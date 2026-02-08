@@ -1,6 +1,6 @@
 # beadbox
 
-A modern, real-time GUI for the [beads](https://github.com/beadbox/beads) issue tracker.
+A modern, real-time GUI for the [beads](https://github.com/steveyegge/beads) issue tracker.
 
 ![](https://beadbox.dev/og.png)
 
@@ -24,8 +24,8 @@ A modern, real-time GUI for the [beads](https://github.com/beadbox/beads) issue 
 
 ## Download
 
-- [Download beadbox](https://beadbox.dev)
-- [Changelog](https://beadbox.dev/changelog)
+- [Download beadbox](https://beadbox.app)
+- [Changelog](https://beadbox.app/changelog)
 
 ## Need help?
 
