@@ -27,7 +27,7 @@ First public release.
 ### Install
 
 ```bash
-brew install nmelo/tap/beads-ui
+brew install --cask beadbox/homebrew-cask/beadbox
 ```
 
 Or download the `.app` bundle from [beadbox.app](https://beadbox.app).
