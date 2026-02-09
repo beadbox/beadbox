@@ -27,7 +27,8 @@ First public release.
 ### Install
 
 ```bash
-brew install --cask beadbox/homebrew-cask/beadbox
+brew tap beadbox/cask
+brew install --cask beadbox
 ```
 
 Or download the `.app` bundle from [beadbox.app](https://beadbox.app).
