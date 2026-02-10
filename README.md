@@ -1,37 +1,59 @@
-# beadbox
+<p align="center">
+  <img src="https://beadbox.app/icon.svg" width="64" height="64" alt="Beadbox" />
+</p>
 
-A modern, real-time GUI for the [beads](https://github.com/steveyegge/beads) issue tracker.
+<h3 align="center">Beadbox</h3>
+<p align="center">See your AI agents work in real time</p>
 
-![](https://beadbox.dev/og.png)
+<p align="center">
+  <a href="https://beadbox.app">Website</a> &middot;
+  <a href="https://github.com/beadbox/beadbox/blob/main/CHANGELOG.md">Changelog</a> &middot;
+  <a href="https://github.com/beadbox/beadbox/issues">Issues</a>
+</p>
+
+<br />
+
+<p align="center">
+  <img src="screenshot.png" alt="Beadbox showing epic progress, status badges, and multi-workspace navigation" width="1000" />
+</p>
+
+<br />
+
+Beadbox is a native macOS dashboard for the [beads](https://github.com/nmelo/beads) issue tracker. It gives you real-time visibility into every task, dependency, and handoff across your AI agent fleet. Changes made in the terminal appear in the GUI within milliseconds.
 
 ## Features
 
-- Multi-workspace support: switch between multiple beads databases from different projects
-- Epic tree view with expandable hierarchies and nested child epics
-- Real-time auto-update via SSE: UI refreshes automatically when beads change on disk
-- Inline editing with auto-save (debounced text fields, immediate dropdowns)
-- Optimistic updates with automatic error recovery
-- Filter by status, priority, or assignee
-- Full-text search across bead titles
-- Sort by title, priority, status, or last updated
-- Visual progress bars showing epic completion percentage
-- Bead detail modal with editable title, type, status, priority, and assignee
-- Comments with markdown rendering
-- URL-based state: expanded epics and selected bead persist in the URL
-- Dark and light themes
-- Copyable bead IDs (click to copy)
-- Breadcrumb navigation showing parent hierarchy
+- **Epic trees with progress bars** &mdash; see completion percentage across nested hierarchies at a glance
+- **Real-time sync** &mdash; file-watch pipeline picks up CLI changes instantly, no polling or refresh
+- **Multi-workspace** &mdash; switch between beads databases from different projects in one window
+- **Inline editing** &mdash; change status, priority, assignee, and descriptions directly in the GUI
+- **Filter, search, sort** &mdash; slice your backlog by status, priority, type, or assignee
+- **Dependency badges** &mdash; see blocking relationships without running `bd show`
+- **Dark and light themes** &mdash; follows your system preference
+- **Native macOS app** &mdash; built with Tauri, not Electron
 
-## Download
+## Install
 
-- [Download beadbox](https://beadbox.app)
-- [Changelog](https://beadbox.app/changelog)
+### Homebrew (recommended)
+
+```bash
+brew tap beadbox/cask && brew install --cask beadbox
+```
+
+### Direct download
+
+Grab the latest `.dmg` from [beadbox.app](https://beadbox.app) or from [GitHub Releases](https://github.com/beadbox/beadbox/releases).
+
+## Requirements
+
+- macOS (Apple Silicon)
+- [beads](https://github.com/nmelo/beads) CLI installed (`brew install nmelo/tap/beads`)
 
 ## Need help?
 
 - Open a [GitHub issue](https://github.com/beadbox/beadbox/issues)
-- Shoot us an email hello@beadbox.dev
+- Email [hello@beadbox.dev](mailto:hello@beadbox.dev)
 
----
+## License
 
-Love beadbox? Give us a star!
+Source code is proprietary. Binary releases are free during beta.
