@@ -34,15 +34,7 @@ Beadbox is a native macOS dashboard for the [beads](https://github.com/nmelo/bea
 
 ## Install
 
-### Homebrew (recommended)
-
-```bash
-brew tap beadbox/cask && brew install --cask beadbox
-```
-
-### Direct download
-
-Grab the latest `.dmg` from [beadbox.app](https://beadbox.app) or from [GitHub Releases](https://github.com/beadbox/beadbox/releases).
+Download from [beadbox.app](https://beadbox.app) or grab the latest `.dmg` from [GitHub Releases](https://github.com/beadbox/beadbox/releases).
 
 ## Requirements
 
