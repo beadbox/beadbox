@@ -52,7 +52,6 @@ Grab the latest `.dmg` from [beadbox.app](https://beadbox.app) or from [GitHub R
 ## Need help?
 
 - Open a [GitHub issue](https://github.com/beadbox/beadbox/issues)
-- Email [hello@beadbox.dev](mailto:hello@beadbox.dev)
 
 ## License
 
