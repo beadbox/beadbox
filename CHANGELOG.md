@@ -2,6 +2,25 @@
 
 All notable changes to Beadbox will be documented in this file.
 
+## [0.4.11] - 2026-02-09
+
+### Features
+
+- **Workspace selector**: new card-based workspace picker screen for discovering and switching between projects
+- **Settings dialog**: new Settings panel (Cmd+,) with sidebar navigation
+- **Theme picker**: choose your theme from the Settings General tab (replaces header palette icon)
+- **Feedback form**: submit feedback directly from Settings (backend deferred; UI ready)
+- **Help tab**: access support links, view logs, and clear cache from Settings
+- **BETA badge**: visible beta indicator next to the app icon in the header
+- **Drop zone reorder**: archive zone moved first, backlog second, epic/loose side by side
+
+### Bug Fixes
+
+- **Mobile Connect button**: Connect button on workspace selector is now reachable on mobile viewports
+- **Connection timeout**: workspace connection attempts now time out after 10 seconds instead of hanging indefinitely
+- **Stripe sponsor heart icon**: heart icon now opens Stripe in an external browser in the Tauri app
+- **App naming**: renamed from "Beads" to "Beadbox" in app title and window title
+
 ## [0.4.0] - 2026-02-09
 
 ### Bug Fixes
