@@ -34,7 +34,7 @@ Beadbox is a native macOS dashboard for the [beads](https://github.com/nmelo/bea
 
 ## Install
 
-Download from [beadbox.app](https://beadbox.app) or grab the latest `.dmg` from [GitHub Releases](https://github.com/beadbox/beadbox/releases).
+Download from [beadbox.app](https://beadbox.app).
 
 ## Requirements
 
