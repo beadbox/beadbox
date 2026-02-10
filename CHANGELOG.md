@@ -2,6 +2,21 @@
 
 All notable changes to Beadbox will be documented in this file.
 
+## [0.4.12] - 2026-02-09
+
+### Features
+
+- **PostHog app analytics**: anonymous usage tracking with `app_opened` event for DAU/WAU/MAU measurement, includes opt-out toggle in Settings
+- **Website download tracking**: download-intent events on beadbox.app for measuring visitor-to-download conversion
+
+### Bug Fixes
+
+- **Changelog link**: changelog link in the settings footer now opens correctly
+- **Settings typography**: settings dialog font and sizing updated to match Aptakube's polished typography
+- **iOS app icon**: removed transparency from app icon to pass Apple TestFlight validation
+- **Workspace tab labels**: bumped workspace tab label font size to text-base for better readability
+- **Gear icon replaced**: workspace header gear icon replaced with a plus (+) button for clearer "add workspace" affordance
+
 ## [0.4.11] - 2026-02-09
 
 ### Features
