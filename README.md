@@ -39,7 +39,7 @@ Download from [beadbox.app](https://beadbox.app).
 ## Requirements
 
 - macOS (Apple Silicon)
-- [beads](https://github.com/nmelo/beads) CLI installed (`brew install nmelo/tap/beads`)
+- [beads](https://github.com/steveyegge/beads) CLI installed.
 
 ## Need help?
 
