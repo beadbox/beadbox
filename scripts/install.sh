@@ -119,13 +119,19 @@ install_macos() {
     local arch="$2"
     local release_json="$3"
 
+    # Map architecture name to match release asset naming
+    local asset_arch="$arch"
+    if [ "$arch" = "x86_64" ]; then
+        asset_arch="x64"
+    fi
+
     # Find the DMG asset for this architecture
     local asset_name
-    asset_name=$(find_asset "$release_json" "${APP_NAME}-${version#v}-${arch}\.dmg")
+    asset_name=$(find_asset "$release_json" "${APP_NAME}-${version#v}-${asset_arch}\.dmg")
 
     if [ -z "$asset_name" ]; then
         # Try without version (latest alias)
-        asset_name=$(find_asset "$release_json" "${APP_NAME}-latest-${arch}\.dmg")
+        asset_name=$(find_asset "$release_json" "${APP_NAME}-latest-${asset_arch}\.dmg")
     fi
 
     if [ -z "$asset_name" ]; then
