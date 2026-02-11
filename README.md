@@ -18,7 +18,7 @@
 
 <br />
 
-Beadbox is a native macOS dashboard for the [beads](https://github.com/nmelo/beads) issue tracker. It gives you real-time visibility into every task, dependency, and handoff across your AI agent fleet. Changes made in the terminal appear in the GUI within milliseconds.
+Beadbox is a native desktop dashboard for the [beads](https://github.com/steveyegge/beads) issue tracker. It gives you real-time visibility into every task, dependency, and handoff across your AI agent fleet. Changes made in the terminal appear in the GUI within milliseconds.
 
 ## Features
 
@@ -29,16 +29,41 @@ Beadbox is a native macOS dashboard for the [beads](https://github.com/nmelo/bea
 - **Filter, search, sort** &mdash; slice your backlog by status, priority, type, or assignee
 - **Dependency badges** &mdash; see blocking relationships without running `bd show`
 - **Dark and light themes** &mdash; follows your system preference
-- **Native macOS app** &mdash; built with Tauri, not Electron
+- **Native desktop app** &mdash; built with Tauri, not Electron. Runs on macOS and Linux.
 
 ## Install
 
-Download from [beadbox.app](https://beadbox.app).
+### macOS
+
+Download the `.dmg` from [beadbox.app](https://beadbox.app) or install with Homebrew:
+
+```
+brew install nmelo/tap/beads-ui
+```
+
+### Linux
+
+Download the `.deb` or `.AppImage` from the [latest release](https://github.com/beadbox/beadbox/releases/latest).
+
+**Debian/Ubuntu:**
+```
+sudo dpkg -i beadbox_latest_amd64.deb
+```
+
+**AppImage:**
+```
+chmod +x Beadbox-latest-amd64.AppImage
+./Beadbox-latest-amd64.AppImage
+```
+
+### Windows
+
+Coming soon.
 
 ## Requirements
 
-- macOS (Apple Silicon)
-- [beads](https://github.com/steveyegge/beads) CLI installed.
+- macOS (Apple Silicon or Intel) or Linux (x86_64)
+- [beads](https://github.com/steveyegge/beads) CLI installed
 
 ## Need help?
 
