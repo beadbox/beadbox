@@ -2,7 +2,7 @@
   <img src="icon.svg" width="160" height="160" alt="Beadbox" />
 </p>
 <h1 align="center">Beadbox</h1>
-<h2 align="center">See your AI agents work in real time</h2>
+<p align="center"><strong><em>See your AI agents work in real time</em></strong></p>
 
 <p align="center">
   <a href="https://beadbox.app">Website</a> &middot;
