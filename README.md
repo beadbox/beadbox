@@ -13,7 +13,7 @@
 <br />
 
 <p align="center">
-  <img src="screenshot.png" alt="Beadbox showing epic progress, status badges, and multi-workspace navigation" width="1000" />
+  <video src="https://github.com/beadbox/beadbox/raw/main/hero.mp4" width="1000" autoplay loop muted playsinline></video>
 </p>
 
 <br />
