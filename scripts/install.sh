@@ -252,7 +252,8 @@ install_linux() {
     chmod +x "$install_path"
     log_success "AppImage installed to ${install_path}"
 
-    # Create .desktop entry for app launchers
+    # Install icon and create .desktop entry for app launchers
+    install_icon
     create_desktop_entry "$install_path"
 
     # Check PATH
@@ -270,6 +271,27 @@ install_linux() {
     echo ""
 }
 
+# Install app icon for Linux desktop integration
+install_icon() {
+    local icon_dir="$HOME/.local/share/icons/hicolor/256x256/apps"
+    local icon_path="${icon_dir}/beadbox.png"
+
+    mkdir -p "$icon_dir"
+
+    local icon_url="https://raw.githubusercontent.com/${GITHUB_REPO}/main/icon-square.png"
+
+    log_info "Installing application icon..."
+    if download "$icon_url" "$icon_path"; then
+        # Update icon cache if available
+        if command -v gtk-update-icon-cache &>/dev/null; then
+            gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+        fi
+        log_success "Icon installed to ${icon_path}"
+    else
+        log_warning "Could not download app icon (non-fatal)"
+    fi
+}
+
 # Create a .desktop file for Linux application menus
 create_desktop_entry() {
     local exec_path="$1"
@@ -284,6 +306,7 @@ Type=Application
 Name=${APP_NAME}
 Comment=GUI for the beads issue tracker
 Exec=${exec_path}
+Icon=beadbox
 Terminal=false
 Categories=Development;ProjectManagement;
 StartupNotify=true
@@ -308,7 +331,7 @@ main() {
     local platform
     platform=$(detect_platform)
 
-    local os="${platform%_*}"
+    local os="${platform%%_*}"
     local arch="${platform#*_}"
     log_info "Platform: ${os} ${arch}"
 
