@@ -1,8 +1,7 @@
 <p align="center">
   <img src="icon.svg" width="160" height="160" alt="Beadbox" />
 </p>
-
-<h3 align="center">Beadbox</h3>
+<h1 align="center">Beadbox</h1>
 <p align="center">See your AI agents work in real time</p>
 
 <p align="center">
