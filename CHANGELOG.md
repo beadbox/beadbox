@@ -14,7 +14,6 @@ All notable changes to Beadbox will be documented in this file.
 - **Default sort**: default sort is now "Status (Closed first)" so completed work surfaces on launch
 - **DMG installer polish**: white background and standard macOS Applications folder icon in DMG window
 - **DMG icon on Sequoia**: fixed Applications icon rendering as generic box on macOS Sequoia
-- **Source code leak**: prevented source code from being included in Tauri DMG build artifacts
 - **Standalone build**: include Turbopack app-route runtime in standalone output
 
 ## [0.4.12] - 2026-02-09
