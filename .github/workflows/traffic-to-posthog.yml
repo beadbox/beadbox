@@ -1,0 +1,104 @@
+name: Sync GitHub Traffic to PostHog
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # Daily at 6am UTC (1am EST)
+  workflow_dispatch: # Manual trigger for backfills
+
+jobs:
+  sync-traffic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Push traffic data to PostHog
+        env:
+          GH_TRAFFIC_PAT: ${{ secrets.GH_TRAFFIC_PAT }}
+          POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
+        run: |
+          python3 << 'SCRIPT'
+          import json, os, urllib.request, hashlib
+          from datetime import datetime, timezone, timedelta
+
+          GH_PAT = os.environ["GH_TRAFFIC_PAT"]
+          PH_KEY = os.environ["POSTHOG_PROJECT_KEY"]
+          PH_HOST = "https://us.i.posthog.com"
+
+          REPOS = [
+              {
+                  "repo": "beadbox/homebrew-cask",
+                  "endpoints": {
+                      "clones": "github_cask_cloned",
+                      "views": "github_cask_viewed",
+                  },
+              },
+              {
+                  "repo": "beadbox/beadbox",
+                  "endpoints": {
+                      "clones": "github_repo_cloned",
+                      "views": "github_repo_viewed",
+                  },
+              },
+          ]
+
+          # Only send data from yesterday and before (today's data is still accumulating)
+          yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+          def gh_get(url):
+              req = urllib.request.Request(url)
+              req.add_header("Authorization", f"Bearer {GH_PAT}")
+              req.add_header("Accept", "application/vnd.github+json")
+              with urllib.request.urlopen(req) as resp:
+                  return json.loads(resp.read())
+
+          def ph_capture(event, timestamp, properties):
+              # Deterministic UUID from repo+date+event to deduplicate across runs
+              dedup_key = f"{properties.get('repo', '')}:{timestamp}:{event}"
+              dedup_uuid = hashlib.md5(dedup_key.encode()).hexdigest()
+              uuid_str = f"{dedup_uuid[:8]}-{dedup_uuid[8:12]}-{dedup_uuid[12:16]}-{dedup_uuid[16:20]}-{dedup_uuid[20:]}"
+
+              payload = {
+                  "api_key": PH_KEY,
+                  "event": event,
+                  "distinct_id": "github-traffic-bot",
+                  "timestamp": timestamp,
+                  "uuid": uuid_str,
+                  "properties": properties,
+              }
+              req = urllib.request.Request(
+                  f"{PH_HOST}/capture/",
+                  data=json.dumps(payload).encode(),
+                  headers={"Content-Type": "application/json"},
+              )
+              urllib.request.urlopen(req)
+
+          total_sent = 0
+
+          for repo_config in REPOS:
+              repo = repo_config["repo"]
+              for endpoint, event_name in repo_config["endpoints"].items():
+                  url = f"https://api.github.com/repos/{repo}/traffic/{endpoint}"
+                  try:
+                      data = gh_get(url)
+                  except Exception as e:
+                      print(f"ERROR: {repo} {endpoint}: {e}")
+                      continue
+
+                  key = endpoint  # "clones" or "views"
+                  for day in data.get(key, []):
+                      ts = day["timestamp"]
+                      day_str = ts[:10]
+
+                      # Skip today (incomplete data)
+                      if day_str > yesterday:
+                          continue
+
+                      ph_capture(event_name, ts, {
+                          "count": day["count"],
+                          "unique_count": day["uniques"],
+                          "repo": repo,
+                          "endpoint": endpoint,
+                      })
+                      total_sent += 1
+                      print(f"  {event_name} {day_str}: {day['count']} total, {day['uniques']} unique")
+
+          print(f"\nDone. Sent {total_sent} events to PostHog.")
+          SCRIPT
