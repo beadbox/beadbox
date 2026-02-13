@@ -2,6 +2,32 @@
 
 All notable changes to Beadbox will be documented in this file.
 
+## [0.7.1] - 2026-02-12
+
+### Bug Fixes
+
+- **macOS Finder launch**: app now correctly locates the `bd` CLI when launched from Finder or the Dock (PATH resolution fix)
+
+## [0.7.0] - 2026-02-12
+
+### Features
+
+- **Windows support**: native Windows binaries with code signing via Azure Trusted Signing
+- **Linux support**: distributed as `.deb` package and AppImage
+- **macOS Intel support**: universal builds now cover both Apple Silicon and Intel Macs
+- **Code signing and notarization**: all macOS builds are signed and notarized for gatekeeper-free installation
+- **Floating version label**: version indicator visible on all screens
+- **Version API endpoint**: `/api/version` returns current version and build ID
+- **Workspace registration**: selecting a folder writes it to the workspace registry for quick access
+- **Keyboard shortcuts on website**: keyboard shortcuts section added to the features page on beadbox.app
+- **Build number system**: release candidates promote to final without rebuilding
+- **Automated website version updates**: website version badge updates automatically on each release
+- **Per-platform CI builds**: dedicated build pipelines per platform with native DMG creation via `hdiutil`
+
+### Bug Fixes
+
+- **Epic progress bar accuracy**: progress bar now only counts closed children, not in-progress ones
+
 ## [0.5.0] - 2026-02-10
 
 ### Features
