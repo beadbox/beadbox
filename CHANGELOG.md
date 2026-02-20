@@ -2,6 +2,57 @@
 
 All notable changes to Beadbox will be documented in this file.
 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.9.2] - Unreleased
+
+### Fixed
+
+- Version display correctly distinguishes RC testers from GA users (RC suffix only shown to testers)
+
+## [0.9.1] - 2026-02-20
+
+### Fixed
+
+- Update dialog now shows full version including RC suffix, so users can tell which build they're running
+
+## [0.9.0] - 2026-02-20
+
+### Added
+
+- **Dolt backend support**: Beadbox now detects and works with Dolt-backed beads workspaces in addition to SQLite
+- **Smarter real-time updates**: change detection uses Dolt commit hashes instead of file modification times, eliminating false-positive refreshes
+
+### Fixed
+
+- Activity feed works correctly with bd v0.54.0 output format
+
+### Removed
+
+- WAL-based change detection (replaced by Dolt commit hash fingerprinting)
+
+## [0.8.0] - 2026-02-14
+
+### Added
+
+- **Self-update system**: Beadbox checks for updates in the background, shows an indicator in the header when a new version is available, and lets you download and install updates without leaving the app
+- **Update settings**: choose between stable and RC update channels in Settings
+- **Activity feed**: see a timeline of recent changes across your workspace with live real-time updates, filtering, bulk operation grouping, and click-through navigation to bead details
+- **Keyboard shortcuts**: vim-style `G`/`gg`/`/` bindings; full keyboard shortcuts reference in Settings
+- **Headless mode**: run with `--headless` for server-only mode without the native window
+- Feature vote page at `/vote`
+
+### Fixed
+
+- Update checker now downloads the correct architecture DMG on ARM64 Macs (was downloading x64)
+- "Quit to Update" button works in the native app
+- Auto-updater correctly detects newer RC versions for RC-to-RC upgrades
+- DMG auto-opens after update download completes
+- Update check re-runs when PostHog flags load, fixing a race condition on first launch
+- Correct CPU architecture detected in native app for update downloads
+- Warning shown when closing or archiving an epic that still has open children
+
 ## [0.7.1] - 2026-02-12
 
 ### Bug Fixes
@@ -22,7 +73,6 @@ All notable changes to Beadbox will be documented in this file.
 - **Keyboard shortcuts on website**: keyboard shortcuts section added to the features page on beadbox.app
 - **Build number system**: release candidates promote to final without rebuilding
 - **Automated website version updates**: website version badge updates automatically on each release
-- **Per-platform CI builds**: dedicated build pipelines per platform with native DMG creation via `hdiutil`
 
 ### Bug Fixes
 
