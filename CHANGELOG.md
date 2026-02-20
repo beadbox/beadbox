@@ -5,6 +5,17 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.5] - Unreleased
+
+### Changed
+
+- Backlog now uses P4 priority instead of labels (drag-to-backlog sets priority, not label)
+
+### Fixed
+
+- Website auto-deploys on release promote (no more manual trigger)
+- CHANGELOG.md auto-syncs to public repo on promote
+
 ## [0.9.4] - 2026-02-20
 
 ### Added
