@@ -5,7 +5,26 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - Unreleased
+## [0.9.4] - 2026-02-20
+
+### Added
+
+- Cmd+1/Cmd+2 keyboard shortcuts to switch between Beads and Activity views
+
+### Fixed
+
+- WebSocket live indicator no longer flashes yellow every 2 seconds
+- Refresh button no longer hangs for 20 seconds then loads an empty workspace
+
+## [0.9.3] - 2026-02-20
+
+### Fixed
+
+- Activity feed sorts by most recent first
+- RC update channel no longer prompts stable users with pre-release builds
+- Website deploy triggers automatically on new releases
+
+## [0.9.2] - 2026-02-20
 
 ### Fixed
 
