@@ -5,6 +5,25 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-02-28
+
+### Added
+
+- **Ready to Ship pipeline column**: the pipeline dashboard now shows a "Ready to Ship" stage (emerald green) between Ready for QA and Closed, so you can see which beads have passed QA and are queued for release
+- **Custom metadata display**: bead detail panel and modal now show custom metadata key-value pairs (read-only) below the standard fields, surfacing project-specific data without switching to the CLI
+- **Molecule DAG visualization**: bead detail panel can render molecule dependency graphs as interactive 3D DAGs. Feature-flagged behind `enable-molecule-view` in PostHog.
+- **Molecule badge types**: molecule epics now display a pink "Molecule" badge, and their children show the correct child type (Task or Gate) instead of generic badges
+- **Activation event instrumentation**: `app_issue_viewed` and `app_epic_expanded` events now fire to PostHog, enabling activation funnel analysis
+- **Beads tab icon**: circle icon added next to the "Beads" tab label for visual consistency with the Activity tab
+- **Delete spinner**: the delete button now shows a loading spinner while the deletion is in progress, preventing double-clicks and confirming the action is underway
+
+### Fixed
+
+- **Detail panel latency**: parallelized CLI calls in `getBeadDetail` and eliminated a redundant comments fetch (comments already come back from `bd show --json`). Typical load time drops from ~450ms to ~125ms (3-4x improvement).
+- **Clear Filters button in Activity tab**: the button was wired up but had no effect; now correctly resets all active filters
+- **Archive dialog title wrapping**: child bead titles in the archive confirmation dialog no longer truncate mid-word; long titles wrap to the next line
+- **Delete button actually deletes**: the delete button in the UI was silently failing in certain modes; now reliably removes beads
+
 ## [0.11.3] - 2026-02-28
 
 ### Added
