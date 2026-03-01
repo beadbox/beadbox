@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Molecule graph sizing**: the 3D molecule DAG canvas now fills the available height in the detail panel instead of rendering at a fixed size
 - **WebSocket server crash recovery**: if the real-time update server crashes, it now automatically restarts within 5 seconds instead of staying down until app restart
 - **Workspace card loading state**: workspace cards that fail to load stats now show an error fallback ("Unable to load stats") instead of spinning indefinitely, particularly on Windows
+- **Workspace error hints**: workspace cards that fail to load stats now show a specific reason (server not running, database not found, CLI not found) with a recovery hint, instead of a generic error message
 - **Native app startup reliability**: improved error reporting during app startup so crashes surface actionable diagnostics instead of silent failures
 
 ## [0.12.0] - 2026-02-28
