@@ -19,79 +19,72 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Get all release tag names (oldest first so we recreate in order)
-          gh api repos/${{ github.repository }}/releases --paginate \
-            --jq 'reverse | .[].tag_name' > /tmp/tags.txt
+          REPO="${{ github.repository }}"
 
-          total=$(wc -l < /tmp/tags.txt | tr -d ' ')
+          # Get all releases as JSON array with IDs (oldest first)
+          gh api "repos/$REPO/releases" --paginate \
+            --jq 'reverse | .[] | [.id, .tag_name, .name, .draft, .prerelease, (.assets | length), .body] | @json' \
+            > /tmp/releases.jsonl
+
+          total=$(wc -l < /tmp/releases.jsonl | tr -d ' ')
           echo "Found $total releases to recreate"
 
           count=0
-          while IFS= read -r tag; do
+          while IFS= read -r line; do
             count=$((count + 1))
+
+            release_id=$(echo "$line" | jq -r '.[0]')
+            tag=$(echo "$line" | jq -r '.[1]')
+            name=$(echo "$line" | jq -r '.[2]')
+            is_draft=$(echo "$line" | jq -r '.[3]')
+            is_prerelease=$(echo "$line" | jq -r '.[4]')
+            asset_count=$(echo "$line" | jq -r '.[5]')
+            body=$(echo "$line" | jq -r '.[6]')
+
             echo ""
-            echo "=== [$count/$total] Processing $tag ==="
-
-            # Save release metadata
-            gh api "repos/${{ github.repository }}/releases/tags/$tag" > /tmp/release.json
-
-            release_id=$(jq -r '.id' /tmp/release.json)
-            name=$(jq -r '.name // empty' /tmp/release.json)
-            body=$(jq -r '.body // empty' /tmp/release.json)
-            is_draft=$(jq -r '.draft' /tmp/release.json)
-            is_prerelease=$(jq -r '.prerelease' /tmp/release.json)
-            asset_count=$(jq -r '.assets | length' /tmp/release.json)
-
-            echo "  Name: $name | Draft: $is_draft | Assets: $asset_count"
+            echo "=== [$count/$total] $tag (id=$release_id, assets=$asset_count) ==="
 
             # Download assets if any
             rm -rf /tmp/assets && mkdir -p /tmp/assets
             if [ "$asset_count" -gt 0 ]; then
-              echo "  Downloading $asset_count assets..."
-              gh release download "$tag" --dir /tmp/assets --repo "${{ github.repository }}" || true
+              echo "  Downloading assets..."
+              # Download via API using asset URLs (tag-based download may fail)
+              gh api "repos/$REPO/releases/$release_id/assets" --paginate --jq '.[] | [.name, .url] | @tsv' | \
+              while IFS=$'\t' read -r asset_name asset_url; do
+                echo "    $asset_name"
+                gh api "$asset_url" -H "Accept: application/octet-stream" > "/tmp/assets/$asset_name" || echo "    WARN: failed to download $asset_name"
+              done
               echo "  Downloaded: $(ls /tmp/assets/ | wc -l | tr -d ' ') files"
             fi
 
             # Delete the old release
-            echo "  Deleting release $release_id..."
-            gh api -X DELETE "repos/${{ github.repository }}/releases/$release_id"
-
-            # Build create flags
-            flags="--tag $tag"
-            [ -n "$name" ] && flags="$flags --title $(printf '%q' "$name")"
-            [ "$is_draft" = "true" ] && flags="$flags --draft"
-            [ "$is_prerelease" = "true" ] && flags="$flags --prerelease"
+            echo "  Deleting release..."
+            gh api -X DELETE "repos/$REPO/releases/$release_id"
 
             # Create new release
-            echo "  Creating new release..."
-            if [ -n "$body" ]; then
-              echo "$body" > /tmp/body.md
-              gh release create "$tag" \
-                --title "${name:-$tag}" \
-                --notes-file /tmp/body.md \
-                $([ "$is_draft" = "true" ] && echo "--draft") \
-                $([ "$is_prerelease" = "true" ] && echo "--prerelease") \
-                --repo "${{ github.repository }}"
+            echo "  Creating release..."
+            create_flags="--tag $tag --title ${name:-$tag}"
+            [ "$is_draft" = "true" ] && create_flags="$create_flags --draft"
+            [ "$is_prerelease" = "true" ] && create_flags="$create_flags --prerelease"
+
+            if [ -n "$body" ] && [ "$body" != "null" ]; then
+              printf '%s' "$body" > /tmp/body.md
+              gh release create $create_flags --notes-file /tmp/body.md --repo "$REPO"
             else
-              gh release create "$tag" \
-                --title "${name:-$tag}" \
-                --notes "" \
-                $([ "$is_draft" = "true" ] && echo "--draft") \
-                $([ "$is_prerelease" = "true" ] && echo "--prerelease") \
-                --repo "${{ github.repository }}"
+              gh release create $create_flags --notes "" --repo "$REPO"
             fi
 
-            # Upload assets if any
-            if [ "$asset_count" -gt 0 ] && [ "$(ls /tmp/assets/ 2>/dev/null | wc -l)" -gt 0 ]; then
+            # Upload assets
+            if [ "$(ls /tmp/assets/ 2>/dev/null | wc -l)" -gt 0 ]; then
               echo "  Uploading assets..."
-              gh release upload "$tag" /tmp/assets/* --repo "${{ github.repository }}" --clobber
+              gh release upload "$tag" /tmp/assets/* --repo "$REPO" --clobber
             fi
 
-            # Cleanup disk space
-            rm -rf /tmp/assets /tmp/release.json /tmp/body.md
+            # Cleanup
+            rm -rf /tmp/assets /tmp/body.md
             echo "  Done with $tag"
 
-          done < /tmp/tags.txt
+          done < /tmp/releases.jsonl
 
           echo ""
           echo "=== All $total releases recreated ==="
