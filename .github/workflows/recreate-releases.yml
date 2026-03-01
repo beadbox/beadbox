@@ -1,0 +1,97 @@
+name: Recreate releases as org identity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  recreate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Recreate all releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Get all release tag names (oldest first so we recreate in order)
+          gh api repos/${{ github.repository }}/releases --paginate \
+            --jq 'reverse | .[].tag_name' > /tmp/tags.txt
+
+          total=$(wc -l < /tmp/tags.txt | tr -d ' ')
+          echo "Found $total releases to recreate"
+
+          count=0
+          while IFS= read -r tag; do
+            count=$((count + 1))
+            echo ""
+            echo "=== [$count/$total] Processing $tag ==="
+
+            # Save release metadata
+            gh api "repos/${{ github.repository }}/releases/tags/$tag" > /tmp/release.json
+
+            release_id=$(jq -r '.id' /tmp/release.json)
+            name=$(jq -r '.name // empty' /tmp/release.json)
+            body=$(jq -r '.body // empty' /tmp/release.json)
+            is_draft=$(jq -r '.draft' /tmp/release.json)
+            is_prerelease=$(jq -r '.prerelease' /tmp/release.json)
+            asset_count=$(jq -r '.assets | length' /tmp/release.json)
+
+            echo "  Name: $name | Draft: $is_draft | Assets: $asset_count"
+
+            # Download assets if any
+            rm -rf /tmp/assets && mkdir -p /tmp/assets
+            if [ "$asset_count" -gt 0 ]; then
+              echo "  Downloading $asset_count assets..."
+              gh release download "$tag" --dir /tmp/assets --repo "${{ github.repository }}" || true
+              echo "  Downloaded: $(ls /tmp/assets/ | wc -l | tr -d ' ') files"
+            fi
+
+            # Delete the old release
+            echo "  Deleting release $release_id..."
+            gh api -X DELETE "repos/${{ github.repository }}/releases/$release_id"
+
+            # Build create flags
+            flags="--tag $tag"
+            [ -n "$name" ] && flags="$flags --title $(printf '%q' "$name")"
+            [ "$is_draft" = "true" ] && flags="$flags --draft"
+            [ "$is_prerelease" = "true" ] && flags="$flags --prerelease"
+
+            # Create new release
+            echo "  Creating new release..."
+            if [ -n "$body" ]; then
+              echo "$body" > /tmp/body.md
+              gh release create "$tag" \
+                --title "${name:-$tag}" \
+                --notes-file /tmp/body.md \
+                $([ "$is_draft" = "true" ] && echo "--draft") \
+                $([ "$is_prerelease" = "true" ] && echo "--prerelease") \
+                --repo "${{ github.repository }}"
+            else
+              gh release create "$tag" \
+                --title "${name:-$tag}" \
+                --notes "" \
+                $([ "$is_draft" = "true" ] && echo "--draft") \
+                $([ "$is_prerelease" = "true" ] && echo "--prerelease") \
+                --repo "${{ github.repository }}"
+            fi
+
+            # Upload assets if any
+            if [ "$asset_count" -gt 0 ] && [ "$(ls /tmp/assets/ 2>/dev/null | wc -l)" -gt 0 ]; then
+              echo "  Uploading assets..."
+              gh release upload "$tag" /tmp/assets/* --repo "${{ github.repository }}" --clobber
+            fi
+
+            # Cleanup disk space
+            rm -rf /tmp/assets /tmp/release.json /tmp/body.md
+            echo "  Done with $tag"
+
+          done < /tmp/tags.txt
+
+          echo ""
+          echo "=== All $total releases recreated ==="
