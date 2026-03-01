@@ -5,6 +5,25 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-03-01
+
+### Added
+
+- **Archive button in bead list**: each bead row now has an archive icon button next to delete, so you can archive beads without opening the detail panel or dragging to a drop zone
+- **Gastown workspace support**: workspaces managed by Gastown (beads' multi-agent orchestration tool) now load correctly in Beadbox. The epic tree view falls back to a flat list when no epics exist, so beads are visible on first open instead of showing "No epics or beads match your filters"
+
+### Changed
+
+- **Workspace loading performance**: parallelized read-only CLI calls, added fingerprint caching to skip redundant reloads, and introduced incremental refresh so only changed beads are re-fetched on WebSocket updates. Large workspaces (500+ beads) load noticeably faster.
+- **"Mark Ready to Ship" button**: now shows a loading spinner while the status change executes, instead of appearing unresponsive until the command completes
+
+### Fixed
+
+- **Real-time updates with bd v0.57.0**: change detection no longer depends on `issues.jsonl` (removed in beads v0.57.0). Embedded-mode and server-mode workspaces both use Dolt-native fingerprinting for live updates.
+- **Real-time updates for Gastown workspaces**: the WebSocket server now watches the correct data directory for Gastown-managed workspaces, so live updates work without manual refresh
+- **Workspace resolution after SQLite migration**: workspaces that auto-migrated from SQLite to Dolt (beads v0.57.0) now resolve correctly without reconfiguration. Registry entries pointing to old `.db` paths are handled gracefully.
+- **Dolt server error message**: the "Failed to initialize workspace" error no longer references "Gas Town" and has improved formatting
+
 ## [0.12.1] - 2026-03-01
 
 ### Changed
