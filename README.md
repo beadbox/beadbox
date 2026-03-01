@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://beadbox.app">
-    <img src="hero.png" width="1280" alt="Beadbox - See your AI agents work in real time" />
+    <img src="assets/hero.png" width="1280" alt="Beadbox - See your AI agents work in real time" />
   </a>
 </p>
 
