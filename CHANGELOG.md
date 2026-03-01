@@ -11,9 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Ready to Ship pipeline column**: the pipeline dashboard now shows a "Ready to Ship" stage (emerald green) between Ready for QA and Closed, so you can see which beads have passed QA and are queued for release
 - **Custom metadata display**: bead detail panel and modal now show custom metadata key-value pairs (read-only) below the standard fields, surfacing project-specific data without switching to the CLI
-- **Molecule DAG visualization**: bead detail panel can render molecule dependency graphs as interactive 3D DAGs. Feature-flagged behind `enable-molecule-view` in PostHog.
+- **Molecule DAG visualization**: bead detail panel can render molecule dependency graphs as interactive 3D DAGs.
 - **Molecule badge types**: molecule epics now display a pink "Molecule" badge, and their children show the correct child type (Task or Gate) instead of generic badges
-- **Activation event instrumentation**: `app_issue_viewed` and `app_epic_expanded` events now fire to PostHog, enabling activation funnel analysis
 - **Beads tab icon**: circle icon added next to the "Beads" tab label for visual consistency with the Activity tab
 - **Delete spinner**: the delete button now shows a loading spinner while the deletion is in progress, preventing double-clicks and confirming the action is underway
 
@@ -60,7 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Read-first onboarding**: empty boards now show "You're the pilot, not the mechanic" messaging with two copy-to-clipboard getting-started commands (`bd create` and an AI agent example) instead of the bare "No epics found" text. Disappears automatically when the first bead arrives.
 - Refresh icon in the header now spins while reloading (Cmd+R or click)
-- In-app AI help button gated behind PostHog feature flag (`enable-ai-help`) so it can be rolled out gradually
 
 ### Fixed
 
@@ -77,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spec viewer modal**: clicking a spec-id file path in the bead detail panel now opens the markdown document in a full-width modal, rendered with the same styling as bead descriptions. No more switching to a separate editor to read specs.
 - **In-app AI help**: floating `?` button (bottom-right corner) opens a text input where you can ask questions about Beadbox. Queries are answered by whichever AI CLI is installed (`claude`, `codex`, or `gemini`), with app context automatically injected. Falls back to a helpful message if no CLI is found.
 - **Archive onboarding toast**: the first time you close a bead, a persistent toast teaches you about drag-to-archive with a one-click "Archive now" shortcut. Appears once per installation, stays visible until dismissed.
-- **Node.js crash reporting**: unhandled exceptions and rejected promises in the Next.js server and WebSocket server are now captured and sent to PostHog (when analytics is enabled). Browser-side capture was already in place; this closes the server-side gap.
+- **Node.js crash reporting**: unhandled exceptions and rejected promises in the Next.js server and WebSocket server are now captured for error reporting. Browser-side capture was already in place; this closes the server-side gap.
 
 ### Fixed
 
@@ -249,7 +247,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - "Quit to Update" button works in the native app
 - Auto-updater correctly detects newer RC versions for RC-to-RC upgrades
 - DMG auto-opens after update download completes
-- Update check re-runs when PostHog flags load, fixing a race condition on first launch
 - Correct CPU architecture detected in native app for update downloads
 - Warning shown when closing or archiving an epic that still has open children
 
@@ -296,7 +293,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 
-- **PostHog app analytics**: anonymous usage tracking with `app_opened` event for DAU/WAU/MAU measurement, includes opt-out toggle in Settings
 - **Website download tracking**: download-intent events on beadbox.app for measuring visitor-to-download conversion
 
 ### Bug Fixes
