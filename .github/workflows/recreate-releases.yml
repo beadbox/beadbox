@@ -9,70 +9,80 @@ permissions:
 jobs:
   recreate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+
+      - name: Save release metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          mkdir -p /tmp/release-data
+
+          # Fetch all releases (oldest first) and save each as a separate JSON file
+          gh api "repos/$REPO/releases" --paginate --jq 'reverse | .[]' | \
+            jq -c '.' | nl -ba -nrz -w4 | while IFS=$'\t' read -r idx json; do
+              echo "$json" > "/tmp/release-data/${idx}.json"
+            done
+
+          count=$(ls /tmp/release-data/*.json 2>/dev/null | wc -l | tr -d ' ')
+          echo "Saved $count releases"
+          ls /tmp/release-data/
 
       - name: Recreate all releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-
           REPO="${{ github.repository }}"
 
-          # Get all releases as JSON array with IDs (oldest first)
-          gh api "repos/$REPO/releases" --paginate \
-            --jq 'reverse | .[] | [.id, .tag_name, .name, .draft, .prerelease, (.assets | length), .body] | @json' \
-            > /tmp/releases.jsonl
-
-          total=$(wc -l < /tmp/releases.jsonl | tr -d ' ')
-          echo "Found $total releases to recreate"
-
+          total=$(ls /tmp/release-data/*.json | wc -l | tr -d ' ')
           count=0
-          while IFS= read -r line; do
+
+          for f in /tmp/release-data/*.json; do
             count=$((count + 1))
 
-            release_id=$(echo "$line" | jq -r '.[0]')
-            tag=$(echo "$line" | jq -r '.[1]')
-            name=$(echo "$line" | jq -r '.[2]')
-            is_draft=$(echo "$line" | jq -r '.[3]')
-            is_prerelease=$(echo "$line" | jq -r '.[4]')
-            asset_count=$(echo "$line" | jq -r '.[5]')
-            body=$(echo "$line" | jq -r '.[6]')
+            release_id=$(jq -r '.id' "$f")
+            tag=$(jq -r '.tag_name' "$f")
+            name=$(jq -r '.name // ""' "$f")
+            is_draft=$(jq -r '.draft' "$f")
+            is_prerelease=$(jq -r '.prerelease' "$f")
+            asset_count=$(jq -r '.assets | length' "$f")
 
             echo ""
             echo "=== [$count/$total] $tag (id=$release_id, assets=$asset_count) ==="
 
-            # Download assets if any
+            # Download assets
             rm -rf /tmp/assets && mkdir -p /tmp/assets
             if [ "$asset_count" -gt 0 ]; then
               echo "  Downloading assets..."
-              # Download via API using asset URLs (tag-based download may fail)
-              gh api "repos/$REPO/releases/$release_id/assets" --paginate --jq '.[] | [.name, .url] | @tsv' | \
-              while IFS=$'\t' read -r asset_name asset_url; do
-                echo "    $asset_name"
-                gh api "$asset_url" -H "Accept: application/octet-stream" > "/tmp/assets/$asset_name" || echo "    WARN: failed to download $asset_name"
+              jq -r '.assets[] | [.name, .url] | @tsv' "$f" | \
+              while IFS=$'\t' read -r aname aurl; do
+                echo "    $aname"
+                gh api "$aurl" -H "Accept: application/octet-stream" > "/tmp/assets/$aname" || echo "    WARN: failed $aname"
               done
-              echo "  Downloaded: $(ls /tmp/assets/ | wc -l | tr -d ' ') files"
+              downloaded=$(ls /tmp/assets/ 2>/dev/null | wc -l | tr -d ' ')
+              echo "  Downloaded: $downloaded files"
             fi
 
-            # Delete the old release
-            echo "  Deleting release..."
+            # Extract body to file
+            jq -r '.body // ""' "$f" > /tmp/body.md
+
+            # Delete old release
+            echo "  Deleting release $release_id..."
             gh api -X DELETE "repos/$REPO/releases/$release_id"
 
             # Create new release
             echo "  Creating release..."
-            create_flags="--tag $tag --title ${name:-$tag}"
-            [ "$is_draft" = "true" ] && create_flags="$create_flags --draft"
-            [ "$is_prerelease" = "true" ] && create_flags="$create_flags --prerelease"
+            cmd=(gh release create "$tag" --repo "$REPO")
+            cmd+=(--title "${name:-$tag}")
+            cmd+=(--notes-file /tmp/body.md)
+            [ "$is_draft" = "true" ] && cmd+=(--draft)
+            [ "$is_prerelease" = "true" ] && cmd+=(--prerelease)
 
-            if [ -n "$body" ] && [ "$body" != "null" ]; then
-              printf '%s' "$body" > /tmp/body.md
-              gh release create $create_flags --notes-file /tmp/body.md --repo "$REPO"
-            else
-              gh release create $create_flags --notes "" --repo "$REPO"
-            fi
+            "${cmd[@]}"
 
             # Upload assets
             if [ "$(ls /tmp/assets/ 2>/dev/null | wc -l)" -gt 0 ]; then
@@ -83,8 +93,39 @@ jobs:
             # Cleanup
             rm -rf /tmp/assets /tmp/body.md
             echo "  Done with $tag"
-
-          done < /tmp/releases.jsonl
+          done
 
           echo ""
           echo "=== All $total releases recreated ==="
+
+      - name: Create v0.4.0 if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+          if ! gh release view v0.4.0 --repo "$REPO" > /dev/null 2>&1; then
+            echo "Creating missing v0.4.0 release..."
+            gh release create v0.4.0 --repo "$REPO" --title "v0.4.0" --draft --notes "$(cat <<'NOTES'
+          ## [0.4.0] - 2026-02-09
+
+          ### Bug Fixes
+
+          - **WebSocket reconnection loop**: eliminated a WAL checkpoint feedback loop that caused ~1s reload cycles and constant reconnection indicators
+          - **Convoy badge overlap**: convoy type badges no longer overlap with status badges on wider viewports
+          - **iOS/iPadOS safe area insets**: content now respects Dynamic Island, status bar, and home indicator
+          - **Clipboard crash on LAN**: copying bead IDs no longer crashes on non-secure HTTP contexts
+          - **WebSocket hostname**: WebSocket connects using the page hostname instead of hardcoded localhost
+          - **Drag-and-drop archive**: archiving epics via drag-and-drop now works in the native macOS app
+          NOTES
+            )"
+          else
+            echo "v0.4.0 already exists, skipping"
+          fi
+
+      - name: Verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Release authors:"
+          gh api repos/${{ github.repository }}/releases --paginate \
+            --jq '.[] | [.tag_name, .author.login] | @tsv' | sort -V
