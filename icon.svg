@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="217 217 590 590" width="590" height="590">
+  <defs>
+    <radialGradient id="marbleBase" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#5b21b6"/>
+      <stop offset="1" stop-color="#5b21b6"/>
+    </radialGradient>
+
+    <clipPath id="marbleClip">
+      <circle cx="512" cy="512" r="250"/>
+    </clipPath>
+  </defs>
+
+  <!-- Gray circle backdrop (same size as scaled bead) -->
+  <circle cx="512" cy="512" r="285" fill="#242a35"/>
+
+  <!-- Marble - scaled 14% from center (512, 512) -->
+  <g transform="translate(512, 512) scale(1.14) translate(-512, -512)">
+    <circle cx="512" cy="512" r="250" fill="url(#marbleBase)" />
+
+    <!-- Stripes clipped to marble -->
+    <g clip-path="url(#marbleClip)">
+      <path d="M220 432c80-130 400-180 620-100" fill="none" stroke="#ff3b3b" stroke-width="110" opacity="0.90" stroke-linecap="round"/>
+      <path d="M200 502c110-130 420-160 660-70" fill="none" stroke="#ff6b3d" stroke-width="110" opacity="0.95" stroke-linecap="round"/>
+      <path d="M190 572c130-130 460-155 690-50" fill="none" stroke="#ffd43b" stroke-width="110" opacity="0.95" stroke-linecap="round"/>
+      <path d="M190 642c150-125 480-140 710-30" fill="none" stroke="#39d353" stroke-width="110" opacity="0.95" stroke-linecap="round"/>
+      <path d="M200 712c160-120 490-130 720-10" fill="none" stroke="#1d8aff" stroke-width="105" opacity="0.95" stroke-linecap="round"/>
+      <path d="M210 772c170-110 490-115 730 15" fill="none" stroke="#7c3aed" stroke-width="90" opacity="0.8" stroke-linecap="round"/>
+    </g>
+
+    <!-- Simple highlight -->
+    <path d="M430 342c-40 25-75 70-85 110c40-15 85-45 118-90c12-17 8-35-33-20Z"
+          fill="#fff" opacity="0.35"/>
+
+    <!-- Star sparkle -->
+    <path d="M380 362
+             L408 417
+             L463 445
+             L408 473
+             L380 528
+             L352 473
+             L297 445
+             L352 417 Z"
+          fill="#ffffff" opacity="0.95"/>
+  </g>
+</svg>
