@@ -5,6 +5,28 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-03-01
+
+### Added
+
+- **Port-scan server discovery**: the "Add by server" screen now has a "Scan for local servers" link that finds running Dolt servers automatically. Phase 1 checks common ports instantly; Phase 2 scans a wider range if nothing is found. Click a result to auto-fill the connection form and discover databases.
+- **Rig badges for Gastown workspaces**: in multi-rig Gastown workspaces, each bead row shows a small tag indicating which rig it belongs to (parsed from `.beads/routes.jsonl`). Rig is also available as a filter. Invisible in non-Gastown workspaces.
+- **Pipeline type composition**: each pipeline column now shows a summary line below the count (e.g. "3 bugs · 2 tasks") so you can see what kind of work is in each stage at a glance
+
+### Changed
+
+- **Empty board redesign**: the onboarding hero now leads with "Nothing here yet." and the quickstart commands, instead of philosophy copy. Pip logo is smaller. The pilot/mechanic tagline survives below a divider in secondary styling.
+
+### Fixed
+
+- **Health indicator accuracy**: the connection dot now correctly turns red when the Dolt server stops or the circuit breaker trips, across both the Beads and Activity tabs. Previously the dot could stay green after a Dolt failure.
+- **Archived beads in Backlog**: archived beads no longer appear in the Backlog section of the epic tree
+- **Workspace stats with bd v0.57.0**: the workspace card error classifier now handles the new Dolt error format introduced in beads v0.57.0, showing correct error hints instead of a generic fallback
+
+### Security
+
+- **API path validation**: the `/api/bd` route now validates database paths and rejects `--db` flag injection attempts
+
 ## [0.13.0] - 2026-03-01
 
 ### Added
