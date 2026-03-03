@@ -1,4 +1,8 @@
 <p align="center">
+  <a href="https://www.producthunt.com/posts/beadbox?utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-beadbox" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1085973&theme=dark&t=1772546710354" alt="Beadbox - Real-time dashboard for your coding agent fleet | Product Hunt" width="250" height="54" /></a>
+</p>
+
+<p align="center">
   <a href="https://beadbox.app">
     <img src="assets/hero.png" width="1280" alt="Beadbox - See your AI agents work in real time" />
   </a>
