@@ -5,6 +5,74 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-03-03
+
+This release overhauls how Beadbox manages workspaces. You control which projects appear, connect to Dolt servers without creating local folders, and get real logs when something goes wrong.
+
+### Added
+
+- **App-owned workspace registry**: Beadbox now keeps its own workspace list at `~/.beadbox/registry.json` instead of autodiscovering `.beads/` directories on disk. You decide which workspaces appear. No more phantom entries from old projects or stale paths cluttering the selector.
+- **Remove any workspace card**: hover over any workspace card and click the X button to remove it from your list. Previously the remove button only appeared on broken workspaces.
+- **Sidecar log files on all platforms**: the native app now writes Next.js and WebSocket server output to log files (`~/Library/Logs/Beadbox/` on macOS, equivalent paths on Windows and Linux). Crashes and errors are no longer invisible.
+- **bd doctor in diagnostics**: the Settings diagnostics panel now runs `bd doctor` against your active workspace, surfacing health issues without switching to the terminal.
+- **bd command timing**: every `bd` CLI call now logs its execution time, making it easy to spot slow commands in the logs.
+- **Client-side startup logging**: critical startup-gate events (workspace detection, cookie resolution, redirect decisions) are now captured server-side, closing a major diagnostic blind spot.
+
+### Changed
+
+- **Direct Dolt server connections**: connecting to a Dolt server no longer creates a local stub folder. Pick `host:port`, select your databases, done. Connection info lives in the workspace registry, and workspace cards show `host:port/database` instead of a meaningless local path.
+- **Server discovery filters to beads databases**: when scanning a Dolt server, the discovery dialog now hides databases that don't have the beads schema. No more selecting a random database and getting a confusing error.
+- **Removed Feedback tab**: the Settings dialog no longer includes the Feedback tab (the backend was never connected).
+
+### Fixed
+
+- **Initialize button shows spinner**: the Initialize button now shows a loading spinner while `bd init` runs instead of appearing frozen.
+- **Spaces in folder names**: `bd init` no longer fails silently when the project folder path contains spaces.
+- **Folder rename handling**: workspaces no longer crash when you rename the parent folder after running `bd init` (database name mismatch). The error is caught and surfaced with a clear message.
+- **Random redirect to workspace selector**: fixed a race condition that could bounce you back to the workspace selector seconds after opening a workspace.
+- **Server workspace schema validation**: schema validation no longer rejects valid Dolt server workspaces that use `.beads` vs `.beads/dolt` paths.
+- **Server workspace display path**: server-connected workspaces now show the actual `host:port/database` connection info instead of a synthetic `.beadbox/servers/` file path.
+- **bd init error reporting**: initialization errors are now logged server-side and sent to error tracking instead of failing silently.
+- **bd command timeout**: long-running or hung `bd` commands now time out with an error instead of blocking the UI indefinitely.
+- **Workspace card skeleton**: adding a new workspace no longer gets stuck in the skeleton loading state with details that never render.
+- **Dolt health check path**: the inline health check now correctly resolves database paths for Dolt workspaces.
+- **Windows: log output**: Windows release builds now produce log output (were completely blind before this fix).
+- **Windows: workspace setup**: setting up a workspace on Windows no longer fails silently when `bd` is not in PATH; the error is surfaced to the user.
+
+## [0.15.0] - 2026-03-02
+
+### Changed
+
+- **Scan-first Dolt connect dialog**: the "Connect to Dolt Server" dialog now auto-scans for running servers when it opens, displaying discovered servers with one-click "Use" buttons at the top. The manual connection form collapses into an accordion below scan results, and auto-expands when no servers are found or authentication fails.
+- **Update dialog release notes**: the "Update Available" dialog now shows curated release notes describing what changed, instead of install instructions. Content is fetched from the public changelog repository; falls back to the previous behavior when a curated entry doesn't exist yet.
+
+### Fixed
+
+- **Status filter scroll reset**: selecting a status filter no longer leaves the list scrolled to the previous position; the view resets to the top so matching beads are immediately visible
+- **CI E2E test reliability**: the end-to-end test suite (66 tests) now passes reliably in CI, fixing a port-discovery collision where the WebSocket server connected to the wrong Dolt instance instead of the test fixture's server
+
+## [0.14.0] - 2026-03-01
+
+### Added
+
+- **Port-scan server discovery**: the "Add by server" screen now has a "Scan for local servers" link that finds running Dolt servers automatically. Phase 1 checks common ports instantly; Phase 2 scans a wider range if nothing is found. Click a result to auto-fill the connection form and discover databases.
+- **Rig badges for Gastown workspaces**: in multi-rig Gastown workspaces, each bead row shows a small tag indicating which rig it belongs to (parsed from `.beads/routes.jsonl`). Rig is also available as a filter. Invisible in non-Gastown workspaces.
+- **Pipeline type composition**: each pipeline column now shows a summary line below the count (e.g. "3 bugs · 2 tasks") so you can see what kind of work is in each stage at a glance
+
+### Changed
+
+- **Empty board redesign**: the onboarding hero now leads with "Nothing here yet." and the quickstart commands, instead of philosophy copy. Pip logo is smaller. The pilot/mechanic tagline survives below a divider in secondary styling.
+
+### Fixed
+
+- **Health indicator accuracy**: the connection dot now correctly turns red when the Dolt server stops or the circuit breaker trips, across both the Beads and Activity tabs. Previously the dot could stay green after a Dolt failure.
+- **Archived beads in Backlog**: archived beads no longer appear in the Backlog section of the epic tree
+- **Workspace stats with bd v0.57.0**: the workspace card error classifier now handles the new Dolt error format introduced in beads v0.57.0, showing correct error hints instead of a generic fallback
+
+### Security
+
+- **API path validation**: the `/api/bd` route now validates database paths and rejects `--db` flag injection attempts
+
 ## [0.13.0] - 2026-03-01
 
 ### Added
