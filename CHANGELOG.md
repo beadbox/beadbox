@@ -5,6 +5,66 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-03-04
+
+### Added
+
+- **Developer Console**: press `~` to open a bottom drawer with two tabs. The Commands tab streams live `bd` CLI output and accepts interactive input. The Events tab shows WebSocket lifecycle events in real time. Session-token gated and undocumented; built for power users who want to see what's happening under the hood.
+
+### Changed
+
+- **Bead detail caching**: `getBeadDetail` now uses a cache-first strategy. Opening the same bead a second time is instant instead of re-running CLI calls.
+
+### Fixed
+
+- **Activity Dashboard filter crash**: clicking the Filter button on the Activity Dashboard no longer crashes when `bd activity` falls back to `bd list` (happens when some beads have no actor field). P1 fix affecting users with mixed-actor workspaces.
+- **Workspace re-open spinner**: clicking the tab for an already-active workspace no longer shows a spinner that never resolves. Previously required closing and re-opening the workspace to recover. P1 fix confirmed in 7 user reports.
+- **"Fix this" button on error screen**: the WorkspaceErrorScreen now shows the "Fix this" button for circuit breaker and server-unreachable errors, which were previously missing the button entirely.
+- **/settings 500 error**: the `/settings` page no longer returns a 500 in production builds. The standalone output glob patterns were excluding SSR chunks needed by the settings route.
+- **/api/console 401 in dev mode**: the `/api/console` endpoint no longer returns 401 when running under Turbopack dev mode (module isolation was preventing session token validation).
+- **Circuit breaker severity**: reverted circuit breaker error severity to "recoverable" so transient Dolt failures trigger auto-retry instead of showing a permanent error screen.
+- **E2E test port collisions in CI**: test fixtures now use isolated port ranges, eliminating spurious CI failures from port reuse across parallel test runs.
+
+## [0.16.1] - 2026-03-03
+
+Stability release. Error recovery actually works now (two P1 fixes), transient failures self-heal, and the CI test suites are back online.
+
+### Added
+
+- **Comments skeleton loading**: selecting a bead now shows animated placeholder cards in the comments area during the async load, with a smooth fade transition when real comments arrive. Background refreshes (WebSocket updates) skip the skeleton so the UI stays calm.
+- **Filter bar keyboard shortcut**: press Cmd+F (macOS) or Ctrl+F (Windows/Linux) to toggle the filter bar open and closed. Focus moves to the first filter input on open.
+- **Workspace switch failure telemetry**: failed workspace switches now send structured events to PostHog with error type, source workspace, and target workspace, closing a diagnostic gap in multi-workspace usage.
+- **Update checker on workspace selector**: when a newer Beadbox version is available, the workspace selector now shows an inline banner with a Download button above your workspace cards. You no longer need to open a workspace to discover updates.
+
+### Changed
+
+- **AI help button in header**: the floating `?` circle in the bottom-right corner moved to the header bar next to the sponsor button for consistency. The help popover widened from 384px to 576px so prose wraps properly and code blocks scroll horizontally instead of clipping.
+- **Init prompt inline**: the workspace initialization prompt ("No workspace found. Create one?") moved from a floating bottom bar into the Quick Start card on the onboarding screen, below the "Set Up Workspace" button.
+- **Privacy toggle copy**: the Settings privacy toggle body text now says "anonymous crash reports and usage stats" instead of "a single startup event," which had become inaccurate as more telemetry events were added.
+- **Docs workspace concept page**: fixed 8 technical inaccuracies in `/docs/concepts#workspace` including outdated path references, incorrect detection logic descriptions, and stale screenshots.
+
+### Fixed
+
+- **Workspace switch flash in Tauri**: switching workspaces in the native app no longer briefly flashes the target workspace and then redirects back to the original. The redirect guard now waits for the workspace cookie to propagate before evaluating navigation state.
+- **Error recovery screen**: two P1 fixes that together make workspace error recovery functional. First, the error classifier now uses regex instead of literal string matching, so real `bd` error messages (which contain variable content like database names) are classified correctly instead of falling through to "unknown." Second, errors thrown from server actions are now returned as discriminated unions instead of thrown class instances, preserving error classification across the Next.js server/client serialization boundary. Users now see specific error screens ("Workspace out of sync," "Server unreachable") with targeted fix commands instead of a generic "Unable to load workspace."
+- **Circuit breaker auto-retry**: when the Dolt server's circuit breaker trips (temporary connection failure), the error is now classified as transient instead of "unknown." The app retries automatically with exponential backoff (3s, 6s, 12s, 24s) and self-heals when the server recovers, instead of freezing until the user clicks Retry.
+- **Drag to backlog/archive**: dragging a bead onto the Backlog or Archived section headers in the epic tree now works. Previously only the separate "Drop here to..." zones accepted drops. Section headers show visual feedback (blue ring for backlog, amber ring for archive).
+- **Workspace card skeleton after add**: adding a workspace no longer gets stuck showing a perpetual skeleton loading bar. When `bd status` fails for a workspace, the card now shows "Unable to load stats" instead of spinning forever.
+- **"What is beads?" link**: the onboarding link now points to the public article instead of a private GitHub repo that returned 404 for end users.
+- **Molecule graph height**: the Three.js 3D graph in the Molecule tab now fills the full available height in the detail panel instead of only the upper half, leaving a blank region below.
+- **Minimap comment order**: the minimap (right side of detail panel) now respects the current sort direction. Previously it always showed oldest-first regardless of the selected sort, and clicking a minimap entry scrolled to the wrong comment.
+- **Comment card author accents**: comment cards in the detail panel now show a colored left border matching the comment author, making it easier to visually track who said what in long threads.
+- **Workspace connect error advice**: when connecting to a workspace fails, the bottom bar now shows category-specific recovery hints (e.g., "Database not found" suggests checking the `.beads` directory) instead of a generic "Check that the server is running" message regardless of error type.
+- **"Fix this" button command**: the workspace error screen's "Fix this" button for database-not-found errors now runs `bd dolt start` (correct) instead of `bd dolt stop` (wrong).
+- **WebSocket server crash in Tauri**: if the real-time update server crashes inside the native app, the Rust sidecar monitor now detects the exit and automatically restarts it. The UI reconnects within about 8 seconds. Previously a crash silently killed real-time updates until the next app restart.
+- **Header overflow at 4+ workspaces**: workspace tabs in the header no longer push the right-side controls (refresh, settings, sponsor) off-screen. Workspace names truncate with ellipsis and controls stay visible regardless of workspace count.
+- **E2E test suite CI timeout**: bumped the E2E and holistic test job timeouts from 15 to 30 minutes to accommodate release-build test runs.
+- **CI E2E and holistic test suites re-enabled**: both test suites were disabled to ship v0.16.0. Re-enabled with hardened configurations: stale process cleanup, port collision fixes, registry isolation, and cookie fallback for workspace health checks. 73 E2E tests and 18 holistic tests passing on Linux.
+- **PostHog log capture filtering**: the PostHog log capture integration was forwarding all stdout output as log events. Now it filters to error-level messages only, reducing noise and event volume.
+- **app_opened event in Tauri**: the `app_opened` PostHog event was not firing for some native app users because the telemetry init raced with the WebView load. The event now fires after the client confirms the WebView is ready.
+- **AI help textarea clearing**: the AI help input field now clears after a response is received. Previously the textarea retained the last question, requiring manual deletion before asking another.
+- **Windows: JobObject startup telemetry**: the Windows Job Object creation failure path in headless mode now reports to telemetry, closing a diagnostic gap in Windows startup errors.
+
 ## [0.16.0] - 2026-03-03
 
 This release overhauls how Beadbox manages workspaces. You control which projects appear, connect to Dolt servers without creating local folders, and get real logs when something goes wrong.
