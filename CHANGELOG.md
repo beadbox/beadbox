@@ -10,19 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **mysql2 connection pool**: Beadbox now maintains a persistent mysql2 connection pool per workspace instead of spawning a new `bd` process for every query. This is the foundation for eliminating subprocess overhead across the app. The ws-server fingerprint poll is the first consumer: real-time update detection dropped from ~1400ms (Go process spawn + TCP connect + query + exit) to ~5ms (single query on a persistent connection).
+- **"Dolt is required" startup screen**: when Dolt is not installed, Beadbox now shows a dedicated screen with platform-specific install instructions (Homebrew, curl, Windows download) and a "Check again" button that auto-polls every 10 seconds. Replaces the cryptic "Unable to load workspace" error that appeared when bd was present but Dolt was missing.
+- **metadata.json corruption warning**: if your workspace's `metadata.json` is missing or malformed, Beadbox now shows an inline warning banner explaining the issue instead of silently falling back to embedded detection mode. Server-mode workspaces no longer degrade to embedded mode without telling you.
+- **Unified health indicator**: the three independent error signals (red header banner, amber inline overlay, green/red health dot) are now driven by a single `AppHealth` state machine. Recovery from a Dolt outage clears all indicators at once instead of leaving stale banners over fresh data.
 - **Telemetry: server action failures**: `app_server_action_failed` fires when any server action errors on the client side, capturing the action name, user-facing error message, and elapsed time. Closes the gap between server-side bd errors and what the user actually experienced.
 - **Telemetry: error toasts**: `app_error_shown` fires whenever an error toast is displayed, with error type, message, and source action.
 - **Telemetry: workspace lifecycle**: `app_workspace_added`, `app_workspace_removed`, and `app_workspace_switch_failed` (with timing data) events now track workspace management actions.
 - **Telemetry: issue interactions**: `app_issue_status_changed`, `app_issue_comment_added`, and `app_detail_panel_action` events track how users interact with beads in the detail panel.
 - **Telemetry: navigation and search**: `app_search_used` and `app_navigation_used` events capture how users move through the app and find beads.
 
+### Changed
+
+- **Workspace selector rewrite**: the workspace selector page was a single 2152-line component. It is now decomposed into focused modules: `WorkspaceCard` (individual workspace display and actions), `InitWorkspaceDialog` (new workspace creation flow), `AddWorkspaceDialog` (connecting to existing workspaces), and `WorkspacesPage` (layout and orchestration). No user-facing behavior changes; this is a maintainability improvement that unblocks future workspace features.
+
 ### Fixed
 
+- **Error banner persists after recovery**: the amber "Failed to refresh" overlay stayed visible even after the Dolt server recovered and data refreshed successfully via WebSocket. The overlay now clears automatically when a WebSocket-triggered refresh succeeds, matching the behavior of the red header banner and health dot which already self-healed.
+- **Workspace creation errors are opaque**: `bd init` failures surfaced as a generic toast with no guidance. Workspace creation errors now appear inline on the creation form with specific messages (permission denied, path not found, database already exists) and suggested fixes.
 - **toastError infinite recursion**: `toastError()` was calling itself instead of the underlying toast function, causing a `Maximum call stack size exceeded` error. No error toasts were shown and no `app_error_shown` events fired. All error paths silently swallowed failures.
 - **Archive bead visual lag**: archiving a bead left it visible in the list for 500-1000ms while waiting for the server round-trip. Archive now uses an optimistic update, removing the bead from the list instantly before the server action completes.
 - **Delete bead visual lag**: same pattern as archive. Deleting a bead kept it visible until `loadEpics` finished. Now uses an optimistic removal from local state.
 - **Stale dolt-server.port after restart**: when Beadbox restarts a managed Dolt server, the old `.dolt/dolt-server.port` file could linger, causing the app to connect to a port that no longer existed. The restart path now cleans up stale port files before launching a new server.
 - **Workspace init error logging**: `bd init` failures logged `[object Object]` instead of the actual error. Error objects are now properly serialized so diagnostic details survive into logs and PostHog events.
+- **Middleware Edge Runtime crash**: `middleware.ts` used Node.js `crypto` APIs that are unavailable in the Edge Runtime, causing a crash on every request in production builds. Replaced with Edge-compatible alternatives.
 - **Workspace switch timing**: `app_workspace_switch_failed` now measures elapsed time from the start of the switch attempt, not from when the error is caught, giving accurate latency data for failed switches.
 
 ## [0.16.2] - 2026-03-04
