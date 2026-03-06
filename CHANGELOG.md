@@ -5,6 +5,26 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.3] - 2026-03-05
+
+### Added
+
+- **mysql2 connection pool**: Beadbox now maintains a persistent mysql2 connection pool per workspace instead of spawning a new `bd` process for every query. This is the foundation for eliminating subprocess overhead across the app. The ws-server fingerprint poll is the first consumer: real-time update detection dropped from ~1400ms (Go process spawn + TCP connect + query + exit) to ~5ms (single query on a persistent connection).
+- **Telemetry: server action failures**: `app_server_action_failed` fires when any server action errors on the client side, capturing the action name, user-facing error message, and elapsed time. Closes the gap between server-side bd errors and what the user actually experienced.
+- **Telemetry: error toasts**: `app_error_shown` fires whenever an error toast is displayed, with error type, message, and source action.
+- **Telemetry: workspace lifecycle**: `app_workspace_added`, `app_workspace_removed`, and `app_workspace_switch_failed` (with timing data) events now track workspace management actions.
+- **Telemetry: issue interactions**: `app_issue_status_changed`, `app_issue_comment_added`, and `app_detail_panel_action` events track how users interact with beads in the detail panel.
+- **Telemetry: navigation and search**: `app_search_used` and `app_navigation_used` events capture how users move through the app and find beads.
+
+### Fixed
+
+- **toastError infinite recursion**: `toastError()` was calling itself instead of the underlying toast function, causing a `Maximum call stack size exceeded` error. No error toasts were shown and no `app_error_shown` events fired. All error paths silently swallowed failures.
+- **Archive bead visual lag**: archiving a bead left it visible in the list for 500-1000ms while waiting for the server round-trip. Archive now uses an optimistic update, removing the bead from the list instantly before the server action completes.
+- **Delete bead visual lag**: same pattern as archive. Deleting a bead kept it visible until `loadEpics` finished. Now uses an optimistic removal from local state.
+- **Stale dolt-server.port after restart**: when Beadbox restarts a managed Dolt server, the old `.dolt/dolt-server.port` file could linger, causing the app to connect to a port that no longer existed. The restart path now cleans up stale port files before launching a new server.
+- **Workspace init error logging**: `bd init` failures logged `[object Object]` instead of the actual error. Error objects are now properly serialized so diagnostic details survive into logs and PostHog events.
+- **Workspace switch timing**: `app_workspace_switch_failed` now measures elapsed time from the start of the switch attempt, not from when the error is caught, giving accurate latency data for failed switches.
+
 ## [0.16.2] - 2026-03-04
 
 ### Added
