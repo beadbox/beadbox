@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **"Dolt is required" startup screen**: when Dolt is not installed, Beadbox now shows a dedicated screen with platform-specific install instructions (Homebrew, curl, Windows download) and a "Check again" button that auto-polls every 10 seconds. Replaces the cryptic "Unable to load workspace" error that appeared when bd was present but Dolt was missing.
 - **metadata.json corruption warning**: if your workspace's `metadata.json` is missing or malformed, Beadbox now shows an inline warning banner explaining the issue instead of silently falling back to embedded detection mode. Server-mode workspaces no longer degrade to embedded mode without telling you.
 - **Unified health indicator**: the three independent error signals (red header banner, amber inline overlay, green/red health dot) are now driven by a single `AppHealth` state machine. Recovery from a Dolt outage clears all indicators at once instead of leaving stale banners over fresh data.
+
 ### Changed
 
 - **Workspace selector rewrite**: the workspace selector page was a single 2152-line component. It is now decomposed into focused modules: `WorkspaceCard` (individual workspace display and actions), `InitWorkspaceDialog` (new workspace creation flow), `AddWorkspaceDialog` (connecting to existing workspaces), and `WorkspacesPage` (layout and orchestration). No user-facing behavior changes; this is a maintainability improvement that unblocks future workspace features.
