@@ -5,6 +5,12 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.4] - 2026-03-06
+
+### Fixed
+
+- **Workspace retry cap**: connecting to an unreachable workspace no longer retries indefinitely. Retries are now capped at 3 attempts with exponential backoff (2s, 4s, 8s). After exhausting retries, Beadbox shows an error state with a manual "Retry" button instead of spinning forever.
+
 ## [0.16.3] - 2026-03-05
 
 ### Added
