@@ -5,6 +5,25 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.5] - 2026-03-06
+
+### Added
+
+- **Startup gate overhaul**: the bd-missing, dolt-missing, and no-workspace screens now provide actionable recovery guidance. "Check again" failures show which paths were checked, what error occurred, and specific next steps instead of a generic "still not found" message. Install command boxes have copy-to-clipboard buttons. The Linuxbrew binary path is now included in the search list.
+
+### Fixed
+
+- **Stale feedback across startup screens**: clicking "Check again" on the bd-missing screen and then transitioning to the dolt-missing screen (after bd was detected) carried the old "bd still not found" message into the new screen. Feedback now clears on every phase transition.
+- **Folder workspaces show SERVER badge**: initializing a workspace via the folder picker showed a "SERVER" badge on the workspace card. The mode detection was treating the presence of a `dolt-server.port` file as proof of server mode, but since bd 0.57.0 every workspace has that file. Mode detection now uses `metadata.json`'s `dolt_mode` field as the source of truth.
+- **Dolt-missing screen spacing**: tightened and normalized vertical spacing between install command blocks, the Advanced section, and feedback messages on the Dolt installation screen. Increased line-height on the curl install script so wrapped text has breathing room.
+- **Tool versions blank after startup**: `getToolVersions` was only called during the startup gate check, so bd and Dolt version strings were empty in the diagnostics panel if they were installed after the initial check. Versions now refresh after the startup gate clears.
+- **Server address display**: workspace cards for server-connected workspaces showed the address without proper formatting (e.g., `127.0.1.14199` instead of `127.0.0.1:14199`). Host and port are now formatted correctly.
+- **Stale workspace cookie**: switching away from a workspace that was later removed from the registry could leave a stale cookie, causing the app to redirect to the workspace selector on every launch. The cookie is now validated against the current registry on startup.
+
+### Security
+
+- **Analytics path sanitization**: home directory paths in analytics events are now replaced with `~` before capture, preventing accidental PII exposure through filesystem paths that contain usernames.
+
 ## [0.16.4] - 2026-03-06
 
 ### Fixed
@@ -19,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **"Dolt is required" startup screen**: when Dolt is not installed, Beadbox now shows a dedicated screen with platform-specific install instructions (Homebrew, curl, Windows download) and a "Check again" button that auto-polls every 10 seconds. Replaces the cryptic "Unable to load workspace" error that appeared when bd was present but Dolt was missing.
 - **metadata.json corruption warning**: if your workspace's `metadata.json` is missing or malformed, Beadbox now shows an inline warning banner explaining the issue instead of silently falling back to embedded detection mode. Server-mode workspaces no longer degrade to embedded mode without telling you.
 - **Unified health indicator**: the three independent error signals (red header banner, amber inline overlay, green/red health dot) are now driven by a single `AppHealth` state machine. Recovery from a Dolt outage clears all indicators at once instead of leaving stale banners over fresh data.
+- **Telemetry: server action failures**: `app_server_action_failed` fires when any server action errors on the client side, capturing the action name, user-facing error message, and elapsed time. Closes the gap between server-side bd errors and what the user actually experienced.
+- **Telemetry: error toasts**: `app_error_shown` fires whenever an error toast is displayed, with error type, message, and source action.
+- **Telemetry: workspace lifecycle**: `app_workspace_added`, `app_workspace_removed`, and `app_workspace_switch_failed` (with timing data) events now track workspace management actions.
+- **Telemetry: issue interactions**: `app_issue_status_changed`, `app_issue_comment_added`, and `app_detail_panel_action` events track how users interact with beads in the detail panel.
+- **Telemetry: navigation and search**: `app_search_used` and `app_navigation_used` events capture how users move through the app and find beads.
 
 ### Changed
 
@@ -34,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Stale dolt-server.port after restart**: when Beadbox restarts a managed Dolt server, the old `.dolt/dolt-server.port` file could linger, causing the app to connect to a port that no longer existed. The restart path now cleans up stale port files before launching a new server.
 - **Workspace init error logging**: `bd init` failures logged `[object Object]` instead of the actual error. Error objects are now properly serialized so diagnostic details survive into logs and PostHog events.
 - **Middleware Edge Runtime crash**: `middleware.ts` used Node.js `crypto` APIs that are unavailable in the Edge Runtime, causing a crash on every request in production builds. Replaced with Edge-compatible alternatives.
+- **Workspace switch timing**: `app_workspace_switch_failed` now measures elapsed time from the start of the switch attempt, not from when the error is caught, giving accurate latency data for failed switches.
+
 ## [0.16.2] - 2026-03-04
 
 ### Added
