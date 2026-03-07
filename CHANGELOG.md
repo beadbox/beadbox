@@ -5,34 +5,6 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.16.6] - 2026-03-06
-
-### Added
-
-- **Onboarding architecture redesign**: the entire startup and onboarding code path has been rewritten from scratch. A new explicit state machine (`lib/startup-machine.ts`) replaces the implicit state scattered across multiple components. Workspace identity is now UUID-based (Registry v2 schema) with automatic migration from the old name-based format. An end-to-end health check validates workspace connectivity with classified error types (not just "is the file there?" but "can we actually query it?"). The startup gate (`startup-gate.tsx`) is now a `useReducer` state machine instead of a tangle of `useEffect` chains.
-- **Single-process Tauri sidecar**: the Tauri native app no longer spawns a separate WebSocket server process alongside the Next.js server. WebSocket connections now route through a Next.js API route (`/api/ws`) with a `server.js` upgrade handler. This eliminates an entire class of port-allocation and process-orphaning bugs on macOS, Linux, and Windows.
-- **WebSocket same-origin architecture**: the WebSocket client connects to the same origin as the web app instead of a separate port. Connection failures use exponential backoff with jitter. A dedicated `lib/ws-manager.ts` module replaces the inline WebSocket logic that was duplicated across components.
-
-### Changed
-
-- **page.tsx decomposed into modules**: the main page component was a single large file handling epic trees, filters, and the detail panel. It is now split into focused modules with clear responsibilities. No user-facing behavior changes.
-- **"Add existing workspace" button label**: the "Connect to a server" button in the Add Workspace dialog now reads "Use existing workspace," which better describes what it does (point Beadbox at an already-initialized workspace, whether local or remote).
-- **Add Workspace dialog defaults to Local Path tab**: opening the Add Workspace dialog now lands on the Local Path tab instead of the Server tab, matching the most common workflow.
-- **Filter toggle active state**: active filter icons now use `aria-pressed` styling that is visually distinct from the hover state. Previously, you couldn't tell whether a filter was active or just hovered.
-- **Filter icon tooltips**: replaced native `title` attributes with Radix UI Tooltip components. Tooltips now appear in 200ms (instead of the browser's default ~500ms delay) and transition instantly when moving between adjacent filter icons.
-
-### Fixed
-
-- **Workspace removal race condition**: removing a workspace showed no spinner and allowed double-clicking the remove button, which could trigger a race condition if the first removal hadn't completed. The button now shows a spinner and disables during removal.
-- **Database not registered after workspace init**: initializing a new workspace via the folder picker created the `.beads/` directory but didn't register the database on the running Dolt server, leaving the workspace in a broken state that required restarting Beadbox.
-- **Tauri first-launch blocker**: launching the Tauri app for the first time showed "Dolt must be running to create a workspace" even when Dolt was installed, because the managed Dolt server hadn't started yet. The startup sequence now ensures the Dolt server is running before presenting the workspace creation flow.
-- **Windows: workspace Open clicks silently fail**: clicking "Open" on a workspace card in Windows did nothing and showed no error. The navigation path was failing silently due to a platform-specific path resolution issue.
-- **V8 error leaks to UI**: when `bdExec` received raw V8 error output (e.g., out-of-memory warnings) instead of JSON, `JSON.parse` threw an unhandled exception that surfaced as a cryptic error in the UI. stdout is now validated before parsing, and non-JSON output is wrapped in a structured error.
-- **Non-existent path opens wrong dialog**: entering a path that doesn't exist in the Add Workspace dialog opened the Init Workspace dialog (offering to create a workspace there) instead of showing an inline validation error. Invalid paths now show an inline error message.
-- **Transient "Workspace did not respond" on first load**: adding a Dolt server workspace and immediately opening it could show a transient "Workspace did not respond" error because the health check fired before the server connection was fully established.
-- **bd path resolution returns directory**: `resolveBdDbPath` was returning the `.beads/` directory path, but `bd --db` expects the full file path (`.beads/beads.db`). Commands using the resolved path were failing silently or returning unexpected results.
-- **Depth-0 bead rows missing left border**: top-level beads in the epic tree had a transparent left border instead of the visible `border-l-border/40` treatment applied to nested beads. All depth levels now show a consistent left border.
-
 ## [0.16.5] - 2026-03-06
 
 ### Added
