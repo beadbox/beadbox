@@ -13,7 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DAG visualization features**: sequential and parallel step grouping into container nodes, invisible constraint edges to push short branches down, start/end sentinel nodes, spline edge routing, variable badges, group header tooltips, resizable panels, and persistent view mode preference.
 - **Tree view for formula steps**: hierarchical tree representation of formula steps with sequential/parallel grouping, completed overlay status pills, and group icons.
 - **Formula E2E test suite**: Playwright end-to-end tests covering the full Formulas tab lifecycle.
-- **Analytics instrumentation**: PostHog events for WebSocket health, update checker, settings changes, activity feed engagement, bead deletion, keyboard shortcuts, sort changes, drag-and-drop reparenting, server scan, developer console usage, onboarding hero display/dwell time, priority changes, and health degradation/recovery.
 - **Edit-connection action for server workspaces**: server workspace cards now have an edit-connection option to update host/port/database without removing and re-adding.
 - **Help tooltips on section headers**: Agents and Pipeline section headers now show help icon popovers explaining the section.
 - **Responsive priority pills**: priority badges switch to short-form labels at narrow viewport widths.
