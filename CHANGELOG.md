@@ -5,6 +5,117 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-03-09
+
+### Added
+
+- **Formulas tab (Early Access)**: full Formulas page with sidebar listing all formulas, DAG visualization powered by React Flow + ELK layout, tree view with sequential/parallel step grouping, step detail panel, preview and pour modals, and active molecules section with live DAG overlay showing current execution state.
+- **DAG visualization features**: sequential and parallel step grouping into container nodes, invisible constraint edges to push short branches down, start/end sentinel nodes, spline edge routing, variable badges, group header tooltips, resizable panels, and persistent view mode preference.
+- **Tree view for formula steps**: hierarchical tree representation of formula steps with sequential/parallel grouping, completed overlay status pills, and group icons.
+- **Formula E2E test suite**: Playwright end-to-end tests covering the full Formulas tab lifecycle.
+- **Analytics instrumentation**: PostHog events for WebSocket health, update checker, settings changes, activity feed engagement, bead deletion, keyboard shortcuts, sort changes, drag-and-drop reparenting, server scan, developer console usage, onboarding hero display/dwell time, priority changes, and health degradation/recovery.
+- **Edit-connection action for server workspaces**: server workspace cards now have an edit-connection option to update host/port/database without removing and re-adding.
+- **Help tooltips on section headers**: Agents and Pipeline section headers now show help icon popovers explaining the section.
+- **Responsive priority pills**: priority badges switch to short-form labels at narrow viewport widths.
+- **Molecules section**: molecules are separated into their own sidebar section with a pink hexagon icon, distinct from the Pipeline section.
+- **Missing keyboard shortcuts**: added undocumented shortcuts to the Shortcut Reference dialog.
+
+### Changed
+
+- **Formulas badge from "Coming Soon" to "EA"**: the Formulas tab is now labeled Early Access instead of Coming Soon.
+- **Loose Beads reordered in sidebar**: Loose Beads section now appears above Molecules for better scan order.
+- **Decomposed bead-detail-panel.tsx**: split into sub-components and hooks with 26 unit tests.
+- **Decomposed activity-feed.tsx**: extracted pure logic into 6 utility modules with 62 unit tests.
+- **Decomposed lib.rs**: extracted Tauri lib.rs into focused Rust modules with unit tests.
+
+### Fixed
+
+- **Circuit breaker recovery (bb-47fq, bb-mu6a)**: dead Dolt processes are now auto-recovered on startup, and WebSocket polling uses exponential backoff instead of a fixed 2-second interval that reset the circuit breaker cooldown.
+- **Epic children flash-disappear on status update**: optimistic status updates no longer strip child beads from the epic tree.
+- **Search by bead ID**: search now matches bead IDs in addition to titles; orphan beads appear under a _standalone group.
+- **Cmd+F opens filter bar**: the keyboard handler now correctly tracks filter bar visibility state.
+- **Long bead IDs overflow**: CopyableId truncates long IDs with an ellipsis instead of breaking layout.
+- **Molecule icon color**: molecule section header uses the correct gray icon.
+- **Drag-to-make-epic**: dropping a bead on the "Make top-level epic" zone now promotes its type to epic.
+- **Scanner accuracy (bb-e8yd)**: dropped legacy default ports, tightened DerivePort scan range, and added Dolt verification to prevent false positives.
+- **Init dialog detects existing .beads/**: initializeWorkspace now detects an existing .beads/ directory and adds it instead of re-initializing.
+- **Dolt retry error logging**: connection retry path now logs errors instead of failing silently.
+- **WebView height (bb-fjlj)**: switched resizable panels from h-full to flex layout to prevent WebView height collapse.
+- **Molecule rendering stability**: rewrote molecule overlay to use structural DAG matching instead of brittle title matching.
+- **Suppress dev /internal/event 404**: analytics route 404 noise in dev mode is suppressed.
+- **Dolt port resolution from port file**: resolvePort now reads from the .beads/ directory port file instead of a stale registry.
+- **PostHog poll-path log spam**: downgraded noisy console.error in poll path to debug/warn.
+- **Linux browser tab on launch (bb-phod)**: prevented a stray browser tab from opening on Linux launch.
+- **Molecule phase re-fetch after WS refresh**: blockedBy data is re-fetched after WebSocket refresh to preserve molecule phase grouping.
+- **React hooks lint violations**: resolved all react-hooks/exhaustive-deps warnings.
+- **Tauri sidecar process cleanup**: fixed spawn_sidecar temp Drop from killing the entire sidecar process group.
+- **E2E test stability**: fixed port-scan dialog tests, workspace removal race conditions, delete test timing, and serialized e2e/holistic test jobs to prevent Dolt cross-kill.
+
+### Security
+
+- **DOMPurify update**: upgraded dompurify 3.3.1 to 3.3.2 to fix an XSS vulnerability.
+
+## [0.16.7] - 2026-03-07
+
+### Added
+
+- **Molecule phase-grouped tree view**: epic tree now groups child beads by phase, with gate status badges displayed inline next to each phase header. Makes it easy to see which phases are gated and which are clear at a glance.
+- **Proactive bd minimum version check at startup**: the app checks the installed bd version at launch and shows a clear error screen if bd is too old, instead of failing with cryptic errors downstream.
+- **Startup diagnostics logging (Tauri)**: the Tauri sidecar now logs PATH, bd/dolt binary paths, and version strings at startup for easier debugging of environment issues.
+
+### Fixed
+
+- **bd v0.59.0 compatibility**: bd v0.59.0 changed its JSON output format. The app now passes `--flat` conditionally when running on bd >= 0.59.0, preventing broken list views after a bd upgrade.
+- **Misleading "server unreachable" error on bad Dolt setup**: a proactive Dolt check at startup now catches missing or broken Dolt installations before they surface as a confusing "server unreachable" message.
+- **Startup gate shows raw bd help text on Windows**: when bd was too old, the startup gate dumped raw CLI help output instead of a human-readable version error. Now shows a proper message on all platforms.
+- **Linux startup gate shows wrong bd install instructions**: Linux users were shown `brew install` as the primary install method. Removed the Homebrew option from Linux install instructions.
+- **Child bead order lost within molecule phases**: children within a molecule phase could appear in a different order than the input. Phase grouping now preserves the original child order.
+- **Pre-flight Dolt check before workspace init**: workspace initialization now runs a Dolt connectivity check with a 15-second timeout before proceeding, preventing half-initialized workspaces when Dolt is down.
+- **Gray left border on bead rows**: removed an unintended gray left border that appeared on all bead table rows.
+- **Epic cache not invalidated after label changes**: archiving a bead by changing its label did not invalidate the epic cache, so the bead stayed visible until the next manual refresh. Cache now invalidates on label changes.
+- **Long commands overflow in CopyableCommand**: long bd commands in copyable command blocks now scroll horizontally instead of overflowing their container.
+
+## [0.16.6] - 2026-03-06
+
+### Added
+
+- **Onboarding architecture redesign**: the entire startup and onboarding code path has been rewritten from scratch. A new explicit state machine (`lib/startup-machine.ts`) replaces the implicit state scattered across multiple components. Workspace identity is now UUID-based (Registry v2 schema) with automatic migration from the old name-based format. An end-to-end health check validates workspace connectivity with classified error types (not just "is the file there?" but "can we actually query it?"). The startup gate (`startup-gate.tsx`) is now a `useReducer` state machine instead of a tangle of `useEffect` chains.
+- **Single-process Tauri sidecar**: the Tauri native app no longer spawns a separate WebSocket server process alongside the Next.js server. WebSocket connections now route through a Next.js API route (`/api/ws`) with a `server.js` upgrade handler. This eliminates an entire class of port-allocation and process-orphaning bugs on macOS, Linux, and Windows.
+- **WebSocket same-origin architecture**: the WebSocket client connects to the same origin as the web app instead of a separate port. Connection failures use exponential backoff with jitter. A dedicated `lib/ws-manager.ts` module replaces the inline WebSocket logic that was duplicated across components.
+
+### Changed
+
+- **page.tsx decomposed into modules**: the main page component was a single large file handling epic trees, filters, and the detail panel. It is now split into focused modules with clear responsibilities. No user-facing behavior changes.
+- **"Add existing workspace" button label**: the "Connect to a server" button in the Add Workspace dialog now reads "Use existing workspace," which better describes what it does (point Beadbox at an already-initialized workspace, whether local or remote).
+- **Add Workspace dialog defaults to Local Path tab**: opening the Add Workspace dialog now lands on the Local Path tab instead of the Server tab, matching the most common workflow.
+- **Filter toggle active state**: active filter icons now use `aria-pressed` styling that is visually distinct from the hover state. Previously, you couldn't tell whether a filter was active or just hovered.
+- **Filter icon tooltips**: replaced native `title` attributes with Radix UI Tooltip components. Tooltips now appear in 200ms (instead of the browser's default ~500ms delay) and transition instantly when moving between adjacent filter icons.
+
+### Fixed
+
+- **Workspace removal race condition**: removing a workspace showed no spinner and allowed double-clicking the remove button, which could trigger a race condition if the first removal hadn't completed. The button now shows a spinner and disables during removal.
+- **Database not registered after workspace init**: initializing a new workspace via the folder picker created the `.beads/` directory but didn't register the database on the running Dolt server, leaving the workspace in a broken state that required restarting Beadbox.
+- **Tauri first-launch blocker**: launching the Tauri app for the first time showed "Dolt must be running to create a workspace" even when Dolt was installed, because the managed Dolt server hadn't started yet. The startup sequence now ensures the Dolt server is running before presenting the workspace creation flow.
+- **Windows: workspace Open clicks silently fail**: clicking "Open" on a workspace card in Windows did nothing and showed no error. The navigation path was failing silently due to a platform-specific path resolution issue.
+- **V8 error leaks to UI**: when `bdExec` received raw V8 error output (e.g., out-of-memory warnings) instead of JSON, `JSON.parse` threw an unhandled exception that surfaced as a cryptic error in the UI. stdout is now validated before parsing, and non-JSON output is wrapped in a structured error.
+- **Non-existent path opens wrong dialog**: entering a path that doesn't exist in the Add Workspace dialog opened the Init Workspace dialog (offering to create a workspace there) instead of showing an inline validation error. Invalid paths now show an inline error message.
+- **Transient "Workspace did not respond" on first load**: adding a Dolt server workspace and immediately opening it could show a transient "Workspace did not respond" error because the health check fired before the server connection was fully established.
+- **bd path resolution returns directory**: `resolveBdDbPath` was returning the `.beads/` directory path, but `bd --db` expects the full file path (`.beads/beads.db`). Commands using the resolved path were failing silently or returning unexpected results.
+- **Depth-0 bead rows missing left border**: top-level beads in the epic tree had a transparent left border instead of the visible `border-l-border/40` treatment applied to nested beads. All depth levels now show a consistent left border.
+- **Windows app DOA on launch**: the Tauri sidecar corrupted UNC paths, preventing the Windows app from starting at all. Path handling now preserves UNC prefixes correctly.
+- **React dev bundle loaded in production**: `NODE_ENV=production` was missing from the Tauri sidecar environment, so the Next.js server loaded the React development bundle instead of the production build. Sidecar now sets `NODE_ENV` explicitly.
+- **"Database not found" shows recovery UI**: when the workspace database cannot be reached, the app now shows a recovery screen with a Retry button instead of a blank error state.
+- **Platform-specific error screens**: the bd-missing, dolt-missing, and database-error screens now show platform-appropriate install instructions (macOS, Linux, Windows) and a recovery action matrix so users know exactly what to do on their OS.
+- **Dolt detection on Linux**: Dolt binary detection now probes common Linux install paths (e.g., `/usr/local/bin`, `/home/linuxbrew/.linuxbrew/bin`) that were previously missed.
+- **False "Workspace did not respond" on empty workspaces**: fresh workspaces with no beads triggered a spurious 10-second timeout banner. The health check now distinguishes between "empty but healthy" and "actually unreachable."
+- **Archiving a bead requires manual refresh**: archiving a bead left it visible in the list until the next full refresh. The bead now moves out of view immediately on archive.
+- **Server workspace metadata missing server block**: server-mode workspace metadata now includes the `server` block with correct connection info, so downstream consumers get host/port without guessing.
+- **Duplicate workspace entries in selector**: workspaces could appear twice in the selector if registered at both add-time and load-time. Deduplication now runs at both stages.
+- **Drag-and-drop broken on Windows**: drag-and-drop in the bead table failed silently on Windows due to a WebView2 OLE compatibility issue. Fixed via a custom MIME type that bypasses the OLE limitation.
+- **Server discovery allows re-adding local workspace as server**: adding a server whose address resolves to an already-registered local workspace now shows an overlap warning with a Replace option instead of silently creating a duplicate.
+- **Diagnostics panel false ".beads/ missing" on server workspaces**: the diagnostics panel checked for a local `.beads/` directory even on server-mode workspaces, falsely reporting it as missing. Detection now respects the workspace mode.
+- **dolt_mode missing from server workspace runtime metadata**: server workspace runtime metadata now includes the `dolt_mode` field so mode detection works correctly downstream.
+
 ## [0.16.5] - 2026-03-06
 
 ### Added
