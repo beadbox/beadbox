@@ -5,6 +5,46 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-04-02
+
+### Changed
+
+- **Faster workspace loading**: parallel version checks, reused health results, and epic data prefetch cut cold launch to ~2 seconds.
+- **Smarter health detection**: mid-session connectivity monitoring now uses WebSocket signals instead of polling bd every 5 seconds, reducing background process overhead.
+
+### Fixed
+
+- **Dead code cleanup**: removed ~5,350 lines of unused code including 32 shadcn/ui component files, 21 npm dependencies, dead CI jobs, unused exports, and stale CSS.
+
+### Removed
+
+- 32 unused UI component files (sidebar, tabs, chart, calendar, carousel, command, etc.).
+- 21 unused npm dependencies (recharts, vaul, cmdk, react-hook-form, zod, etc.).
+- Dead CI workflows (publish-public.yml, iOS/TestFlight jobs, Windows GitHub-hosted builder).
+- Stale CSS variables (chart colors, sidebar tokens, unused spacing system).
+
+## [0.19.0] - 2026-03-21
+
+### Added
+
+- **bd version catchup formula**: repeatable 8-step formula for safely catching up to new bd CLI versions, covering version detection, schema migration, changelog, codebase audit, implementation, and verification.
+
+### Changed
+
+- **Faster server-mode change detection**: server polling now uses O(1) hash comparison (`DOLT_HASHOF_TABLE`) instead of row-scanning queries, cutting poll overhead and enabling a 1-second baseline interval (down from 2 seconds). Changes propagate to the UI roughly twice as fast.
+- **Faster workspace scanner**: removed the legacy 1000-port DerivePort range scan (Phase 2) from the add-workspace dialog. Server discovery now reads port files directly, completing in under 2 seconds instead of ~10 seconds.
+- **Minimum bd version bumped to 0.61.0**: Beadbox now requires bd 0.61.0 or later. Users on older versions see a clear upgrade prompt at startup instead of encountering silent failures.
+- **Updated documentation for ephemeral ports**: quick start and troubleshooting pages across all 11 languages now reference the `.beads/dolt-server.port` file instead of the retired 13307-14306 port range.
+
+### Fixed
+
+- **Comment deletion broken on bd 0.61 (bb-cmno.1)**: bd 0.61 migrated comment IDs from auto-increment integers to UUIDs. `deleteComment()` rejected UUID strings with "Invalid comment ID", making comment deletion completely non-functional. Fixed to accept both UUID and legacy integer IDs with SQL injection prevention.
+- **Comment change detection fragile with UUID PKs (bb-cmno.2)**: server-mode polling used `MAX(id)` on the comments table, which returns a meaningless lexicographic maximum for UUID primary keys. Replaced with `COUNT(*)`, which correctly detects comment additions and deletions.
+
+### Removed
+
+- **Dead idle-monitor code from E2E tests**: bd 0.59 removed the daemon infrastructure. Cleaned up ~25 references to the defunct idle-monitor process across 6 E2E test files (pkill commands, sleep guards, race condition comments).
+
 ## [0.18.0] - 2026-03-09
 
 ### Added
