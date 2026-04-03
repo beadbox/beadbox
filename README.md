@@ -25,7 +25,7 @@ Beadbox is a native desktop dashboard for the [beads](https://github.com/steveye
 
 ## Install
 
-Download from [beadbox.app](https://beadbox.app). Available for macOS (Apple Silicon and Intel), Linux, and Windows.
+Download from [beadbox.app](https://beadbox.app). Available for macOS, Linux, and Windows.
 
 Requires the [beads](https://github.com/steveyegge/beads) CLI.
 
