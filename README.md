@@ -10,6 +10,8 @@
   <a href="https://github.com/beadbox/beadbox/issues">Issues</a>
 </p>
 
+> **Note:** We've rolled back to v0.19.0 while we stabilize beads v1.0.0 support. See [this discussion](https://github.com/beadbox/beadbox/discussions/10) for details and what to do.
+
 Beadbox is a native desktop dashboard for the [beads](https://github.com/steveyegge/beads) issue tracker. It gives you real-time visibility into every task, dependency, and handoff across your AI agent fleet. Changes made in the terminal appear in the GUI within milliseconds.
 
 ## Features
