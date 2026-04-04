@@ -5,35 +5,6 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.21.0] - 2026-04-03
-
-v0.20.x was released and rolled back while we stabilized beads v1.0.0 support; v0.21.0 includes all those fixes plus embedded mode resilience.
-
-### Added
-
-- **beads v1.0.0 support**: full compatibility with beads v1.0.0 including embedded and server mode. Embedded mode uses flock-based retry with graceful degradation when the database is locked. Auto-promote suggests upgrading to server mode after repeated lock contention.
-- **Remote workspace credential persistence**: server workspace credentials (host, port, database) are now stored in the OS keychain via Tauri's secure credential APIs instead of plaintext config files.
-
-### Changed
-
-- **Faster workspace loading**: parallel version checks, reused health results, and epic data prefetch cut cold launch by ~2 seconds.
-- **Smarter health detection**: mid-session connectivity monitoring now uses WebSocket signals instead of polling bd every 5 seconds, reducing background process overhead.
-- **Minimum bd version bumped to 1.0.0**: Beadbox now requires beads 1.0.0 or later. Users on older versions see a clear upgrade prompt at startup.
-- **Windows improvements**: increased startup timeout to 90 seconds for slower machines, added dual-stack (IPv4/IPv6) support for WebSocket connections, switched to platform-native `open` for external links, and fixed Windows CI builds.
-
-### Fixed
-
-- **Custom status filter hiding beads**: beads with custom statuses were excluded from filtered views. Up to 47 beads could be invisible depending on workflow configuration. Custom statuses now pass through all filter paths.
-- **Dead code cleanup**: removed ~5,350 lines of unused code including 32 shadcn/ui component files, 21 npm dependencies, dead CI jobs, unused exports, and stale CSS.
-
-### Removed
-
-- Runtime directory infrastructure: Beadbox no longer creates or manages `~/.beadbox/` runtime directories. All workspace state is tracked through bd's own config and port files.
-- 32 unused UI component files (sidebar, tabs, chart, calendar, carousel, command, etc.).
-- 21 unused npm dependencies (recharts, vaul, cmdk, react-hook-form, zod, etc.).
-- Dead CI workflows (publish-public.yml, iOS/TestFlight jobs, Windows GitHub-hosted builder).
-- Stale CSS variables (chart colors, sidebar tokens, unused spacing system).
-
 ## [0.17.0] - 2026-03-08
 
 ### Added
