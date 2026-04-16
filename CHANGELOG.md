@@ -5,6 +5,45 @@ All notable changes to Beadbox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.3] - 2026-04-16
+
+### Fixed
+
+- **New-user workspace loading stuck on blank screen (P0)**: first-launch users and users with no workspaces configured could land on an empty viewport with no workspace selector rendered. The bootstrap flow now detects the no-workspace state and always routes to the workspace selector so a fresh install can get to work.
+
+### Changed
+
+- **App launches maximized**: the main window now opens maximized to the primary display instead of at the saved (or default) inner-size, so first-run presentation is not a small floating window tucked in a corner.
+
+## [0.23.2] - 2026-04-15
+
+### Fixed
+
+- **Real-time update rebuild loop**: the WebSocket change detector could re-enter its own rebuild path on certain change events, producing a tight loop that spiked CPU and flooded the UI with redundant refreshes. The rebuild trigger is now guarded so one change produces one refresh.
+
+## [0.23.1] - 2026-04-15
+
+### Added
+
+- **Sidecar health monitor**: Beadbox now supervises the Node.js sidecar process and surfaces a clear error state if it exits or stops responding, instead of leaving the UI stuck on a stale view with no feedback.
+
+### Fixed
+
+- **Embedded-mode lock contention**: embedded-mode workspaces could fail with lock errors when bd and Beadbox touched the database at the same moment. Reads and writes now use the flock-retry path consistently, so concurrent access degrades gracefully rather than surfacing a hard error.
+- **Windows workspace path validation**: tightened workspace path validation on Windows to correctly handle drive-letter paths and paths under `%USERPROFILE%`, reducing spurious "invalid workspace path" failures on the diagnostics screen.
+
+## [0.23.0] - 2026-04-11
+
+### Fixed
+
+- **Workspace switch race condition**: switching workspaces quickly (or while a background poll was mid-flight) could leave the UI showing beads from the previous workspace until the next refresh. Workspace switches now cancel in-flight queries before the new workspace loads.
+- **bd stderr warnings surfaced as errors**: benign warnings on bd stderr (version notices, deprecation hints) were being treated as command failures and bubbling up as error toasts. Only non-zero exit codes now count as failures.
+- **JSON error parsing for bd output**: when bd returned a structured JSON error, the parser could throw on edge-case payloads and hide the real message behind a generic "unexpected error." Error parsing is now defensive and always preserves the original bd message.
+
+### Security
+
+- **PII scrubbed from telemetry**: telemetry events no longer include absolute filesystem paths that contain usernames; home-directory prefixes are replaced with `~` before capture, and workspace paths are reduced to their basename.
+
 ## [0.17.0] - 2026-03-08
 
 ### Added
