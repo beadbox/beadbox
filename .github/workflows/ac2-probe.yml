@@ -1,0 +1,68 @@
+# AC-2 probe for beadbox-l5i.6.1.
+#
+# Introduced BY the test PR on purpose: for `pull_request` events GitHub runs
+# the workflow file from the PR head, so a hostile PR can add exactly this.
+# That is the real attack shape. A probe pre-placed on main would test
+# something strictly weaker than what we need to know.
+#
+# It probes the secrets that ACTUALLY EXIST (9 environment-scoped + 2
+# repo-level). Probing a secret that was never created would report "empty"
+# and prove nothing — a false reassurance, which is worse than no test.
+#
+# SAFETY: prints only populated/empty. Never a value, and never a length —
+# a length is itself partial disclosure precisely in the case where the
+# isolation has failed, which is the case this runs in.
+name: AC-2 fork secret probe
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report whether any real secret is reachable from a fork PR
+        env:
+          # 9 scoped to the `release` environment. This job deliberately does
+          # NOT declare that environment — a fork PR could not resolve it anyway,
+          # and that is half the point being demonstrated.
+          E1: ${{ secrets.APPLE_CERTIFICATE }}
+          E2: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          E3: ${{ secrets.APPLE_API_KEY_ID }}
+          E4: ${{ secrets.APPLE_API_ISSUER }}
+          E5: ${{ secrets.APPLE_API_KEY_P8 }}
+          E6: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          E7: ${{ secrets.CASK_PAT }}
+          E8: ${{ secrets.NEXT_PUBLIC_POSTHOG_KEY }}
+          E9: ${{ secrets.NEXT_PUBLIC_POSTHOG_HOST }}
+          # 2 at REPO level — a different reachability question, and the
+          # stronger half of the test: repo-level secrets are not behind an
+          # environment gate at all, so if anything leaks to a fork it is these.
+          R1: ${{ secrets.GH_TRAFFIC_PAT }}
+          R2: ${{ secrets.POSTHOG_PROJECT_KEY }}
+        run: |
+          reachable=0
+          check() {
+            if [ -n "$2" ]; then
+              echo "$1: POPULATED  <-- ISOLATION FAILURE"
+              reachable=$((reachable+1))
+            else
+              echo "$1: empty"
+            fi
+          }
+          echo "--- environment-scoped (release) ---"
+          check APPLE_CERTIFICATE "$E1";          check APPLE_CERTIFICATE_PASSWORD "$E2"
+          check APPLE_API_KEY_ID "$E3";           check APPLE_API_ISSUER "$E4"
+          check APPLE_API_KEY_P8 "$E5";           check TAURI_SIGNING_PRIVATE_KEY "$E6"
+          check CASK_PAT "$E7";                   check NEXT_PUBLIC_POSTHOG_KEY "$E8"
+          check NEXT_PUBLIC_POSTHOG_HOST "$E9"
+          echo "--- repo-level ---"
+          check GH_TRAFFIC_PAT "$R1";             check POSTHOG_PROJECT_KEY "$R2"
+          echo "---"
+          echo "reachable: $reachable of 11"
+          if [ "$reachable" -ne 0 ]; then
+            echo "::error::fork PR reached $reachable secret(s) — never-acceptable class"
+            exit 1
+          fi
+          echo "PASS: no secret reachable from a fork PR"
