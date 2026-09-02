@@ -25,17 +25,14 @@ import { Circle, ExternalLink, FolderOpen, HardDrive, Loader2, Plus, RefreshCw }
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import { getAnalyticsEnabled } from "../lib/local-storage"
+import { toastError } from "../lib/notifications"
 import { safeCapture } from "../lib/posthog-safe"
 import { rpc } from "../lib/rpc"
 import { useSubscriptionChangeSignal } from "../lib/subscribe"
-import { deleteCredential } from "../lib/tauri-credentials"
 import type { WorkspaceCard as WorkspaceCardType } from "../lib/types"
 import { cn } from "../lib/utils"
-import {
-  clearWorkspaceCookie,
-  getWorkspaceCookie,
-  setWorkspaceCookie,
-} from "../lib/workspace-cookie"
+import { activateWorkspace, unregisterWorkspace } from "../lib/workspace-actions"
+import { clearWorkspaceCookie, getWorkspaceCookie } from "../lib/workspace-cookie"
 import { AddWorkspaceDialog } from "./add-workspace-dialog"
 import { EditConnectionDialog } from "./edit-connection-dialog"
 import { InitWorkspaceDialog } from "./init-workspace-dialog"
@@ -298,20 +295,7 @@ export function WorkspacesPage() {
     async (ws: WorkspaceCardType) => {
       setConnecting(ws.id)
       try {
-        setWorkspaceCookie(ws.id)
-        try {
-          // bb-qn71: setActiveWorkspaceAction takes databasePath, not the
-          // workspace UUID. The server-side handler resolves via
-          // findWorkspaceByDbPath (server:// URI or local FS path), so a
-          // UUID was a silent no-op — registry.activeWorkspaceId stayed
-          // unset, breaking cross-restart workspace persistence.
-          await rpc.workspaces.setActiveWorkspaceAction(ws.databasePath)
-        } catch {
-          /* cookie is set, proceed */
-        }
-        if (getAnalyticsEnabled()) {
-          safeCapture("app_workspace_switch", { workspace_mode: ws.mode })
-        }
+        await activateWorkspace(ws)
         router.navigate({ to: "/", search: { from: "selector" } })
       } catch {
         setConnecting(null)
@@ -326,17 +310,12 @@ export function WorkspacesPage() {
     if (!removeTarget || isRemoving) return
     setIsRemoving(true)
     try {
-      const result = await rpc.workspaces.removeWorkspace(removeTarget.databasePath)
-      if (result.success) {
-        if (result.credentialKey) {
-          await deleteCredential(result.credentialKey)
-        }
+      const result = await unregisterWorkspace(removeTarget, "ui")
+      if (result.ok) {
         setWorkspaces((prev) => prev.filter((w) => w.id !== removeTarget.id))
-        const activeCookie = getWorkspaceCookie()
-        if (activeCookie === removeTarget.id) clearWorkspaceCookie()
-        if (getAnalyticsEnabled()) {
-          safeCapture("app_workspace_removed", { source: "ui" })
-        }
+        if (getWorkspaceCookie() === removeTarget.id) clearWorkspaceCookie()
+      } else {
+        toastError("Failed to remove workspace", { description: result.error })
       }
       setRemoveTarget(null)
     } finally {
@@ -432,7 +411,10 @@ export function WorkspacesPage() {
 
   return (
     <TooltipProvider>
-      <div className="h-dvh flex flex-col bg-background">
+      {/* h-full, not h-dvh: the dashboard renders inside the root shell's
+          flex row next to the workspace rail (routes/__root.tsx), and the
+          height chain is html/body/#root at 100% (index.css bb-s3gb). */}
+      <div className="h-full flex flex-col bg-background">
         {/* Header */}
         <div className="pt-6 pb-3 px-6 text-center">
           <div className="mb-2">

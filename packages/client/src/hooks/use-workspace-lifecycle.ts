@@ -3,20 +3,25 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import type { AppHealth } from "@/hooks/use-app-health"
 import type { BdLoadError } from "@/lib/bd-error"
-import { captureServerActionFailed, trackedAction } from "@/lib/capture-action-failed"
+import { captureServerActionFailed } from "@/lib/capture-action-failed"
 import { collectAllBeadsFromEpics, countAllBeads } from "@/lib/epic-tree-utils"
+import { getSessionEpics, setSessionEpics } from "@/lib/epics-session-cache"
 import { getAnalyticsEnabled, getReadState, initializeReadState } from "@/lib/local-storage"
 import { toastError } from "@/lib/notifications"
 import { safeCapture } from "@/lib/posthog-safe"
 import { rpc } from "@/lib/rpc"
-import { deleteCredential } from "@/lib/tauri-credentials"
 import type { Epic, ReadState, Workspace } from "@/lib/types"
 import {
   type BeadboxLoadEpicsEntry,
   type BeadboxLoadEpicsPhase,
   ensureBeadboxStamp,
 } from "@/lib/window-globals"
-import { getWorkspaceCookie, setWorkspaceCookie } from "@/lib/workspace-cookie"
+import { unregisterWorkspace } from "@/lib/workspace-actions"
+import {
+  getWorkspaceCookie,
+  setWorkspaceCookie,
+  subscribeWorkspaceCookie,
+} from "@/lib/workspace-cookie"
 
 // beadbox-jk7 / cascade-9 diagnostic: ring-buffer push for loadEpics lifecycle
 // transitions, capped at 32 entries. Lives next to the consumer so the trim
@@ -38,12 +43,10 @@ function recordLoadEpicsPhase(
   }
 }
 
-const getEpics = rpc.epics.getEpics
-const getWorkspaces = rpc.workspaces.getWorkspaces
-const removeWorkspace = rpc.workspaces.removeWorkspace
-const setActiveWorkspaceAction = rpc.workspaces.setActiveWorkspaceAction
-const getAvailableStatuses = rpc.beads.getAvailableStatuses
-const getCustomStatusList = rpc.beads.getCustomStatusList
+// Handlers are called through the `rpc` proxy at the callsite, never captured
+// at module load: `const f = rpc.ns.method` freezes whichever transport was
+// installed when this module was first evaluated, which pins the browser-dev
+// stub (and defeats the _setRpc test seam).
 
 // UX threshold for "taking longer than expected" feedback + app_workspace_load_timeout
 // telemetry. Paired with app_workspace_load_succeeded on success, this lets us measure
@@ -95,6 +98,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   // schedule a retry after the cooldown expires instead of silently dropping it.
   const pendingRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasExistingDataRef = useRef(false)
+  // databasePath the tree in `epics` was loaded for. Guards the session-cache
+  // mirror below: `epics` and `currentWorkspace` are two states that change on
+  // different commits during a switch.
+  const epicsDbPathRef = useRef<string | null>(null)
   // Per-attempt timer origin: reset each time loadEpics fires (including auto-retries).
   // Used by app_workspace_load_{succeeded,timeout}.elapsed_ms to measure THIS attempt.
   const loadStartTimeRef = useRef(0)
@@ -181,6 +188,72 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on mount with initial data; currentWorkspace is being set here
   }, [initialWorkspaces])
+
+  // Adopt in-place workspace switches driven by the workspace rail.
+  //
+  // The rail lives outside StartupGate and switches by writing the cookie.
+  // When the gate has already health-checked the target this session it
+  // skips its re-check (no remount, no "Starting up..." screen), so this
+  // listener is the only thing that notices. Refs keep it stable — it is
+  // registered once and reads the latest state.
+  const currentWorkspaceIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    currentWorkspaceIdRef.current = currentWorkspace?.id ?? null
+  }, [currentWorkspace?.id])
+  const workspacesRef = useRef<Workspace[]>(initialWorkspaces)
+  useEffect(() => {
+    workspacesRef.current = workspaces
+  }, [workspaces])
+
+  useEffect(
+    () =>
+      subscribeWorkspaceCookie(() => {
+        const cookieId = getWorkspaceCookie()
+        if (!cookieId || cookieId === currentWorkspaceIdRef.current) return
+        const target = workspacesRef.current.find((w) => w.id === cookieId)
+        // Unknown id: the gate is re-checking and will remount this hook
+        // with a registry list that contains it.
+        if (!target) return
+        workspaceSourceRef.current = "manual"
+        // Invalidate any in-flight load before the workspace changes: a
+        // getEpics for the previous workspace that resolves in the gap
+        // before loadEpics re-runs would otherwise pass its gen check and
+        // publish the wrong tree.
+        loadGenRef.current++
+        setLoadingWorkspaceId(target.id)
+        setCurrentWorkspace(target)
+        setHealthy()
+        // loadEpics only raises isLoading once its effect runs, one commit
+        // later; without this the render in between shows the previous
+        // workspace's tree under the new workspace's name.
+        setIsLoading(true)
+        // Paint the target workspace's last known tree straight away when we
+        // have one; loadEpics then refreshes in the background. Without this
+        // every switch drops back to the skeleton for the length of a bd +
+        // Dolt round trip. hasExistingDataRef gates that skeleton (see
+        // home-page's `isLoading && !hasExistingDataRef.current`).
+        const cached = getSessionEpics(target.databasePath)
+        epicsDbPathRef.current = target.databasePath ?? null
+        if (cached) {
+          setEpics(cached)
+          hasExistingDataRef.current = true
+        } else {
+          hasExistingDataRef.current = false
+        }
+      }),
+    [setHealthy],
+  )
+
+  // Mirror the rendered tree into the session cache, so a switch away and
+  // back paints the post-edit state rather than resurrecting beads that
+  // were closed, archived or deleted since the load. Guarded by the path
+  // the tree was loaded for: during a switch the state briefly still holds
+  // the previous workspace's tree, and storing that under the new key
+  // would turn a one-frame glitch into a persistent wrong-project paint.
+  useEffect(() => {
+    if (epicsDbPathRef.current !== currentWorkspace?.databasePath) return
+    setSessionEpics(currentWorkspace?.databasePath, epics)
+  }, [epics, currentWorkspace?.databasePath])
 
   // Fire app_workspace_opened when a workspace STARTS loading (once per workspace.id)
   // This fires at load start so app_issues_rendered (which fires at load end) has
@@ -314,7 +387,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   // Refresh workspace list on workspace change (picks up newly added workspaces)
   useEffect(() => {
     async function refreshWorkspaces() {
-      const ws = await getWorkspaces(currentWorkspace?.databasePath)
+      const ws = await rpc.workspaces.getWorkspaces(currentWorkspace?.databasePath)
       // Preserve the current workspace if it was resolved via cookie fallback
       // but isn't in the registry (unregistered workspace loaded via direct link).
       if (currentWorkspace && !ws.some((w) => w.id === currentWorkspace.id)) {
@@ -327,39 +400,6 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- currentWorkspace tracked via .id; full object reference would cause infinite loop
   }, [currentWorkspace?.id])
-
-  // Handle workspace change and persist to cookie + registry
-  const handleWorkspaceChange = useCallback(
-    async (workspace: Workspace) => {
-      if (getAnalyticsEnabled()) {
-        safeCapture("app_workspace_tab_clicked", {
-          workspace_id: workspace.id,
-          already_active: currentWorkspace?.id === workspace.id,
-          workspace_count: workspaces.length,
-        })
-      }
-      // No-op if clicking the already-active workspace (avoids stuck spinner)
-      if (workspace.id === currentWorkspace?.id) return
-      workspaceSourceRef.current = "manual"
-      setLoadingWorkspaceId(workspace.id)
-      setCurrentWorkspace(workspace)
-      setWorkspaceCookie(workspace.id)
-      // Persist active workspace to registry (server-side, survives cookie loss).
-      // Awaited so subsequent health checks read the correct activeWorkspace.
-      if (workspace.databasePath) {
-        try {
-          await setActiveWorkspaceAction(workspace.databasePath)
-        } catch {
-          // Registry write failed; cookie is set so proceed anyway
-        }
-      }
-      // Reset health on workspace switch (will be re-evaluated on next load)
-      setHealthy()
-      hasExistingDataRef.current = false
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- setHealthy is a stable setter; workspaces.length used for analytics only
-    },
-    [currentWorkspace?.id, workspaces.length],
-  )
 
   // Handle workspace removal (unregister from registry, not delete data)
   // If removing the active workspace, show confirmation first
@@ -378,32 +418,28 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
 
   const doRemoveWorkspace = useCallback(
     async (workspace: Workspace) => {
-      const { databasePath } = workspace
-      if (!databasePath || removingWorkspaceId) return
+      if (!workspace.databasePath || removingWorkspaceId) return
       setRemovingWorkspaceId(workspace.id)
       try {
-        const result = await trackedAction("removeWorkspace", () => removeWorkspace(databasePath))
-        if (result.success) {
-          if (result.credentialKey) {
-            await deleteCredential(result.credentialKey)
-          }
-          setWorkspaces((prev) => {
-            const remaining = prev.filter((w) => w.id !== workspace.id)
-            // If we removed the active workspace, switch to another or redirect
-            if (currentWorkspace && workspace.id === currentWorkspace.id) {
-              if (remaining.length > 0) {
-                setCurrentWorkspace(remaining[0])
-                setWorkspaceCookie(remaining[0].id)
-              } else {
-                router.push("/workspaces")
-              }
-            }
-            return remaining
-          })
-          toast.success(`Removed "${workspace.name}" from workspace list`)
-        } else {
+        const result = await unregisterWorkspace(workspace, "ui")
+        if (!result.ok) {
           toastError("Failed to remove workspace", { description: result.error })
+          return
         }
+        // Compute the survivors first: setWorkspaceCookie publishes
+        // synchronously, and doing that inside a setState updater would
+        // re-enter every cookie subscriber during the render phase.
+        const remaining = workspacesRef.current.filter((w) => w.id !== workspace.id)
+        setWorkspaces(remaining)
+        toast.success(`Removed "${workspace.name}" from workspace list`)
+        if (!currentWorkspace || workspace.id !== currentWorkspace.id) return
+        const next = remaining[0]
+        if (!next) {
+          router.push("/workspaces")
+          return
+        }
+        setCurrentWorkspace(next)
+        setWorkspaceCookie(next.id)
       } finally {
         setRemovingWorkspaceId(null)
         setRemoveConfirm(null)
@@ -420,8 +456,9 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
 
   // Success branch: persist epics, clear flock contention, hydrate read state.
   const handleEpicsSuccess = useCallback(
-    (result: { epics: Epic[] }) => {
+    (result: { epics: Epic[]; databasePath?: string }) => {
       setEpics(result.epics)
+      epicsDbPathRef.current = result.databasePath ?? null
       hasExistingDataRef.current = true
       setHealthy()
       // Clear flock contention state on success
@@ -543,7 +580,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     try {
       const dbPath = currentWorkspace?.databasePath
       const getEpicsStart = Date.now()
-      const result = await getEpics(dbPath)
+      const result = await rpc.epics.getEpics(dbPath)
       if (gen !== loadGenRef.current) {
         recordLoadEpicsPhase("stale", gen, dbPathForStamp, {
           epicsLength: result.success ? result.epics.length : undefined,
@@ -554,7 +591,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         recordLoadEpicsPhase("resolved", gen, dbPathForStamp, {
           epicsLength: result.epics.length,
         })
-        handleEpicsSuccess(result)
+        // Remember the tree so a switch back to this workspace paints
+        // instantly instead of flashing the skeleton.
+        setSessionEpics(dbPath, result.epics)
+        handleEpicsSuccess({ epics: result.epics, databasePath: dbPath })
       } else {
         recordLoadEpicsPhase("error", gen, dbPathForStamp, {
           errorMessage: result.bdLoadError.message,
@@ -673,10 +713,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     if (currentWorkspace) {
       loadEpics()
       // Fetch available statuses for this workspace
-      getAvailableStatuses(currentWorkspace.databasePath).then(setAvailableStatuses)
+      rpc.beads.getAvailableStatuses(currentWorkspace.databasePath).then(setAvailableStatuses)
       // beadbox-3qo: also fetch the ordered status.custom chain for the
       // workflow advancement button (pm/spec §4.3). Empty array = button hidden.
-      getCustomStatusList(currentWorkspace.databasePath).then(setCustomStatusChain)
+      rpc.beads.getCustomStatusList(currentWorkspace.databasePath).then(setCustomStatusChain)
       // Expose db path for console commands
       const beadbox = ensureBeadboxStamp()
       if (beadbox) beadbox.db = currentWorkspace.databasePath
@@ -700,8 +740,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const refreshAvailableStatuses = useCallback(async () => {
     if (!currentWorkspace) return
     const [next, chain] = await Promise.all([
-      getAvailableStatuses(currentWorkspace.databasePath),
-      getCustomStatusList(currentWorkspace.databasePath),
+      rpc.beads.getAvailableStatuses(currentWorkspace.databasePath),
+      rpc.beads.getCustomStatusList(currentWorkspace.databasePath),
     ])
     setAvailableStatuses(next)
     setCustomStatusChain(chain)
@@ -754,7 +794,6 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     loadEpics,
     handleManualRetry,
     handleRefresh,
-    handleWorkspaceChange,
     handleRemoveWorkspace,
     doRemoveWorkspace,
   }

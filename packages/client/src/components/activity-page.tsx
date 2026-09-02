@@ -1,20 +1,16 @@
 import { useNavigate } from "@tanstack/react-router"
 import { X } from "lucide-react"
 import posthog from "posthog-js"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { isFeatureEnabled } from "@/lib/feature-flag"
 import { safeCapture } from "@/lib/posthog-safe"
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
+import { useActiveWorkspace } from "../hooks/use-active-workspace"
 import { useAppHealth } from "../hooks/use-app-health"
 import { useCrossFilter } from "../hooks/use-cross-filter"
 import { useDevConsole } from "../hooks/use-dev-console"
 import { useDevConsoleTaps } from "../hooks/use-dev-console-taps"
 import { useUpdateChecker } from "../hooks/use-update-checker"
-import {
-  deriveAgentStates,
-  derivePipelineStages,
-  toCanonicalStage,
-} from "../lib/activity-utils"
-import { composePipelineChain } from "../lib/status-chain"
+import { deriveAgentStates, derivePipelineStages, toCanonicalStage } from "../lib/activity-utils"
 import {
   getAnalyticsEnabled,
   getThemePreference,
@@ -32,9 +28,10 @@ import {
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
+import { composePipelineChain } from "../lib/status-chain"
 import { useSubscriptionChangeSignal } from "../lib/subscribe"
 import type { ActivityEvent, PipelineStage, Workspace } from "../lib/types"
-import { getWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
+import { setWorkspaceCookie } from "../lib/workspace-cookie"
 import { ActivityFeed } from "./activity-feed"
 import { AgentStrip } from "./agent-strip"
 import { DevConsole } from "./dev-console"
@@ -54,7 +51,9 @@ function ActivityViewer() {
   // (the BdErrorBanner was removed). AppHealth setDegraded/setHealthy below
   // still drives the toast/badge surface for real bd failures.
   const [workspaces] = useState<Workspace[]>(initialWorkspaces)
-  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null)
+  // Cookie-resolved active workspace: the rail can switch projects without
+  // remounting this route, so the resolution has to be subscribed.
+  const [currentWorkspace, setCurrentWorkspace] = useActiveWorkspace(workspaces)
   const [loadingWorkspaceId, setLoadingWorkspaceId] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   // Manual refresh signal (handleRefresh below) + subscription-driven signal
@@ -100,10 +99,7 @@ function ActivityViewer() {
   // can re-fetch on subscription events without depending on the
   // home-page lifecycle hook.
   const [customStatusChain, setCustomStatusChain] = useState<string[]>([])
-  const pipelineChain = useMemo(
-    () => composePipelineChain(customStatusChain),
-    [customStatusChain],
-  )
+  const pipelineChain = useMemo(() => composePipelineChain(customStatusChain), [customStatusChain])
 
   // Settings and app-level state
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -226,13 +222,6 @@ function ActivityViewer() {
     setUpdateCheckFrequencyState(frequency)
     setUpdateCheckFrequency(frequency)
   }, [])
-
-  // Initialize current workspace from cookie
-  useEffect(() => {
-    const savedId = getWorkspaceCookie()
-    const found = workspaces.find((w) => w.id === savedId)
-    setCurrentWorkspace(found || workspaces[0] || null)
-  }, [workspaces])
 
   // Extract primitives for React Compiler compatibility
   const currentWorkspaceId = currentWorkspace?.id

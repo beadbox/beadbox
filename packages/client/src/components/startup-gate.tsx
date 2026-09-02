@@ -34,6 +34,7 @@ import {
   getWorkspaceCookie,
   isValidWorkspaceCookie,
   setWorkspaceCookie,
+  subscribeWorkspaceCookie,
 } from "../lib/workspace-cookie"
 import { CopyableCommand } from "./copyable-command"
 import { Button } from "./ui/button"
@@ -95,6 +96,8 @@ interface StartupGateProps {
   children: React.ReactNode
 }
 
+type StartupHealthResult = Awaited<ReturnType<typeof rpc.health.runStartupHealth>>
+
 export function StartupGate({ children }: StartupGateProps) {
   const router = useRouter()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
@@ -102,6 +105,11 @@ export function StartupGate({ children }: StartupGateProps) {
 
   // Track which workspace ID was checked (for removal on stale workspace errors)
   const [checkedWorkspaceId, setCheckedWorkspaceId] = useState<string | undefined>()
+
+  // Forces a re-entry of the health-check effect when the phase alone cannot
+  // express it: a switch that lands mid-check ends with the machine back in
+  // "checking", i.e. the same phase the effect already ran for.
+  const [checkNonce, setCheckNonce] = useState(0)
 
   // Fallback for no_registry redirect: if router.push doesn't navigate within 3s,
   // show a clickable link so the user isn't stuck on an infinite spinner.
@@ -111,6 +119,17 @@ export function StartupGate({ children }: StartupGateProps) {
   // Used to detect workspace switches (e.g., /workspaces -> /) without
   // re-checking on every route change.
   const lastCheckedCookieRef = useRef<string | null>(null)
+
+  // Session cache of workspaces whose startup health check already passed.
+  // Switching back to one of them skips the check: the machine stays
+  // "healthy", children stay mounted, and no full-screen "Starting up..."
+  // flashes between projects. Only an app restart clears it — and a
+  // workspace that breaks after being verified still surfaces through the
+  // page-level load error path (AppHealth / WorkspaceErrorScreen), which is
+  // where every mid-session bd failure already lands.
+  const verifiedWorkspacesRef = useRef<Set<string>>(new Set())
+  // Latest registry list, readable from the cookie listener's closure.
+  const workspacesRef = useRef<Workspace[]>([])
 
   // Tool version info (fetched after healthy)
   const [serverPlatform, setServerPlatform] = useState<string>("darwin")
@@ -144,6 +163,38 @@ export function StartupGate({ children }: StartupGateProps) {
     if (state.phase !== "checking") return
     let cancelled = false
 
+    // Success half of the check, split out to keep `check` readable: record
+    // what was verified, publish the versions, and hand the machine over.
+    function acceptHealthy(result: StartupHealthResult, cookieId: string | null) {
+      // Sync cookie if needed
+      if (result.activeWorkspaceId && result.activeWorkspaceId !== cookieId) {
+        setWorkspaceCookie(result.activeWorkspaceId)
+      }
+
+      // Record the workspace this check actually covered — NOT the live
+      // cookie. The rail is mounted outside this gate, so the user can
+      // switch projects while "Starting up..." is on screen; reading the
+      // cookie here would mark the *new* workspace verified on the strength
+      // of the old one's check and then skip its health check for the rest
+      // of the session.
+      const checkedId = result.activeWorkspaceId ?? cookieId ?? null
+      lastCheckedCookieRef.current = checkedId
+      if (checkedId) verifiedWorkspacesRef.current.add(checkedId)
+
+      // Use version info from health check (avoids 2 redundant process spawns)
+      if (result.bdVersion) setBdVersion(result.bdVersion)
+      if (result.bdPath) setBdPath(result.bdPath)
+
+      dispatch({ type: "HEALTH_OK", workspaces: result.workspaces })
+      // A switch that landed mid-check needs its own check: HEALTH_OK then
+      // WORKSPACE_CHANGED leaves the machine in "checking" again, and the
+      // nonce is what makes the effect notice.
+      if (getWorkspaceCookie() !== checkedId) {
+        dispatch({ type: "WORKSPACE_CHANGED" })
+        setCheckNonce((nonce) => nonce + 1)
+      }
+    }
+
     async function check() {
       const cookieId = getWorkspaceCookie()
       const validCookie = cookieId && isValidWorkspaceCookie(cookieId) ? cookieId : undefined
@@ -164,30 +215,20 @@ export function StartupGate({ children }: StartupGateProps) {
       }
 
       if (result.healthCheck && !result.healthCheck.ok) {
+        // A previously-verified workspace that now fails loses its pass.
+        if (cookieId) verifiedWorkspacesRef.current.delete(cookieId)
         dispatch({ type: "HEALTH_FAIL", error: result.healthCheck.error })
         return
       }
 
-      // Sync cookie if needed
-      if (result.activeWorkspaceId && result.activeWorkspaceId !== cookieId) {
-        setWorkspaceCookie(result.activeWorkspaceId)
-      }
-
-      // Record the cookie value used for this check so we can detect changes later
-      lastCheckedCookieRef.current = getWorkspaceCookie()
-
-      // Use version info from health check (avoids 2 redundant process spawns)
-      if (result.bdVersion) setBdVersion(result.bdVersion)
-      if (result.bdPath) setBdPath(result.bdPath)
-
-      dispatch({ type: "HEALTH_OK", workspaces: result.workspaces })
+      acceptHealthy(result, cookieId)
     }
 
     check()
     return () => {
       cancelled = true
     }
-  }, [state.phase])
+  }, [state.phase, checkNonce])
 
   // Redirect to /workspaces when no registry
   useEffect(() => {
@@ -205,9 +246,26 @@ export function StartupGate({ children }: StartupGateProps) {
     window.dispatchEvent(new Event("startup-gate-ready"))
   }, [state.phase])
 
+  // Keep the registry list readable from the cookie listener below.
+  useEffect(() => {
+    workspacesRef.current = state.workspaces
+  }, [state.workspaces])
+
   // Mid-session health: driven by WebSocket signals from child pages
   // (home-page, activity-page route WS / polling state into the
   // AppHealth status surface). No polling needed here.
+
+  // Returns true when the cookie now points at a workspace this session
+  // already health-checked (and which is still in the registry list the
+  // gate handed to the pages). The switch is then adopted silently: no
+  // WORKSPACE_CHANGED, no re-check, no unmounting of children — the pages
+  // pick the new workspace up from the same cookie event.
+  const adoptCachedSwitch = useCallback((cookie: string | null): boolean => {
+    if (!cookie || !verifiedWorkspacesRef.current.has(cookie)) return false
+    if (!workspacesRef.current.some((w) => w.id === cookie)) return false
+    lastCheckedCookieRef.current = cookie
+    return true
+  }, [])
 
   // Detect workspace cookie changes on route navigation.
   // Two scenarios:
@@ -222,6 +280,7 @@ export function StartupGate({ children }: StartupGateProps) {
     if (state.phase === "healthy") {
       const currentCookie = getWorkspaceCookie()
       if (lastCheckedCookieRef.current !== null && currentCookie !== lastCheckedCookieRef.current) {
+        if (adoptCachedSwitch(currentCookie)) return
         dispatch({ type: "WORKSPACE_CHANGED" })
       }
       return
@@ -235,7 +294,33 @@ export function StartupGate({ children }: StartupGateProps) {
         dispatch({ type: "WORKSPACE_CHANGED" })
       }
     }
-  }, [state.phase, pathname])
+  }, [state.phase, pathname, adoptCachedSwitch])
+
+  // Workspace-rail switches happen without a route change: the rail writes
+  // the cookie and nothing else. The effect above only samples the cookie on
+  // [state.phase, pathname] transitions, so subscribe to the cookie itself
+  // and re-run the health check for the newly-active workspace.
+  //
+  // Loop safety: the health check's own activeWorkspaceId sync (setWorkspaceCookie
+  // above) fires this listener while phase === "checking", and the machine
+  // ignores WORKSPACE_CHANGED in that phase. The `error` phase only accepts
+  // RETRY — without that branch a user could never switch away from a
+  // workspace whose health check fails.
+  const phaseRef = useRef(state.phase)
+  useEffect(() => {
+    phaseRef.current = state.phase
+  }, [state.phase])
+
+  useEffect(
+    () =>
+      subscribeWorkspaceCookie(() => {
+        const cookie = getWorkspaceCookie()
+        if (cookie === lastCheckedCookieRef.current) return
+        if (phaseRef.current === "healthy" && adoptCachedSwitch(cookie)) return
+        dispatch({ type: phaseRef.current === "error" ? "RETRY" : "WORKSPACE_CHANGED" })
+      }),
+    [adoptCachedSwitch],
+  )
 
   const refreshWorkspaces = useCallback(() => {
     dispatch({ type: "WORKSPACE_CHANGED" })
