@@ -15,9 +15,9 @@
 // parity runner against a real workspace.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import {
   addWorkspaceByPath,
@@ -27,7 +27,7 @@ import {
   removeWorkspace,
   setActiveWorkspaceAction,
 } from "../handlers/workspaces"
-import { readRegistry } from "../lib/workspace-registry"
+import { readRegistry, updateWorkspaceLocal } from "../lib/workspace-registry"
 
 const ORIGINAL_REGISTRY_PATH = process.env.BEADBOX_REGISTRY_PATH
 const ORIGINAL_BEADS_REGISTRY_PATH = process.env.BEADS_REGISTRY_PATH
@@ -288,5 +288,93 @@ describe("getLocalWorkspaceOverlaps", () => {
     await writeRegistry({ version: 2, activeWorkspace: null, workspaces: [] })
     const result = await getLocalWorkspaceOverlaps("127.0.0.1", 3308, ["beads_a", "beads_b"])
     expect(result).toEqual({})
+  })
+})
+
+describe("registry write serialization", () => {
+  async function seedOne(): Promise<string> {
+    const beads = await makeBeadsDir("concurrent")
+    await writeRegistry({
+      version: 2,
+      activeWorkspace: "w1",
+      workspaces: [
+        {
+          id: "w1",
+          name: "Original",
+          addedAt: "2026-01-01",
+          local: { path: beads },
+          server: null,
+          mode: "embedded",
+        },
+      ],
+    })
+    return beads
+  }
+
+  test("concurrent mutations all land and leave valid JSON", async () => {
+    const beads = await seedOne()
+    const second = await makeBeadsDir("concurrent-second")
+
+    // Each mutation is a read-modify-write of registry.json. Interleaved,
+    // one update was lost and the truncating write left unparseable bytes.
+    await Promise.all([
+      addWorkspaceByPath(dirname(second)),
+      setActiveWorkspaceAction(beads),
+      updateWorkspaceLocal("w1", beads),
+    ])
+
+    const raw = await readFile(sandboxRegistry, "utf-8")
+    expect(() => JSON.parse(raw)).not.toThrow()
+
+    const reg = await readRegistry()
+    expect(reg.workspaces).toHaveLength(2)
+    expect(reg.workspaces.map((w) => w.name)).toContain("Original")
+    expect(reg.activeWorkspace).toBe("w1")
+  })
+
+  test("a mutation that changes nothing does not rewrite the file", async () => {
+    await seedOne()
+    const before = await readFile(sandboxRegistry, "utf-8")
+
+    await updateWorkspaceLocal("does-not-exist", "/tmp/nope/.beads")
+
+    expect(await readFile(sandboxRegistry, "utf-8")).toBe(before)
+  })
+
+  test("an unparseable registry is quarantined instead of silently emptied", async () => {
+    await writeFile(sandboxRegistry, '{"version": 2, "workspa')
+
+    const reg = await readRegistry()
+    expect(reg.workspaces).toEqual([])
+
+    const files = await readdir(sandboxDir)
+    expect(files.some((f) => f.startsWith("registry.json.corrupt-"))).toBe(true)
+    expect(files).not.toContain("registry.json")
+  })
+
+  test("a structurally odd but valid-JSON entry is skipped, not quarantined", async () => {
+    await writeFile(
+      sandboxRegistry,
+      JSON.stringify({
+        version: 2,
+        activeWorkspace: null,
+        workspaces: [
+          { id: "bad", name: "bad", addedAt: "2026-01-01", local: {}, server: null },
+          {
+            id: "good",
+            name: "good",
+            addedAt: "2026-01-01",
+            local: { path: "/tmp/good/.beads" },
+            server: null,
+            mode: "embedded",
+          },
+        ],
+      }),
+    )
+
+    const reg = await readRegistry()
+    expect(reg.workspaces.map((w) => w.id)).toEqual(["good"])
+    const files = await readdir(sandboxDir)
+    expect(files.some((f) => f.startsWith("registry.json.corrupt-"))).toBe(false)
   })
 })

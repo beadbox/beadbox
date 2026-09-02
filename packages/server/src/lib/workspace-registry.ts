@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto"
-import { mkdir, readFile, writeFile } from "fs/promises"
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "fs/promises"
 import { homedir } from "os"
 import { basename, dirname, join, resolve } from "path"
 
@@ -179,30 +179,74 @@ function emptyRegistry(): WorkspaceRegistry {
 export async function readRegistry(): Promise<WorkspaceRegistry> {
   const registryPath = getBeadboxRegistryPath()
 
+  let content: string | null = null
   try {
-    const content = await readFile(registryPath, "utf-8")
-    const parsed = JSON.parse(content)
-    if (parsed.version === 2) {
-      return deduplicateEntries(parsed as WorkspaceRegistry)
+    content = await readFile(registryPath, "utf-8")
+  } catch (error) {
+    // Only "the file isn't there" means first run. Every other failure
+    // (EACCES, EISDIR, EIO) must propagate: falling through hands the caller
+    // an empty registry, and mutateRegistry would then persist that emptiness
+    // over a file we merely failed to read — the rename makes it permanent.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+
+  if (content !== null) {
+    let parsed: unknown = null
+    try {
+      parsed = JSON.parse(content)
+    } catch (error) {
+      // The file exists but is not JSON. Returning an empty registry here
+      // silently drops every workspace the user registered and the next write
+      // makes that permanent, so move the bytes aside and say so loudly.
+      const reason = error instanceof Error ? error.message : String(error)
+      await quarantineUnreadableRegistry(registryPath, `not valid JSON: ${reason}`)
     }
-    // v1 registry (no version field): migrate
-    const v1: V1Registry = {
-      workspaces: Array.isArray(parsed.workspaces) ? parsed.workspaces : [],
-      activeWorkspace: typeof parsed.activeWorkspace === "string" ? parsed.activeWorkspace : null,
+
+    if (parsed !== null && (typeof parsed !== "object" || Array.isArray(parsed))) {
+      await quarantineUnreadableRegistry(registryPath, "root is not a JSON object")
+      parsed = null
     }
-    return deduplicateEntries(migrateV1ToV2(v1))
+
+    // Migration and dedup run OUTSIDE the quarantine block on purpose: a
+    // registry that parses fine but holds one odd entry is a bug to survive,
+    // not a reason to rename the user's whole file away.
+    if (parsed !== null) {
+      const record = parsed as Partial<WorkspaceRegistry> & Partial<V1Registry>
+      if (record.version === 2) {
+        return deduplicateEntries(parsed as WorkspaceRegistry)
+      }
+      // v1 registry (no version field): migrate
+      const v1: V1Registry = {
+        workspaces: Array.isArray(record.workspaces)
+          ? (record.workspaces as V1RegistryEntry[])
+          : [],
+        activeWorkspace: typeof record.activeWorkspace === "string" ? record.activeWorkspace : null,
+      }
+      return deduplicateEntries(migrateV1ToV2(v1))
+    }
+  }
+
+  // No registry (or an unusable one): attempt migration from legacy registry
+  const legacy = await migrateFromLegacyRegistry()
+  if (legacy.workspaces.length > 0) {
+    return deduplicateEntries(
+      migrateV1ToV2({
+        workspaces: legacy.workspaces,
+        activeWorkspace: legacy.activeWorkspace,
+      }),
+    )
+  }
+  return emptyRegistry()
+}
+
+async function quarantineUnreadableRegistry(registryPath: string, reason: string): Promise<void> {
+  try {
+    await stat(registryPath)
+    const quarantined = `${registryPath}.corrupt-${Date.now()}`
+    await rename(registryPath, quarantined)
+    console.error(`[beadbox-registry] registry is unusable (${reason}); moved to ${quarantined}`)
   } catch {
-    // File doesn't exist or invalid JSON - attempt migration from legacy registry
-    const legacy = await migrateFromLegacyRegistry()
-    if (legacy.workspaces.length > 0) {
-      return deduplicateEntries(
-        migrateV1ToV2({
-          workspaces: legacy.workspaces,
-          activeWorkspace: legacy.activeWorkspace,
-        }),
-      )
-    }
-    return emptyRegistry()
+    console.error(`[beadbox-registry] registry is unreadable (${reason})`)
   }
 }
 
@@ -213,12 +257,19 @@ export async function readRegistry(): Promise<WorkspaceRegistry> {
  * Keeps the first entry for each identity.
  */
 function deduplicateEntries(registry: WorkspaceRegistry): WorkspaceRegistry {
+  // Runs on whatever JSON.parse produced, so nothing here may throw on an odd
+  // shape: a hand-edited or half-migrated registry must lose the bad entry,
+  // not send the caller down the "corrupt file" path.
+  if (!Array.isArray(registry.workspaces)) registry.workspaces = []
+
   const seenLocalPaths = new Set<string>()
   const seenServerKeys = new Set<string>()
   const before = registry.workspaces.length
 
   registry.workspaces = registry.workspaces.filter((entry) => {
+    if (!entry || typeof entry !== "object") return false
     if (entry.local) {
+      if (typeof entry.local.path !== "string") return false
       const key = resolve(entry.local.path)
       if (seenLocalPaths.has(key)) return false
       seenLocalPaths.add(key)
@@ -240,13 +291,83 @@ function deduplicateEntries(registry: WorkspaceRegistry): WorkspaceRegistry {
   return registry
 }
 
-/**
- * Write the registry atomically (mkdir -p the parent dir first).
- */
-export async function writeRegistry(registry: WorkspaceRegistry): Promise<void> {
+// Every registry mutation is a read-modify-write of one small JSON file, and
+// the sidecar handles rpc calls concurrently: two overlapping mutations (e.g.
+// two overlapping mutations of the same entry) used to interleave,
+// losing one update and — because writeFile truncates in place — leaving a
+// half-written file on disk that no longer parses. Both mutations now run
+// under this process-wide queue, and the bytes land via tmp-file + rename so
+// a reader never observes a partial registry.
+let registryQueue: Promise<unknown> = Promise.resolve()
+
+function serializeRegistryTask<T>(task: () => Promise<T>): Promise<T> {
+  const run = registryQueue.then(task, task)
+  registryQueue = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+async function writeRegistryFile(registry: WorkspaceRegistry): Promise<void> {
   const registryPath = getBeadboxRegistryPath()
   await mkdir(dirname(registryPath), { recursive: true })
-  await writeFile(registryPath, JSON.stringify(registry, null, 2) + "\n")
+  // Unguessable name + "wx" so the write cannot land on a file or symlink
+  // someone else planted at a predictable path; 0600 because the registry
+  // lists every project directory on the machine.
+  const tmpPath = `${registryPath}.${randomUUID()}.tmp`
+  try {
+    await writeFile(tmpPath, JSON.stringify(registry, null, 2) + "\n", {
+      flag: "wx",
+      mode: 0o600,
+    })
+    await rename(tmpPath, registryPath)
+  } catch (error) {
+    // A failed write must not leave a stray tmp file next to the registry.
+    await unlink(tmpPath).catch(() => {})
+    throw error
+  }
+}
+
+/**
+ * Write the registry atomically (mkdir -p the parent dir first).
+ * Serialized against every other registry write in this process.
+ */
+export async function writeRegistry(registry: WorkspaceRegistry): Promise<void> {
+  await serializeRegistryTask(() => writeRegistryFile(registry))
+}
+
+/**
+ * Read-modify-write the registry under the process-wide registry lock.
+ * `mutate` sees a registry nobody else is writing; its return value is
+ * passed through to the caller once the new contents are on disk.
+ *
+ * MUST be used by every mutation instead of readRegistry() + writeRegistry():
+ * that pair leaves a window in which a concurrent mutation is lost.
+ *
+ * `mutate` MUST NOT call another exported mutator (addWorkspace,
+ * setActiveWorkspace, removeWorkspaceFromRegistry, ...): the queue is a single
+ * non-reentrant chain, so a nested task waits for the task that is already
+ * holding it and both hang forever.
+ *
+ * The queue is per-process. A second sidecar process writing the same file is
+ * not serialized against this one; the skip-if-unchanged below and the
+ * tmp-file + rename keep that case from corrupting the file or reverting an
+ * untouched field, but this is not a cross-process lock.
+ */
+export async function mutateRegistry<T>(
+  mutate: (registry: WorkspaceRegistry) => T | Promise<T>,
+): Promise<T> {
+  return serializeRegistryTask(async () => {
+    const registry = await readRegistry()
+    const before = JSON.stringify(registry)
+    const result = await mutate(registry)
+    // Skip the write when the mutator changed nothing (unknown workspace id,
+    // empty patch, remove of an absent entry). Rewriting the whole file for a
+    // no-op would clobber whatever another process wrote since our read.
+    if (JSON.stringify(registry) !== before) await writeRegistryFile(registry)
+    return result
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -294,25 +415,25 @@ function migrateV1ToV2(v1: V1Registry): WorkspaceRegistry {
  * Generates a UUID for the new entry. Returns the UUID (existing or new).
  */
 export async function addWorkspace(databasePath: string, name: string): Promise<string> {
-  const registry = await readRegistry()
   const normalizedPath = resolve(databasePath)
-  const existing = registry.workspaces.find(
-    (w) => w.local !== null && resolve(w.local.path) === normalizedPath,
-  )
-  if (existing) return existing.id
+  return mutateRegistry((registry) => {
+    const existing = registry.workspaces.find(
+      (w) => w.local !== null && resolve(w.local.path) === normalizedPath,
+    )
+    if (existing) return existing.id
 
-  const id = generateWorkspaceId()
-  registry.workspaces.push({
-    id,
-    name,
-    addedAt: new Date().toISOString(),
-    local: { path: normalizedPath },
-    server: null,
-    mode: "embedded",
+    const id = generateWorkspaceId()
+    registry.workspaces.push({
+      id,
+      name,
+      addedAt: new Date().toISOString(),
+      local: { path: normalizedPath },
+      server: null,
+      mode: "embedded",
+    })
+    console.log(`[beadbox-registry] added workspace: ${name} (${normalizedPath})`)
+    return id
   })
-  await writeRegistry(registry)
-  console.log(`[beadbox-registry] added workspace: ${name} (${normalizedPath})`)
-  return id
 }
 
 /**
@@ -324,46 +445,43 @@ export async function addServerWorkspaceEntry(
   name: string,
   server: ServerConnection,
 ): Promise<string> {
-  const registry = await readRegistry()
-
-  // Check for existing entry with same server identity
-  const existingIdx = registry.workspaces.findIndex(
-    (w) =>
-      w.server &&
-      w.server.host === server.host &&
-      w.server.port === server.port &&
-      w.server.database === server.database,
-  )
-
   const credentialKey = `${server.host}:${server.port}/${server.database}/${server.user}`
-
-  if (existingIdx >= 0) {
-    // Update server block in place
-    registry.workspaces[existingIdx].server = server
-    registry.workspaces[existingIdx].name = name
-    registry.workspaces[existingIdx].credentialKey = credentialKey
-    await writeRegistry(registry)
-    console.log(
-      `[beadbox-registry] updated server workspace: ${name} (${server.host}:${server.port}/${server.database})`,
+  return mutateRegistry((registry) => {
+    // Check for existing entry with same server identity
+    const existing = registry.workspaces.find(
+      (w) =>
+        w.server &&
+        w.server.host === server.host &&
+        w.server.port === server.port &&
+        w.server.database === server.database,
     )
-    return registry.workspaces[existingIdx].id
-  }
 
-  const id = generateWorkspaceId()
-  registry.workspaces.push({
-    id,
-    name,
-    addedAt: new Date().toISOString(),
-    local: null,
-    server,
-    mode: "server",
-    credentialKey,
+    if (existing) {
+      // Update server block in place
+      existing.server = server
+      existing.name = name
+      existing.credentialKey = credentialKey
+      console.log(
+        `[beadbox-registry] updated server workspace: ${name} (${server.host}:${server.port}/${server.database})`,
+      )
+      return existing.id
+    }
+
+    const id = generateWorkspaceId()
+    registry.workspaces.push({
+      id,
+      name,
+      addedAt: new Date().toISOString(),
+      local: null,
+      server,
+      mode: "server",
+      credentialKey,
+    })
+    console.log(
+      `[beadbox-registry] added server workspace: ${name} (${server.host}:${server.port}/${server.database})`,
+    )
+    return id
   })
-  await writeRegistry(registry)
-  console.log(
-    `[beadbox-registry] added server workspace: ${name} (${server.host}:${server.port}/${server.database})`,
-  )
-  return id
 }
 
 /**
@@ -377,42 +495,41 @@ export async function replaceWorkspace(
   name: string,
   server: ServerConnection,
 ): Promise<string | null> {
-  const registry = await readRegistry()
-  const oldIdx = registry.workspaces.findIndex((w) => w.id === oldId)
-  if (oldIdx < 0) return null
+  return mutateRegistry((registry) => {
+    const oldIdx = registry.workspaces.findIndex((w) => w.id === oldId)
+    if (oldIdx < 0) return null
 
-  const newId = generateWorkspaceId()
-  const wasActive = registry.activeWorkspace === oldId
+    const newId = generateWorkspaceId()
+    const wasActive = registry.activeWorkspace === oldId
 
-  // Remove old entry, insert new server entry at same position
-  registry.workspaces.splice(oldIdx, 1, {
-    id: newId,
-    name,
-    addedAt: new Date().toISOString(),
-    local: null,
-    server,
-    mode: "server",
-    credentialKey: `${server.host}:${server.port}/${server.database}/${server.user}`,
+    // Remove old entry, insert new server entry at same position
+    registry.workspaces.splice(oldIdx, 1, {
+      id: newId,
+      name,
+      addedAt: new Date().toISOString(),
+      local: null,
+      server,
+      mode: "server",
+      credentialKey: `${server.host}:${server.port}/${server.database}/${server.user}`,
+    })
+
+    if (wasActive) registry.activeWorkspace = newId
+
+    console.log(
+      `[beadbox-registry] replaced workspace ${oldId} with server entry: ${name} (${server.host}:${server.port}/${server.database})`,
+    )
+    return newId
   })
-
-  if (wasActive) registry.activeWorkspace = newId
-
-  await writeRegistry(registry)
-  console.log(
-    `[beadbox-registry] replaced workspace ${oldId} with server entry: ${name} (${server.host}:${server.port}/${server.database})`,
-  )
-  return newId
 }
 
 /**
  * Update a workspace's local path (e.g., after creating a scaffold for a server workspace).
  */
 export async function updateWorkspaceLocal(workspaceId: string, localPath: string): Promise<void> {
-  const registry = await readRegistry()
-  const entry = registry.workspaces.find((w) => w.id === workspaceId)
-  if (!entry) return
-  entry.local = { path: localPath }
-  await writeRegistry(registry)
+  await mutateRegistry((registry) => {
+    const entry = registry.workspaces.find((w) => w.id === workspaceId)
+    if (entry) entry.local = { path: localPath }
+  })
 }
 
 /**
@@ -420,20 +537,20 @@ export async function updateWorkspaceLocal(workspaceId: string, localPath: strin
  * Returns true if found and removed, false if not found.
  */
 export async function removeWorkspaceFromRegistry(workspaceId: string): Promise<boolean> {
-  const registry = await readRegistry()
-  const before = registry.workspaces.length
-  registry.workspaces = registry.workspaces.filter((w) => w.id !== workspaceId)
+  return mutateRegistry((registry) => {
+    const before = registry.workspaces.length
+    registry.workspaces = registry.workspaces.filter((w) => w.id !== workspaceId)
 
-  if (registry.workspaces.length === before) return false
+    if (registry.workspaces.length === before) return false
 
-  // If the removed workspace was active, clear it
-  if (registry.activeWorkspace === workspaceId) {
-    registry.activeWorkspace = null
-  }
+    // If the removed workspace was active, clear it
+    if (registry.activeWorkspace === workspaceId) {
+      registry.activeWorkspace = null
+    }
 
-  await writeRegistry(registry)
-  console.log(`[beadbox-registry] removed workspace: ${workspaceId}`)
-  return true
+    console.log(`[beadbox-registry] removed workspace: ${workspaceId}`)
+    return true
+  })
 }
 
 /**
@@ -445,21 +562,21 @@ export async function updateWorkspaceServer(
   workspaceId: string,
   server: ServerConnection,
 ): Promise<void> {
-  const registry = await readRegistry()
-  const entry = registry.workspaces.find((w) => w.id === workspaceId)
-  if (!entry) return
-  entry.server = server
-  entry.mode = "server"
-  await writeRegistry(registry)
+  await mutateRegistry((registry) => {
+    const entry = registry.workspaces.find((w) => w.id === workspaceId)
+    if (!entry) return
+    entry.server = server
+    entry.mode = "server"
+  })
 }
 
 /**
  * Set the active workspace in the registry by UUID.
  */
 export async function setActiveWorkspace(workspaceId: string): Promise<void> {
-  const registry = await readRegistry()
-  registry.activeWorkspace = workspaceId
-  await writeRegistry(registry)
+  await mutateRegistry((registry) => {
+    registry.activeWorkspace = workspaceId
+  })
 }
 
 /**
