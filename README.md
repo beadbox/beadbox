@@ -6,6 +6,8 @@ Beadbox gives `bd` users a visual interface for the things a terminal can't show
 
 ![Beadbox screenshot](docs/screenshot.png)
 
+![Switching projects and editing a workspace tab](docs/rail-demo.gif)
+
 ## Features
 
 - **Epic tree** — hierarchical view of epics and child beads with status, priority, and progress at a glance
