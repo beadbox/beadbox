@@ -27,6 +27,7 @@ import {
   setWorkspaceCookie,
 } from "../lib/workspace-cookie"
 import { subscribeWorkspaceLabels, type WorkspaceLabelChange } from "../lib/workspace-labels"
+import { publishWorkspaceRegistryChange } from "../lib/workspace-registry-events"
 
 const alpha: WorkspaceCard = {
   id: "id-alpha",
@@ -247,6 +248,25 @@ describe("useWorkspaceRail", () => {
     })
 
     expect(seen.current?.workspaces).toHaveLength(2)
+  })
+
+  test("re-reads the registry when another surface announces a membership change", async () => {
+    // The rail is mounted outside the dashboard, so an add performed there
+    // reaches it only through this announcement. Without it the rail kept a
+    // stale list until the next bd subscription bump.
+    const registry = [alpha]
+    const { mocks, seen } = await railAt("/", registry)
+    expect(seen.current?.workspaces.map((w) => w.id)).toEqual([alpha.id])
+
+    registry.push(beta)
+    await act(async () => {
+      publishWorkspaceRegistryChange()
+    })
+
+    await waitFor(() => {
+      expect(seen.current?.workspaces.map((w) => w.id)).toEqual([alpha.id, beta.id])
+    })
+    expect(mocks.getRegisteredWorkspacesForSelector).toHaveBeenCalledTimes(2)
   })
 
   test("relabel writes the registry, patches the tab and publishes the label", async () => {

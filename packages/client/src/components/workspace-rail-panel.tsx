@@ -45,7 +45,6 @@ function WorkspaceRailShell() {
     collapsed,
     dashboardActive,
     switchingWorkspaceId,
-    refresh,
     selectWorkspace,
     removeWorkspace,
     relabelWorkspace,
@@ -61,20 +60,21 @@ function WorkspaceRailShell() {
 
   const isTauri = isTauriRuntime()
 
-  const handleWorkspacesAdded = useCallback(
-    (added: WorkspaceCard[]) => {
-      if (getAnalyticsEnabled()) {
-        for (const ws of added) {
-          safeCapture("app_workspace_added", {
-            method: ws.mode === "server" ? "server" : "local",
-            success: true,
-          })
-        }
+  // No refresh() here: both dialogs announce the registry change themselves
+  // (lib/workspace-registry-events.ts) and useWorkspaceRail re-reads on it,
+  // which is also what makes an add from the /workspaces dashboard land in
+  // the rail. These handlers keep only what is theirs — analytics and
+  // dialog state.
+  const handleWorkspacesAdded = useCallback((added: WorkspaceCard[]) => {
+    if (getAnalyticsEnabled()) {
+      for (const ws of added) {
+        safeCapture("app_workspace_added", {
+          method: ws.mode === "server" ? "server" : "local",
+          success: true,
+        })
       }
-      void refresh()
-    },
-    [refresh],
-  )
+    }
+  }, [])
 
   const handleNeedsInit = useCallback((path: string) => {
     setAddOpen(false)
@@ -87,8 +87,7 @@ function WorkspaceRailShell() {
     if (getAnalyticsEnabled()) {
       safeCapture("app_workspace_added", { method: "init", success: true })
     }
-    void refresh()
-  }, [refresh])
+  }, [])
 
   const confirmRemove = useCallback(async () => {
     if (!removeTarget || isRemoving) return

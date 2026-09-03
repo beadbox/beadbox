@@ -44,6 +44,7 @@ import {
   subscribeWorkspaceCookie,
 } from "@/lib/workspace-cookie"
 import { publishWorkspaceLabel } from "@/lib/workspace-labels"
+import { subscribeWorkspaceRegistryChange } from "@/lib/workspace-registry-events"
 
 const DASHBOARD_ROUTE = "/workspaces"
 
@@ -112,6 +113,12 @@ export function useWorkspaceRail(): WorkspaceRailController {
   // The active workspace lives in the cookie; mirror every write (ours,
   // /workspaces', StartupGate's activeWorkspaceId sync) into the highlight.
   useEffect(() => subscribeWorkspaceCookie(() => setActiveWorkspaceId(getWorkspaceCookie())), [])
+
+  // A registry membership change from another surface — an add or init on
+  // the /workspaces dashboard, or a removal from the beads view — raises no
+  // bd change signal, so without this the rail kept a stale list until the
+  // next subscription bump happened to arrive.
+  useEffect(() => subscribeWorkspaceRegistryChange(() => void refresh()), [refresh])
 
   // bb-1xi2 replay: a `bd init` / registry edit outside the app shows up as
   // a subscription change signal. Skip the initial 0 — the mount effect

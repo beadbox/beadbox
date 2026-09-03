@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react"
 import { trackedAction } from "../lib/capture-action-failed"
 import { rpc } from "../lib/rpc"
 import type { WorkspaceCard } from "../lib/types"
+import { publishWorkspaceRegistryChange } from "../lib/workspace-registry-events"
 import { Button } from "./ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog"
 import { Input } from "./ui/input"
@@ -80,6 +81,11 @@ export function InitWorkspaceDialog({
     setSlowStart(false)
 
     if (result.success) {
+      // `bd init` created the workspace and registered it. Announce the
+      // membership change before handing back, so surfaces other than this
+      // dialog's parent (the rail, the dashboard) re-read instead of
+      // waiting for the next bd subscription bump.
+      publishWorkspaceRegistryChange()
       onSuccess(result.workspace)
       onOpenChange(false)
     } else {

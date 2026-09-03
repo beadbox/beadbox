@@ -34,6 +34,7 @@ import { activateWorkspace, unregisterWorkspace } from "../lib/workspace-actions
 import type { WorkspaceCard as WorkspaceCardType } from "../lib/types"
 import { cn } from "../lib/utils"
 import { clearWorkspaceCookie, getWorkspaceCookie } from "../lib/workspace-cookie"
+import { subscribeWorkspaceRegistryChange } from "../lib/workspace-registry-events"
 import { AddWorkspaceDialog } from "./add-workspace-dialog"
 import { EditConnectionDialog } from "./edit-connection-dialog"
 import { InitWorkspaceDialog } from "./init-workspace-dialog"
@@ -293,6 +294,19 @@ export function WorkspacesPage() {
   // A rename or icon change from the rail is a registry write, which produces
   // no bd change signal — patch the cards directly.
   useWorkspaceLabelSync({ setList: setWorkspaces })
+
+  // Same gap for membership: an add or removal driven from the rail while
+  // this page is mounted would otherwise leave these cards stale until the
+  // next bd bump. Reuses the phaseRef guard above so an announcement that
+  // lands mid-load does not stack a second fetch.
+  useEffect(
+    () =>
+      subscribeWorkspaceRegistryChange(() => {
+        if (phaseRef.current === "loading" || phaseRef.current === "checking-bd") return
+        void loadWorkspaces()
+      }),
+    [loadWorkspaces],
+  )
 
   // ─── Workspace Actions ─────────────────────────────────────────────────────
 

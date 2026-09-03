@@ -16,6 +16,7 @@ import { rpc } from "./rpc"
 import { deleteCredential } from "./tauri-credentials"
 import type { DoltMode } from "./types"
 import { setWorkspaceCookie } from "./workspace-cookie"
+import { publishWorkspaceRegistryChange } from "./workspace-registry-events"
 import { clearWorkspaceSession } from "./workspace-session-cache"
 
 /** The fields every activate/unregister caller can supply. */
@@ -79,6 +80,10 @@ export async function unregisterWorkspace(
     await deleteCredential(result.credentialKey)
   }
   clearWorkspaceSession(workspace.id)
+  // The entry is gone from the registry, and a registry write raises no bd
+  // change signal — tell the other surfaces (notably the rail, which is
+  // mounted outside this one) to re-read.
+  publishWorkspaceRegistryChange()
   if (getAnalyticsEnabled()) {
     safeCapture("app_workspace_removed", { source })
   }

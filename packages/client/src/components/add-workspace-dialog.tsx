@@ -24,6 +24,7 @@ interface LocalOverlap {
 import { getAnalyticsEnabled } from "../lib/local-storage"
 import { storeCredential } from "../lib/tauri-credentials"
 import type { ScanResult, ServerDatabase, WorkspaceCard } from "../lib/types"
+import { publishWorkspaceRegistryChange } from "../lib/workspace-registry-events"
 
 interface AddWorkspaceDialogProps {
   open: boolean
@@ -48,6 +49,20 @@ export function AddWorkspaceDialog({
     if (open) setShowServer(defaultTab === "server")
   }, [open, defaultTab])
 
+  // Every add path in this dialog — local folder, server databases, and
+  // local→server replacement — lands here, so the registry-change
+  // announcement is made once for all three. Surfaces that are not this
+  // dialog's parent (the rail when the add came from the dashboard, and
+  // vice versa) have no other way to learn: a registry write raises no bd
+  // change signal.
+  const handleWorkspaceAdded = useCallback(
+    (added: WorkspaceCard[], replacedIds?: string[]) => {
+      publishWorkspaceRegistryChange()
+      onWorkspaceAdded(added, replacedIds)
+    },
+    [onWorkspaceAdded],
+  )
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -59,7 +74,7 @@ export function AddWorkspaceDialog({
         </DialogHeader>
 
         <LocalPathTab
-          onWorkspaceAdded={onWorkspaceAdded}
+          onWorkspaceAdded={handleWorkspaceAdded}
           onNeedsInit={onNeedsInit}
           onClose={() => onOpenChange(false)}
           isTauri={isTauri}
@@ -82,7 +97,7 @@ export function AddWorkspaceDialog({
           {showServer && (
             <div className="mt-3">
               <ServerTab
-                onWorkspaceAdded={onWorkspaceAdded}
+                onWorkspaceAdded={handleWorkspaceAdded}
                 onClose={() => onOpenChange(false)}
                 isActive={open && showServer}
               />
