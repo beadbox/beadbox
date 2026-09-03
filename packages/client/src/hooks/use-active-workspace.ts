@@ -13,6 +13,7 @@
 // owns its own resolution because it also drives epic loading.
 
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react"
+import { useWorkspaceLabelSync } from "@/hooks/use-workspace-label-sync"
 import type { Workspace } from "@/lib/types"
 import { getWorkspaceCookie, subscribeWorkspaceCookie } from "@/lib/workspace-cookie"
 
@@ -36,6 +37,8 @@ export function useActiveWorkspace(
     resolve()
     return subscribeWorkspaceCookie(resolve)
   }, [workspaces])
+
+  useWorkspaceLabelSync({ setActive })
 
   return [active, setActive]
 }

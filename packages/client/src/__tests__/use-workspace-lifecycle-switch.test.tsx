@@ -21,10 +21,10 @@ import { act, cleanup, render, waitFor } from "@testing-library/react"
 
 import type { AppHealth } from "../hooks/use-app-health"
 import { useWorkspaceLifecycle } from "../hooks/use-workspace-lifecycle"
-import { _resetSessionEpics } from "../lib/epics-session-cache"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import type { Epic, Workspace } from "../lib/types"
 import { clearWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
+import { _resetWorkspaceSessions } from "../lib/workspace-session-cache"
 
 const alpha: Workspace = {
   id: "id-alpha",
@@ -60,13 +60,23 @@ interface Harness {
   release: () => void
 }
 
+// The sidecar hands the client two spellings of one workspace's
+// databasePath: runStartupHealth resolves "<project>/.beads/beads.db"
+// (resolveBdDbPath) and getWorkspaces resolves "<project>/.beads"
+// (resolveLocalEntry). StartupGate's list — this hook's initialWorkspaces —
+// carries the first; the list the hook refreshes carries the second.
+function healthSpelling(workspace: Workspace): Workspace {
+  return { ...workspace, databasePath: `${workspace.databasePath}/beads.db` }
+}
+
 function mountLifecycle(options: { deferAfter?: number } = {}): Harness {
   let calls = 0
   let pendingResolve: (() => void) | null = null
 
   const getEpics = mock((dbPath?: string) => {
     calls += 1
-    const payload = { success: true as const, epics: EPICS_BY_DB[dbPath ?? ""] ?? [] }
+    const key = (dbPath ?? "").replace(/\/beads\.db$/, "")
+    const payload = { success: true as const, epics: EPICS_BY_DB[key] ?? [] }
     if (options.deferAfter !== undefined && calls > options.deferAfter) {
       return new Promise<typeof payload>((resolve) => {
         pendingResolve = () => resolve(payload)
@@ -92,7 +102,8 @@ function mountLifecycle(options: { deferAfter?: number } = {}): Harness {
 
   function Probe() {
     seen.current = useWorkspaceLifecycle({
-      initialWorkspaces: [alpha, beta],
+      // As StartupGate supplies them.
+      initialWorkspaces: [healthSpelling(alpha), healthSpelling(beta)],
       appHealth: healthy,
       appHealthRef: { current: healthy },
       setHealthy: () => {},
@@ -127,7 +138,7 @@ function mountLifecycle(options: { deferAfter?: number } = {}): Harness {
 afterEach(() => {
   cleanup()
   _resetRpc()
-  _resetSessionEpics()
+  _resetWorkspaceSessions()
   clearWorkspaceCookie()
 })
 
@@ -185,6 +196,56 @@ describe("useWorkspaceLifecycle workspace switching", () => {
       expect(seen.current?.isLoading).toBe(false)
     })
     expect(seen.current?.epics.map((e) => e.id)).toEqual(["alpha-1"])
+  })
+
+  test("a remount paints the cached tree instead of the skeleton", async () => {
+    setWorkspaceCookie(alpha.id)
+    const first = mountLifecycle()
+    await waitFor(() => {
+      expect(first.seen.current?.epics.map((e) => e.id)).toEqual(["alpha-1"])
+    })
+
+    // Whatever remounts this hook — a StartupGate re-check, a retry, dev
+    // StrictMode — the tree it already loaded must survive.
+    cleanup()
+    const second = mountLifecycle({ deferAfter: 0 })
+    await waitFor(() => {
+      expect(second.seen.current?.currentWorkspace?.id).toBe(alpha.id)
+    })
+    expect(second.seen.current?.epics.map((e) => e.id)).toEqual(["alpha-1"])
+    // home-page's skeleton gate: isLoading && !hasExistingDataRef.current
+    expect(second.seen.current?.hasExistingDataRef.current).toBe(true)
+
+    second.release()
+  })
+
+  test("the cache survives the sidecar's two databasePath spellings", async () => {
+    // Regression: the session cache used to be keyed by databasePath, so a
+    // tree loaded through StartupGate's list ("…/.beads/beads.db") was
+    // invisible to a switch resolved through getWorkspaces ("…/.beads") and
+    // every other visit repainted the skeleton.
+    setWorkspaceCookie(alpha.id)
+    const { seen } = mountLifecycle()
+    await waitFor(() => {
+      expect(seen.current?.epics.map((e) => e.id)).toEqual(["alpha-1"])
+    })
+    // The mounted workspace came from the health-spelled list.
+    expect(seen.current?.currentWorkspace?.databasePath).toBe(`${alpha.databasePath}/beads.db`)
+
+    await act(async () => {
+      setWorkspaceCookie(beta.id)
+    })
+    await waitFor(() => {
+      expect(seen.current?.epics.map((e) => e.id)).toEqual(["beta-1", "beta-2"])
+    })
+
+    // Back to alpha, now resolved from the refreshed (bare .beads) list.
+    await act(async () => {
+      setWorkspaceCookie(alpha.id)
+    })
+    expect(seen.current?.currentWorkspace?.databasePath).toBe(alpha.databasePath as string)
+    expect(seen.current?.epics.map((e) => e.id)).toEqual(["alpha-1"])
+    expect(seen.current?.hasExistingDataRef.current).toBe(true)
   })
 
   test("a never-before-loaded workspace has no cached tree to paint", async () => {

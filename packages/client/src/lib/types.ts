@@ -74,6 +74,8 @@ export type DoltMode = "embedded" | "server"
 export interface Workspace {
   id: string
   name: string
+  /** User-chosen emoji for the workspace tab; absent = default glyph. */
+  icon?: string
   path?: string | null
   databasePath?: string
   registered?: boolean

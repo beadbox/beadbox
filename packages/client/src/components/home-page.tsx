@@ -3,10 +3,16 @@ import { toast } from "sonner"
 import { BeadDetailPanel } from "@/components/bead-detail-panel"
 import { BeadTable } from "@/components/bead-table"
 import { BeadTableBulkToolbar } from "@/components/bead-table-bulk-toolbar"
-import { DevConsole } from "@/components/dev-console"
 import { EpicTree } from "@/components/epic-tree"
 import { FilterBar, type Filters } from "@/components/filter-bar"
 import { Header } from "@/components/header"
+import { getAnalyticsEnabled, markAllBeadsRead, markBeadRead } from "@/lib/local-storage"
+import { safeCapture } from "@/lib/posthog-safe"
+import { rpc } from "@/lib/rpc"
+import { sortEpics } from "@/lib/sort"
+import { useSubscriptionChangeSignal } from "@/lib/subscribe"
+
+import { DevConsole } from "@/components/dev-console"
 import { useBdHealth, useWorkspaceGate } from "@/components/startup-gate"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { useAppHealth } from "@/hooks/use-app-health"
@@ -19,11 +25,6 @@ import { usePreferences } from "@/hooks/use-preferences"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { useViewport } from "@/hooks/use-viewport"
 import { useWorkspaceLifecycle } from "@/hooks/use-workspace-lifecycle"
-import { getAnalyticsEnabled, markAllBeadsRead, markBeadRead } from "@/lib/local-storage"
-import { safeCapture } from "@/lib/posthog-safe"
-import { rpc } from "@/lib/rpc"
-import { sortEpics } from "@/lib/sort"
-import { useSubscriptionChangeSignal } from "@/lib/subscribe"
 import type { Bead, Epic } from "@/lib/types"
 
 const getBlocksDependencies = rpc.epics.getBlocksDependencies
@@ -847,115 +848,115 @@ function BeadsEpicsViewer() {
                 isPending={isBulkArchiving}
               />
               <div ref={treeContainerRef} className="flex-1 overflow-y-auto hide-scrollbar">
-                {/* beadbox-dme: gate skeleton on first-ever-load, not "currently
+              {/* beadbox-dme: gate skeleton on first-ever-load, not "currently
                   loading + empty". beadbox-s5z's loadEpics wiring flips
                   isLoading on every subscription tick; on empty workspaces
                   that triggered a skeleton flash every ~1s. hasExistingDataRef
                   is true once we've successfully loaded at least one set of
                   epics (even an empty one), so subsequent refetches keep the
                   existing rendered state until the fresh data lands. */}
-                {isLoading && !hasExistingDataRef.current ? (
-                  <EpicTreeSkeleton isSlowLoad={isSlowLoad} />
-                ) : !hasRealEpics &&
-                  flatBeads.length > 0 &&
-                  archivedBeads.length === 0 &&
-                  backlogBeads.length === 0 ? (
-                  /* Flat table for workspaces with no epics (e.g. Gastown).
+              {isLoading && !hasExistingDataRef.current ? (
+                <EpicTreeSkeleton isSlowLoad={isSlowLoad} />
+              ) : !hasRealEpics &&
+                flatBeads.length > 0 &&
+                archivedBeads.length === 0 &&
+                backlogBeads.length === 0 ? (
+                /* Flat table for workspaces with no epics (e.g. Gastown).
                    beadbox-brg: when filters.grouped is on, render via the
                    shared status-grouped helper instead of a single table. */
-                  filters.grouped ? (
-                    renderGroupedFlatView(flatBeads)
-                  ) : (
-                    <div className="space-y-1">
-                      <BeadTable
-                        beads={flatBeads}
-                        epicId="_flat"
-                        onBeadClick={handleBeadClick}
-                        onArchive={handleArchiveBead}
-                        onDelete={setDeleteConfirmId}
-                        expandedBeads={expandedBeads}
-                        onToggleBead={handleToggleBead}
-                        focusedItemId={focusedItemId}
-                        onFocusItem={setFocusedItemId}
-                        onDragStart={handleDragStart}
-                        onDragEnd={handleDragEnd}
-                        draggedBeadId={draggedBeadId}
-                        selectedBeadId={beadIdParam}
-                        showWaves={filters.showWaves}
-                        readState={readState}
-                        selectedIds={beadSelection.selectedIds}
-                        onToggleSelect={beadSelection.toggle}
-                        onToggleSelectAll={beadSelection.toggleAll}
-                      />
-                    </div>
-                  )
-                ) : activeEpicsWithFilteredStandalone.some(
-                    (e) => e.id !== "_standalone" || (e.children?.length ?? 0) > 0,
-                  ) ||
-                  activeConvoys.length > 0 ||
-                  activeMolecules.length > 0 ||
-                  backlogEpics.length > 0 ||
-                  backlogBeads.length > 0 ||
-                  archivedEpics.length > 0 ||
-                  archivedBeads.length > 0 ? (
-                  filters.grouped ? (
-                    renderGroupedFlatView(flattenEpicsToBeads(activeEpicsWithFilteredStandalone))
-                  ) : (
-                    <EpicTree
-                      epics={activeEpicsWithFilteredStandalone}
-                      convoys={activeConvoysFiltered}
-                      molecules={activeMoleculesFiltered}
-                      archivedEpics={archivedEpics}
-                      archivedBeads={archivedBeads}
-                      backlogEpics={backlogEpics}
-                      backlogBeads={backlogBeads}
-                      expandedEpics={expandedEpics}
-                      onToggleEpic={handleToggleEpic}
-                      onSetExpandedEpics={handleSetExpandedEpics}
+                filters.grouped ? (
+                  renderGroupedFlatView(flatBeads)
+                ) : (
+                  <div className="space-y-1">
+                    <BeadTable
+                      beads={flatBeads}
+                      epicId="_flat"
                       onBeadClick={handleBeadClick}
+                      onArchive={handleArchiveBead}
                       onDelete={setDeleteConfirmId}
-                      onBeadMove={handleBeadMove}
-                      canMoveEpic={canMoveEpic}
-                      dragOverEpicId={dragOverEpicId}
-                      onDragOver={handleDragOver}
-                      onDragStart={handleDragStart}
-                      onDragEnd={handleDragEnd}
-                      draggedBeadId={draggedBeadId}
                       expandedBeads={expandedBeads}
                       onToggleBead={handleToggleBead}
                       focusedItemId={focusedItemId}
                       onFocusItem={setFocusedItemId}
-                      onArchive={handleArchive}
-                      onBacklog={handleBacklog}
-                      selectedIds={beadSelection.selectedIds}
-                      onToggleSelect={beadSelection.toggle}
-                      onToggleSelectAll={beadSelection.toggleAll}
+                      onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
+                      draggedBeadId={draggedBeadId}
                       selectedBeadId={beadIdParam}
                       showWaves={filters.showWaves}
                       readState={readState}
+                      selectedIds={beadSelection.selectedIds}
+                      onToggleSelect={beadSelection.toggle}
+                      onToggleSelectAll={beadSelection.toggleAll}
                     />
-                  )
-                ) : epics.length === 0 && loadError && loadError.category !== "flock-contention" ? (
-                  <LoadErrorEmpty
-                    error={loadError}
-                    onRetry={handleManualRetry}
-                    isRetrying={isLoading}
-                    databasePath={currentWorkspace?.databasePath ?? ""}
-                    autoRetryCountdown={autoRetryCountdown}
-                  />
-                ) : epics.length === 0 && flockContention ? (
-                  <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
-                    <RefreshCw className="h-5 w-5 animate-spin" />
-                    <span className="text-sm">Workspace busy, loading data...</span>
                   </div>
-                ) : epics.length === 0 ? (
-                  <OnboardingHero />
+                )
+              ) : activeEpicsWithFilteredStandalone.some(
+                  (e) => e.id !== "_standalone" || (e.children?.length ?? 0) > 0,
+                ) ||
+                activeConvoys.length > 0 ||
+                activeMolecules.length > 0 ||
+                backlogEpics.length > 0 ||
+                backlogBeads.length > 0 ||
+                archivedEpics.length > 0 ||
+                archivedBeads.length > 0 ? (
+                filters.grouped ? (
+                  renderGroupedFlatView(flattenEpicsToBeads(activeEpicsWithFilteredStandalone))
                 ) : (
-                  <div className="text-center py-12 text-muted-foreground">
-                    No epics or beads match your filters
-                  </div>
-                )}
-              </div>
+                <EpicTree
+                  epics={activeEpicsWithFilteredStandalone}
+                  convoys={activeConvoysFiltered}
+                  molecules={activeMoleculesFiltered}
+                  archivedEpics={archivedEpics}
+                  archivedBeads={archivedBeads}
+                  backlogEpics={backlogEpics}
+                  backlogBeads={backlogBeads}
+                  expandedEpics={expandedEpics}
+                  onToggleEpic={handleToggleEpic}
+                  onSetExpandedEpics={handleSetExpandedEpics}
+                  onBeadClick={handleBeadClick}
+                  onDelete={setDeleteConfirmId}
+                  onBeadMove={handleBeadMove}
+                  canMoveEpic={canMoveEpic}
+                  dragOverEpicId={dragOverEpicId}
+                  onDragOver={handleDragOver}
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  draggedBeadId={draggedBeadId}
+                  expandedBeads={expandedBeads}
+                  onToggleBead={handleToggleBead}
+                  focusedItemId={focusedItemId}
+                  onFocusItem={setFocusedItemId}
+                  onArchive={handleArchive}
+                  onBacklog={handleBacklog}
+                  selectedIds={beadSelection.selectedIds}
+                  onToggleSelect={beadSelection.toggle}
+                  onToggleSelectAll={beadSelection.toggleAll}
+                  selectedBeadId={beadIdParam}
+                  showWaves={filters.showWaves}
+                  readState={readState}
+                />
+                )
+              ) : epics.length === 0 && loadError && loadError.category !== "flock-contention" ? (
+                <LoadErrorEmpty
+                  error={loadError}
+                  onRetry={handleManualRetry}
+                  isRetrying={isLoading}
+                  databasePath={currentWorkspace?.databasePath ?? ""}
+                  autoRetryCountdown={autoRetryCountdown}
+                />
+              ) : epics.length === 0 && flockContention ? (
+                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  <span className="text-sm">Workspace busy, loading data...</span>
+                </div>
+              ) : epics.length === 0 ? (
+                <OnboardingHero />
+              ) : (
+                <div className="text-center py-12 text-muted-foreground">
+                  No epics or beads match your filters
+                </div>
+              )}
+            </div>
             </>
           )
         ) : (
@@ -1017,39 +1018,39 @@ function BeadsEpicsViewer() {
                   filters.grouped ? (
                     renderGroupedFlatView(flattenEpicsToBeads(activeEpicsWithFilteredStandalone))
                   ) : (
-                    <EpicTree
-                      epics={activeEpicsWithFilteredStandalone}
-                      convoys={activeConvoysFiltered}
-                      molecules={activeMoleculesFiltered}
-                      archivedEpics={archivedEpics}
-                      archivedBeads={archivedBeads}
-                      backlogEpics={backlogEpics}
-                      backlogBeads={backlogBeads}
-                      expandedEpics={expandedEpics}
-                      onToggleEpic={handleToggleEpic}
-                      onSetExpandedEpics={handleSetExpandedEpics}
-                      onBeadClick={handleBeadClick}
-                      onDelete={setDeleteConfirmId}
-                      onBeadMove={handleBeadMove}
-                      canMoveEpic={canMoveEpic}
-                      dragOverEpicId={dragOverEpicId}
-                      onDragOver={handleDragOver}
-                      onDragStart={handleDragStart}
-                      onDragEnd={handleDragEnd}
-                      draggedBeadId={draggedBeadId}
-                      expandedBeads={expandedBeads}
-                      onToggleBead={handleToggleBead}
-                      focusedItemId={focusedItemId}
-                      onFocusItem={setFocusedItemId}
-                      onArchive={handleArchive}
-                      onBacklog={handleBacklog}
-                      selectedBeadId={beadIdParam}
-                      showWaves={filters.showWaves}
-                      readState={readState}
-                      selectedIds={beadSelection.selectedIds}
-                      onToggleSelect={beadSelection.toggle}
-                      onToggleSelectAll={beadSelection.toggleAll}
-                    />
+                  <EpicTree
+                    epics={activeEpicsWithFilteredStandalone}
+                    convoys={activeConvoysFiltered}
+                    molecules={activeMoleculesFiltered}
+                    archivedEpics={archivedEpics}
+                    archivedBeads={archivedBeads}
+                    backlogEpics={backlogEpics}
+                    backlogBeads={backlogBeads}
+                    expandedEpics={expandedEpics}
+                    onToggleEpic={handleToggleEpic}
+                    onSetExpandedEpics={handleSetExpandedEpics}
+                    onBeadClick={handleBeadClick}
+                    onDelete={setDeleteConfirmId}
+                    onBeadMove={handleBeadMove}
+                    canMoveEpic={canMoveEpic}
+                    dragOverEpicId={dragOverEpicId}
+                    onDragOver={handleDragOver}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    draggedBeadId={draggedBeadId}
+                    expandedBeads={expandedBeads}
+                    onToggleBead={handleToggleBead}
+                    focusedItemId={focusedItemId}
+                    onFocusItem={setFocusedItemId}
+                    onArchive={handleArchive}
+                    onBacklog={handleBacklog}
+                    selectedBeadId={beadIdParam}
+                    showWaves={filters.showWaves}
+                    readState={readState}
+                    selectedIds={beadSelection.selectedIds}
+                    onToggleSelect={beadSelection.toggle}
+                    onToggleSelectAll={beadSelection.toggleAll}
+                  />
                   )
                 ) : epics.length === 0 && loadError && loadError.category !== "flock-contention" ? (
                   <LoadErrorEmpty

@@ -42,6 +42,7 @@ import { formatRelativeTime } from "../lib/activity-utils"
 import { rpc } from "../lib/rpc"
 import type { ActivityEvent, CrossFilter } from "../lib/types"
 import { cn } from "../lib/utils"
+import { sessionActivityEvents } from "../lib/workspace-session-cache"
 import { EventIcon, getActionSummary, getCompactAction } from "./activity-feed-renderers"
 import { Checkbox } from "./ui/checkbox"
 import { Input } from "./ui/input"
@@ -79,6 +80,12 @@ export {
 
 interface ActivityFeedProps {
   dbPath?: string
+  /**
+   * Workspace the dbPath belongs to. Keys the session cache that lets the
+   * feed paint its last events instead of the loading placeholder when this
+   * route is re-entered (the router unmounts it on every navigation away).
+   */
+  workspaceId?: string
   changeSignal?: number
   /** Called when user clicks/presses Enter on a feed item. Returns false if bead was deleted. */
   onBeadNavigate?: (beadId: string) => Promise<boolean>
@@ -94,6 +101,7 @@ interface ActivityFeedProps {
 
 export function ActivityFeed({
   dbPath,
+  workspaceId,
   changeSignal = 0,
   onBeadNavigate,
   crossFilter,
@@ -101,7 +109,9 @@ export function ActivityFeed({
   beadStatusMap,
   onClearCrossFilter,
 }: ActivityFeedProps) {
-  const [events, setEvents] = useState<ActivityEvent[]>([])
+  const [events, setEvents] = useState<ActivityEvent[]>(
+    () => sessionActivityEvents.get(workspaceId) ?? [],
+  )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -134,6 +144,24 @@ export function ActivityFeed({
   useEffect(() => {
     setFilters(loadFilters())
   }, [])
+
+  // The rail can switch workspace without remounting this route: swap in the
+  // new workspace's cached events (or clear, so the previous project's
+  // activity is never shown under the new project's name) while its load runs.
+  const seededWorkspaceRef = useRef(workspaceId)
+  useEffect(() => {
+    if (seededWorkspaceRef.current === workspaceId) return
+    seededWorkspaceRef.current = workspaceId
+    setEvents(sessionActivityEvents.get(workspaceId) ?? [])
+  }, [workspaceId])
+
+  // Mirror the rendered events so the next visit paints from them. Guarded by
+  // the workspace they were loaded for, since `events` and `workspaceId` can
+  // change on different commits.
+  useEffect(() => {
+    if (seededWorkspaceRef.current !== workspaceId || events.length === 0) return
+    sessionActivityEvents.set(workspaceId, events)
+  }, [events, workspaceId])
 
   // Persist filters on change (skip the initial default state)
   const filtersInitialized = useRef(false)

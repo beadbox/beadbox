@@ -10,13 +10,13 @@
 // (spinners, navigation, dialogs).
 
 import { trackedAction } from "./capture-action-failed"
-import { clearSessionEpics } from "./epics-session-cache"
 import { getAnalyticsEnabled } from "./local-storage"
 import { safeCapture } from "./posthog-safe"
 import { rpc } from "./rpc"
 import { deleteCredential } from "./tauri-credentials"
 import type { DoltMode } from "./types"
 import { setWorkspaceCookie } from "./workspace-cookie"
+import { clearWorkspaceSession } from "./workspace-session-cache"
 
 /** The fields every activate/unregister caller can supply. */
 export interface WorkspaceRef {
@@ -78,7 +78,7 @@ export async function unregisterWorkspace(
   if (result.credentialKey) {
     await deleteCredential(result.credentialKey)
   }
-  clearSessionEpics(databasePath)
+  clearWorkspaceSession(workspace.id)
   if (getAnalyticsEnabled()) {
     safeCapture("app_workspace_removed", { source })
   }

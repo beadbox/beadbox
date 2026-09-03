@@ -13,7 +13,7 @@ Beadbox gives `bd` users a visual interface for the things a terminal can't show
 - **Bead detail** — full descriptions, comments, dependencies, and workflow advancement in a side panel or modal
 - **Filters** — slice by status, type, priority, and assignee; filters persist across sessions
 - **Activity feed** — a timeline of what changed, by whom, across the workspace
-- **Multi-workspace** — switch between local `.beads/` projects and remote Dolt server connections
+- **Multi-workspace** — a resizable rail of project tabs on the left switches between local `.beads/` projects and remote Dolt server connections; tabs can be renamed and given an emoji, and switching back to a project you already opened is instant
 - **Keyboard-first** — power-user paths work without touching the mouse
 
 ## Install

@@ -18,6 +18,8 @@ const COMMENT_SORT_KEY = "beadbox_comment_sort"
 const FILTER_BAR_VISIBLE_KEY = "beadbox_filter_bar_visible"
 const SELECTED_FORMULA_KEY = "beadbox_selected_formula"
 const FORMULA_VIEW_MODE_KEY = "beadbox_formula_view_mode"
+const WORKSPACE_RAIL_WIDTH_KEY = "beadbox_workspace_rail_width"
+const WORKSPACE_RAIL_COLLAPSED_KEY = "beadbox_workspace_rail_collapsed"
 
 export type CommentSortOrder = "newest" | "oldest"
 
@@ -502,6 +504,62 @@ export function setCommentSortOrder(order: CommentSortOrder): void {
   }
 }
 
+// --- Workspace rail (left project switcher) ---
+
+export const MIN_WORKSPACE_RAIL_WIDTH = 180
+export const MAX_WORKSPACE_RAIL_WIDTH = 420
+const DEFAULT_WORKSPACE_RAIL_WIDTH = 240
+
+export function clampWorkspaceRailWidth(width: number): number {
+  return Math.max(MIN_WORKSPACE_RAIL_WIDTH, Math.min(MAX_WORKSPACE_RAIL_WIDTH, Math.round(width)))
+}
+
+export function getWorkspaceRailWidth(): number {
+  if (typeof window === "undefined") return DEFAULT_WORKSPACE_RAIL_WIDTH
+
+  try {
+    const stored = localStorage.getItem(WORKSPACE_RAIL_WIDTH_KEY)
+    if (stored) {
+      const width = parseInt(stored, 10)
+      if (!Number.isNaN(width)) return clampWorkspaceRailWidth(width)
+    }
+  } catch {
+    // localStorage unavailable
+  }
+  return DEFAULT_WORKSPACE_RAIL_WIDTH
+}
+
+export function setWorkspaceRailWidth(width: number): void {
+  if (typeof window === "undefined") return
+
+  try {
+    localStorage.setItem(WORKSPACE_RAIL_WIDTH_KEY, String(clampWorkspaceRailWidth(width)))
+  } catch {
+    // localStorage might be full or disabled
+  }
+}
+
+export function getWorkspaceRailCollapsed(): boolean {
+  if (typeof window === "undefined") return false
+
+  try {
+    if (localStorage.getItem(WORKSPACE_RAIL_COLLAPSED_KEY) === "true") return true
+  } catch {
+    // localStorage unavailable
+  }
+  return false // Default: expanded
+}
+
+export function setWorkspaceRailCollapsed(collapsed: boolean): void {
+  if (typeof window === "undefined") return
+
+  try {
+    localStorage.setItem(WORKSPACE_RAIL_COLLAPSED_KEY, String(collapsed))
+  } catch {
+    // localStorage might be full or disabled
+  }
+}
+
 // --- Cache management ---
 
 const CLEARABLE_KEYS = [
@@ -519,6 +577,8 @@ const CLEARABLE_KEYS = [
   READ_STATE_KEY,
   COMMENT_SORT_KEY,
   FILTER_BAR_VISIBLE_KEY,
+  WORKSPACE_RAIL_WIDTH_KEY,
+  WORKSPACE_RAIL_COLLAPSED_KEY,
 ]
 
 export function clearCache(): void {

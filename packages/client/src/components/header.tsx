@@ -246,7 +246,18 @@ export function Header({
                     button width stays stable and the hover state can overlay
                     without causing layout thrash / hover flicker. */}
                 <span className="flex items-center gap-1.5 min-w-0 group-hover:invisible">
-                  {isPending ? <BeadboxLogoLoading size={22} /> : <BeadboxLogo size={22} />}
+                  {isPending ? (
+                    <BeadboxLogoLoading size={22} />
+                  ) : currentWorkspace.icon ? (
+                    // User-chosen tab emoji (set from the workspace rail)
+                    // replaces the marble so the active project reads the
+                    // same in the rail and the header.
+                    <span className="text-lg leading-none" aria-hidden="true">
+                      {currentWorkspace.icon}
+                    </span>
+                  ) : (
+                    <BeadboxLogo size={22} />
+                  )}
                   <span
                     className={cn(
                       "text-base font-medium text-foreground truncate",

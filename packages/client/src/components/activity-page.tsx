@@ -32,6 +32,7 @@ import { composePipelineChain } from "../lib/status-chain"
 import { useSubscriptionChangeSignal } from "../lib/subscribe"
 import type { ActivityEvent, PipelineStage, Workspace } from "../lib/types"
 import { setWorkspaceCookie } from "../lib/workspace-cookie"
+import { sessionPipeline } from "../lib/workspace-session-cache"
 import { ActivityFeed } from "./activity-feed"
 import { AgentStrip } from "./agent-strip"
 import { DevConsole } from "./dev-console"
@@ -296,11 +297,17 @@ function ActivityViewer() {
     setTimeout(() => setIsRefreshing(false), 500)
   }, [])
 
-  // Fetch pipeline snapshot (bd list --json) with 30s cache
+  // Fetch pipeline snapshot (bd list --json), with a per-workspace session
+  // cache. The freshness stamp lives in the cache rather than in a ref so it
+  // survives this route unmounting on every navigation away — otherwise the
+  // card refetched and flashed its spinner on each return trip.
   const fetchPipelineSnapshot = useCallback(async () => {
     if (!databasePath) return
     const now = Date.now()
-    if (now - pipelineFetchedAtRef.current < PIPELINE_CACHE_MS) {
+    const cached = sessionPipeline.get(currentWorkspaceId)
+    if (cached && now - cached.fetchedAt < PIPELINE_CACHE_MS) {
+      setStages(cached.stages)
+      setBeadStatusMap(cached.beadStatuses)
       setPipelineLoading(false)
       return
     }
@@ -323,6 +330,11 @@ function ActivityViewer() {
         statusMap.set(bead.id, toCanonicalStage(bead.status))
       }
       setBeadStatusMap(statusMap)
+      sessionPipeline.set(currentWorkspaceId, {
+        stages: derived,
+        beadStatuses: statusMap,
+        fetchedAt: now,
+      })
 
       setHealthy()
     } catch (error: unknown) {
@@ -345,7 +357,7 @@ function ActivityViewer() {
       }
     }
     setPipelineLoading(false)
-  }, [databasePath, currentWorkspace, setDegraded, pipelineChain])
+  }, [databasePath, currentWorkspaceId, currentWorkspace, setDegraded, pipelineChain])
 
   // beadbox-8k3: load the workspace's custom status chain so the pipeline
   // tile composition reflects status.custom. Uses the same RPC eng1's
@@ -696,6 +708,7 @@ function ActivityViewer() {
             {/* Layer 3: Event Feed */}
             <ActivityFeed
               dbPath={currentWorkspace.databasePath}
+              workspaceId={currentWorkspace.id}
               changeSignal={changeSignal}
               onBeadNavigate={handleBeadNavigate}
               crossFilter={crossFilter}

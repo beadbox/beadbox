@@ -25,16 +25,18 @@ import { getPostHogNode } from "../lib/posthog-node"
 import type { ScanResult, ServerDatabase, Workspace, WorkspaceCard } from "../lib/types"
 import {
   addServerWorkspaceEntry,
+  findWorkspace,
   findWorkspaceByDbPath,
   getBeadboxRegistryPath,
   projectDirFromDatabasePath,
+  type RegistryEntry,
   readRegistry,
   addWorkspace as registryAddWorkspace,
   replaceWorkspace as registryReplaceWorkspace,
   setActiveWorkspace as registrySetActiveWorkspace,
   removeWorkspaceFromRegistry,
-  type RegistryEntry,
   type ServerConnection,
+  updateWorkspaceLabel,
   updateWorkspaceLocal,
   updateWorkspaceServer,
 } from "../lib/workspace-registry"
@@ -52,6 +54,7 @@ function wsLog(fn: string, ...args: unknown[]) {
 interface InlineWorkspace {
   id: string
   name: string
+  icon?: string
   path: string | null
   databasePath: string
   registered?: boolean
@@ -150,6 +153,7 @@ function resolveServerOnlyEntry(entry: RegistryEntry): InlineWorkspace {
   return {
     id: entry.id,
     name: entry.name,
+    icon: entry.icon,
     path: null,
     databasePath: `server://${server.host}:${server.port}/${server.database}`,
     registered: true,
@@ -195,6 +199,7 @@ async function resolveLocalEntry(entry: RegistryEntry): Promise<InlineWorkspace>
   return {
     id: entry.id,
     name: entry.name || basename(projectDir),
+    icon: entry.icon,
     path: projectDir,
     databasePath: dbPath,
     registered: true,
@@ -205,6 +210,28 @@ async function resolveLocalEntry(entry: RegistryEntry): Promise<InlineWorkspace>
 async function resolveRegistryEntry(entry: RegistryEntry): Promise<InlineWorkspace> {
   if (entry.local === null && entry.server) return resolveServerOnlyEntry(entry)
   return resolveLocalEntry(entry)
+}
+
+// Every caller that returns a workspace to the client maps it here. The
+// hand-written copies drifted: updateServerConnection built its card without
+// `icon`, so reconfiguring a server connection cleared the workspace's emoji
+// in client state.
+function toWorkspace(resolved: InlineWorkspace, available: boolean): Workspace {
+  return {
+    id: resolved.id,
+    name: resolved.name,
+    icon: resolved.icon,
+    path: resolved.path,
+    databasePath: resolved.databasePath,
+    registered: resolved.registered ?? false,
+    available,
+    mode: resolved.mode,
+    serverHost: resolved.serverHost,
+    serverPort: resolved.serverPort,
+    serverDatabase: resolved.serverDatabase,
+    serverUser: resolved.serverUser,
+    serverTls: resolved.serverTls,
+  }
 }
 
 async function inlineGetRegisteredWorkspaces(): Promise<InlineWorkspace[]> {
@@ -393,20 +420,7 @@ export async function getWorkspaces(savedDatabasePath?: string): Promise<Workspa
   for (const ws of workspaces) {
     // Server-only workspaces are available by definition (reachability checked at connect time)
     const available = ws.serverOnly ? true : await databaseExists(ws.databasePath)
-    results.push({
-      id: ws.id,
-      name: ws.name,
-      path: ws.path,
-      databasePath: ws.databasePath,
-      registered: ws.registered ?? false,
-      available,
-      mode: ws.mode,
-      serverHost: ws.serverHost,
-      serverPort: ws.serverPort,
-      serverDatabase: ws.serverDatabase,
-      serverUser: ws.serverUser,
-      serverTls: ws.serverTls,
-    })
+    results.push(toWorkspace(ws, available))
   }
 
   return results
@@ -419,19 +433,9 @@ export async function getRegisteredWorkspacesForSelector(): Promise<WorkspaceCar
   const results: WorkspaceCard[] = []
   for (const ws of registered) {
     const available = ws.serverOnly ? true : await databaseExists(ws.databasePath)
-    results.push({
-      id: ws.id,
-      name: ws.name,
-      path: ws.path,
-      databasePath: ws.databasePath,
-      available,
-      mode: ws.mode,
-      serverHost: ws.serverHost,
-      serverPort: ws.serverPort,
-      serverDatabase: ws.serverDatabase,
-      serverUser: ws.serverUser,
-      serverTls: ws.serverTls,
-    })
+    // WorkspaceCard narrows path/databasePath to non-optional; the mapper
+    // returns them as the wider Workspace fields.
+    results.push({ ...toWorkspace(ws, available), path: ws.path, databasePath: ws.databasePath })
   }
   return results
 }
@@ -946,6 +950,135 @@ export async function setActiveWorkspaceAction(databasePath: string): Promise<vo
   }
 }
 
+// Rename a workspace and/or set its tab emoji. Both fields are optional;
+// `icon: null` clears the emoji. The registry is the single source of truth
+// for the display label, so the rail, the header and the /workspaces cards
+// all pick the change up from the next workspace list read.
+const MAX_WORKSPACE_NAME_LENGTH = 64
+// Emoji can be several code points (ZWJ sequences, skin-tone modifiers,
+// flags). 16 UTF-16 units fits every standard sequence with room to spare
+// while keeping a pasted paragraph out of the registry.
+const MAX_WORKSPACE_ICON_LENGTH = 16
+
+// One emoji grapheme: an Extended_Pictographic base carrying its variation
+// selector, skin-tone modifier or tag characters, optionally ZWJ-joined to
+// more of the same ("👩‍💻"), or a two-character regional-indicator flag.
+// The icon is rendered as the workspace avatar, so a plain string like "abc"
+// — which a length-only check accepts — must not reach it.
+const EMOJI_PART = String.raw`\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}|[\u{E0020}-\u{E007F}])*`
+const SINGLE_EMOJI = new RegExp(
+  `^(?:${EMOJI_PART}(?:\\u200D${EMOJI_PART})*|\\p{Regional_Indicator}{2})$`,
+  "u",
+)
+
+// Shared scan for both label fields. These characters must never reach the
+// rail, the header or the dashboard cards: C0/DEL controls break the line,
+// bidi overrides (U+202A-U+202E, U+2066-U+2069) render the rest of it
+// reversed, and the zero-width family (U+200B-U+200F) makes two different
+// labels render identically. U+200D is the one exception: it joins the parts
+// of an emoji sequence.
+function hasUnsafeLabelChars(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0
+    if (code < 0x20 || code === 0x7f) return true
+    if (code >= 0x200b && code <= 0x200f && code !== 0x200d) return true
+    if (code >= 0x202a && code <= 0x202e) return true
+    if (code >= 0x2066 && code <= 0x2069) return true
+  }
+  return false
+}
+
+// resolveRegistryEntry hits the filesystem and dereferences entry.local (the
+// v1 migration can produce an entry with local and server both null), and
+// setWorkspaceLabel calls it after the registry write has already committed.
+// A throw there has to come back as a failure result, not as a rejected rpc
+// call the client cannot interpret.
+async function resolveLabelledWorkspace(
+  entry: RegistryEntry,
+): Promise<{ success: true; workspace: Workspace } | { success: false; error: string }> {
+  try {
+    const resolved = await resolveRegistryEntry(entry)
+    const available = resolved.serverOnly ? true : await databaseExists(resolved.databasePath)
+    return { success: true, workspace: toWorkspace(resolved, available) }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    return { success: false, error: `Could not read the workspace back: ${reason}` }
+  }
+}
+
+type LabelPatch = { name?: string; icon?: string | null }
+type LabelFailure = { success: false; error: string }
+
+// `name` / `icon` cross the rpc boundary from the WebView, so their declared
+// types are claims rather than guarantees. Each validator returns either the
+// accepted value or the declared failure result — throwing would reject the
+// call the client is awaiting.
+function validateWorkspaceName(value: unknown): { name: string } | LabelFailure {
+  if (typeof value !== "string") return { success: false, error: "Name must be text." }
+  const name = value.replace(/\s+/g, " ").trim()
+  if (name.length === 0) return { success: false, error: "Name cannot be empty." }
+  if (name.length > MAX_WORKSPACE_NAME_LENGTH) {
+    return {
+      success: false,
+      error: `Name must be ${MAX_WORKSPACE_NAME_LENGTH} characters or fewer.`,
+    }
+  }
+  if (hasUnsafeLabelChars(name)) {
+    return { success: false, error: "Name contains characters that cannot be displayed." }
+  }
+  return { name }
+}
+
+function validateWorkspaceIcon(value: unknown): { icon: string | null } | LabelFailure {
+  const rejected: LabelFailure = { success: false, error: "Icon must be a single emoji." }
+  if (value === null) return { icon: null }
+  if (typeof value !== "string") return rejected
+  const icon = value.trim()
+  if (icon.length === 0) return { icon: null }
+  // Cheap pre-check before the regex: no standard sequence is this long.
+  if (icon.length > MAX_WORKSPACE_ICON_LENGTH) return rejected
+  if (hasUnsafeLabelChars(icon) || !SINGLE_EMOJI.test(icon)) return rejected
+  return { icon }
+}
+
+function buildLabelPatch(label: LabelPatch): LabelPatch | LabelFailure {
+  const patch: LabelPatch = {}
+  if (label.name !== undefined) {
+    const validated = validateWorkspaceName(label.name)
+    if ("success" in validated) return validated
+    patch.name = validated.name
+  }
+  if (label.icon !== undefined) {
+    const validated = validateWorkspaceIcon(label.icon)
+    if ("success" in validated) return validated
+    patch.icon = validated.icon
+  }
+  return patch
+}
+
+export async function setWorkspaceLabel(
+  workspaceId: string,
+  label: LabelPatch,
+): Promise<{ success: true; workspace: Workspace } | LabelFailure> {
+  if (typeof label !== "object" || label === null) {
+    return { success: false, error: "Invalid label." }
+  }
+
+  const patch = buildLabelPatch(label)
+  if ("success" in patch) return patch
+
+  if (patch.name === undefined && patch.icon === undefined) {
+    // Nothing is being changed: report the current state without writing.
+    const current = findWorkspace(await readRegistry(), workspaceId)
+    if (!current) return { success: false, error: "Workspace not found." }
+    return resolveLabelledWorkspace(current)
+  }
+
+  const entry = await updateWorkspaceLabel(workspaceId, patch)
+  if (!entry) return { success: false, error: "Workspace not found." }
+  return resolveLabelledWorkspace(entry)
+}
+
 // ---------------------------------------------------------------------------
 // Server discovery overlap detection
 // ---------------------------------------------------------------------------
@@ -1096,19 +1229,32 @@ export async function updateServerConnection(
     bdSetWorkspacePassword(serverKey, password)
   }
 
+  // Express the updated entry in the shape resolveRegistryEntry would produce
+  // so the reply goes through the one mapper. The hand-built card here used to
+  // omit `icon`, which cleared the workspace emoji in client state every time
+  // a connection was reconfigured.
+  const resolved: InlineWorkspace = {
+    id: workspaceId,
+    name: entry.name,
+    icon: entry.icon,
+    path: entry.local?.path ?? null,
+    databasePath: entry.local?.path ?? `server://${host}:${port}/${database}`,
+    registered: true,
+    serverOnly: entry.local === null,
+    mode: "server",
+    serverHost: host,
+    serverPort: port,
+    serverDatabase: database,
+    serverUser: user,
+    serverTls: tls,
+  }
+  const available = resolved.serverOnly ? true : await databaseExists(resolved.databasePath)
   return {
     success: true,
     workspace: {
-      id: workspaceId,
-      name: entry.name,
-      path: entry.local?.path ?? null,
-      databasePath: entry.local?.path ?? `server://${host}:${port}/${database}`,
-      mode: "server",
-      serverHost: host,
-      serverPort: port,
-      serverDatabase: database,
-      serverUser: user,
-      serverTls: tls,
+      ...toWorkspace(resolved, available),
+      path: resolved.path,
+      databasePath: resolved.databasePath,
     },
   }
 }

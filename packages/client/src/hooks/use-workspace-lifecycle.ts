@@ -2,10 +2,10 @@ import { useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import type { AppHealth } from "@/hooks/use-app-health"
+import { useWorkspaceLabelSync } from "@/hooks/use-workspace-label-sync"
 import type { BdLoadError } from "@/lib/bd-error"
 import { captureServerActionFailed } from "@/lib/capture-action-failed"
 import { collectAllBeadsFromEpics, countAllBeads } from "@/lib/epic-tree-utils"
-import { getSessionEpics, setSessionEpics } from "@/lib/epics-session-cache"
 import { getAnalyticsEnabled, getReadState, initializeReadState } from "@/lib/local-storage"
 import { toastError } from "@/lib/notifications"
 import { safeCapture } from "@/lib/posthog-safe"
@@ -22,6 +22,8 @@ import {
   setWorkspaceCookie,
   subscribeWorkspaceCookie,
 } from "@/lib/workspace-cookie"
+import { subscribeWorkspaceLabels } from "@/lib/workspace-labels"
+import { sessionEpics } from "@/lib/workspace-session-cache"
 
 // beadbox-jk7 / cascade-9 diagnostic: ring-buffer push for loadEpics lifecycle
 // transitions, capped at 32 entries. Lives next to the consumer so the trim
@@ -98,10 +100,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   // schedule a retry after the cooldown expires instead of silently dropping it.
   const pendingRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasExistingDataRef = useRef(false)
-  // databasePath the tree in `epics` was loaded for. Guards the session-cache
+  // Workspace the tree in `epics` was loaded for. Guards the session-cache
   // mirror below: `epics` and `currentWorkspace` are two states that change on
   // different commits during a switch.
-  const epicsDbPathRef = useRef<string | null>(null)
+  const epicsWorkspaceIdRef = useRef<string | null>(null)
   // Per-attempt timer origin: reset each time loadEpics fires (including auto-retries).
   // Used by app_workspace_load_{succeeded,timeout}.elapsed_ms to measure THIS attempt.
   const loadStartTimeRef = useRef(0)
@@ -184,6 +186,17 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       console.log(
         `[ws-debug-page] setting workspace: cookie=${savedWorkspaceId} selected.dbPath=${selected?.databasePath} selected.mode=${selected?.mode} workspaces=${initialWorkspaces.map((w) => w.databasePath).join(",")}`,
       )
+      // Seed from the session cache on mount too, not just on an in-place
+      // switch: this hook remounts whenever StartupGate re-runs its health
+      // check (a workspace it has not verified yet, a retry, StrictMode's
+      // double mount in dev), and a fresh instance would otherwise drop
+      // back to the skeleton for a tree it already has.
+      const cached = sessionEpics.get(selected?.id)
+      if (cached) {
+        setEpics(cached)
+        epicsWorkspaceIdRef.current = selected?.id ?? null
+        hasExistingDataRef.current = true
+      }
       setCurrentWorkspace(selected)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on mount with initial data; currentWorkspace is being set here
@@ -232,8 +245,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         // every switch drops back to the skeleton for the length of a bd +
         // Dolt round trip. hasExistingDataRef gates that skeleton (see
         // home-page's `isLoading && !hasExistingDataRef.current`).
-        const cached = getSessionEpics(target.databasePath)
-        epicsDbPathRef.current = target.databasePath ?? null
+        const cached = sessionEpics.get(target.id)
+        epicsWorkspaceIdRef.current = target.id
         if (cached) {
           setEpics(cached)
           hasExistingDataRef.current = true
@@ -244,6 +257,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     [setHealthy],
   )
 
+  // Rail renames / icon changes are registry writes; patch the copies this
+  // hook holds so the Header updates without a workspace list refetch.
+  useWorkspaceLabelSync({ setActive: setCurrentWorkspace, setList: setWorkspaces })
+
   // Mirror the rendered tree into the session cache, so a switch away and
   // back paints the post-edit state rather than resurrecting beads that
   // were closed, archived or deleted since the load. Guarded by the path
@@ -251,9 +268,9 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   // the previous workspace's tree, and storing that under the new key
   // would turn a one-frame glitch into a persistent wrong-project paint.
   useEffect(() => {
-    if (epicsDbPathRef.current !== currentWorkspace?.databasePath) return
-    setSessionEpics(currentWorkspace?.databasePath, epics)
-  }, [epics, currentWorkspace?.databasePath])
+    if (epicsWorkspaceIdRef.current !== currentWorkspace?.id) return
+    sessionEpics.set(currentWorkspace?.id, epics)
+  }, [epics, currentWorkspace?.id])
 
   // Fire app_workspace_opened when a workspace STARTS loading (once per workspace.id)
   // This fires at load start so app_issues_rendered (which fires at load end) has
@@ -456,9 +473,9 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
 
   // Success branch: persist epics, clear flock contention, hydrate read state.
   const handleEpicsSuccess = useCallback(
-    (result: { epics: Epic[]; databasePath?: string }) => {
+    (result: { epics: Epic[]; workspaceId?: string }) => {
       setEpics(result.epics)
-      epicsDbPathRef.current = result.databasePath ?? null
+      epicsWorkspaceIdRef.current = result.workspaceId ?? null
       hasExistingDataRef.current = true
       setHealthy()
       // Clear flock contention state on success
@@ -577,6 +594,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     setHealthy()
     const dbPathForStamp = currentWorkspace?.databasePath ?? null
     recordLoadEpicsPhase("start", gen, dbPathForStamp)
+    const workspaceId = currentWorkspace?.id
     try {
       const dbPath = currentWorkspace?.databasePath
       const getEpicsStart = Date.now()
@@ -593,8 +611,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         })
         // Remember the tree so a switch back to this workspace paints
         // instantly instead of flashing the skeleton.
-        setSessionEpics(dbPath, result.epics)
-        handleEpicsSuccess({ epics: result.epics, databasePath: dbPath })
+        sessionEpics.set(workspaceId, result.epics)
+        handleEpicsSuccess({ epics: result.epics, workspaceId })
       } else {
         recordLoadEpicsPhase("error", gen, dbPathForStamp, {
           errorMessage: result.bdLoadError.message,

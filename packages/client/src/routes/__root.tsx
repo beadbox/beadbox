@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 import { DevBadge } from "../components/dev-badge"
 import { StartupGate, useWorkspaceGate } from "../components/startup-gate"
 import { Toaster } from "../components/ui/sonner"
+import { WorkspaceRailPanel } from "../components/workspace-rail-panel"
 import { PostHogProvider } from "../lib/posthog-provider"
 import { useChangeSubscription } from "../lib/subscribe"
 import { getWorkspaceCookie, subscribeWorkspaceCookie } from "../lib/workspace-cookie"
@@ -13,15 +14,19 @@ import { getWorkspaceCookie, subscribeWorkspaceCookie } from "../lib/workspace-c
 //   1. PostHogProvider — analytics init (gated by getAnalyticsEnabled()),
 //      no-op when VITE_POSTHOG_KEY is unset. Wraps everything so capture()
 //      calls from any descendant succeed.
-//   2. StartupGate — workspace registry health, version checks, redirect
+//   2. WorkspaceRailPanel — persistent, resizable left rail of workspace
+//      tabs (+ dashboard / add / remove). Sibling of the gate, not a
+//      child: it must stay mounted while the gate re-checks health on a
+//      workspace switch. Hidden below 768px.
+//   3. StartupGate — workspace registry health, version checks, redirect
 //      to /workspaces when no_registry. Renders error screens INSTEAD of
 //      children when health fails, so per-route Header mounts (inside
 //      <Outlet />) are structurally inside StartupGate and get replaced
 //      by the gate's error UI.
-//   3. <Outlet /> — TanStack Router renders the active route here. Per-
+//   4. <Outlet /> — TanStack Router renders the active route here. Per-
 //      route components mount their own Header (the chrome is in
 //      packages/client/src/components/header.tsx, available to import).
-//   4. Toaster + DevBadge — chrome that always renders regardless of route
+//   5. Toaster + DevBadge — chrome that always renders regardless of route
 //      or gate state. window.bd() helper is installed at module-load in
 //      main.tsx (bb-tu1m removed the prior console-logo.tsx planter along
 //      with the BEADBX ASCII + bd-help-tip dev-console noise).
@@ -44,10 +49,22 @@ export const Route = createRootRoute({
 function RootLayout() {
   return (
     <PostHogProvider>
-      <StartupGate>
-        <ChangeSubscriptionMount />
-        <Outlet />
-      </StartupGate>
+      {/* Shell row: the workspace rail is a sibling of the gated route
+          content, NOT one of the gate's children. StartupGate replaces its
+          children with the "Starting up..." spinner / error screens, and a
+          workspace switch re-runs that check — a rail inside would vanish
+          and re-appear on every switch. Height chain is html/body/#root at
+          100% (index.css bb-s3gb), so h-full here keeps the page shells'
+          own h-full working. */}
+      <div className="flex h-full min-h-0">
+        <WorkspaceRailPanel />
+        <div className="min-w-0 flex-1">
+          <StartupGate>
+            <ChangeSubscriptionMount />
+            <Outlet />
+          </StartupGate>
+        </div>
+      </div>
       <Toaster position="bottom-right" theme="dark" />
       <DevBadge />
     </PostHogProvider>

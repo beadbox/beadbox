@@ -18,7 +18,8 @@ export interface ServerConnection {
 // v2 registry entry with UUID identity
 export interface RegistryEntry {
   id: string // UUID, assigned at creation, immutable
-  name: string // display name
+  name: string // display name (user-editable)
+  icon?: string // user-chosen emoji shown on the workspace tab; absent = default glyph
   addedAt: string // ISO 8601
   local: { path: string } | null // null for server-only
   server: ServerConnection | null // null for local-only
@@ -293,7 +294,7 @@ function deduplicateEntries(registry: WorkspaceRegistry): WorkspaceRegistry {
 
 // Every registry mutation is a read-modify-write of one small JSON file, and
 // the sidecar handles rpc calls concurrently: two overlapping mutations (e.g.
-// two overlapping mutations of the same entry) used to interleave,
+// "rename this workspace" landing next to "set its icon") used to interleave,
 // losing one update and — because writeFile truncates in place — leaving a
 // half-written file on disk that no longer parses. Both mutations now run
 // under this process-wide queue, and the bytes land via tmp-file + rename so
@@ -346,7 +347,7 @@ export async function writeRegistry(registry: WorkspaceRegistry): Promise<void> 
  * that pair leaves a window in which a concurrent mutation is lost.
  *
  * `mutate` MUST NOT call another exported mutator (addWorkspace,
- * setActiveWorkspace, removeWorkspaceFromRegistry, ...): the queue is a single
+ * setActiveWorkspace, updateWorkspaceLabel, ...): the queue is a single
  * non-reentrant chain, so a nested task waits for the task that is already
  * holding it and both hang forever.
  *
@@ -529,6 +530,26 @@ export async function updateWorkspaceLocal(workspaceId: string, localPath: strin
   await mutateRegistry((registry) => {
     const entry = registry.workspaces.find((w) => w.id === workspaceId)
     if (entry) entry.local = { path: localPath }
+  })
+}
+
+/**
+ * Update a workspace's display label: name and/or icon (emoji).
+ * `icon: null` clears the icon. Returns the updated entry, or null when the
+ * workspace id is unknown.
+ */
+export async function updateWorkspaceLabel(
+  workspaceId: string,
+  label: { name?: string; icon?: string | null },
+): Promise<RegistryEntry | null> {
+  return mutateRegistry((registry) => {
+    const entry = registry.workspaces.find((w) => w.id === workspaceId)
+    if (!entry) return null
+    if (label.name !== undefined) entry.name = label.name
+    if (label.icon === null) delete entry.icon
+    else if (label.icon !== undefined) entry.icon = label.icon
+    console.log(`[beadbox-registry] relabeled workspace ${workspaceId}: ${entry.name}`)
+    return entry
   })
 }
 

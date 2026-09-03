@@ -15,9 +15,9 @@
 // parity runner against a real workspace.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 
 import {
   addWorkspaceByPath,
@@ -26,8 +26,9 @@ import {
   getWorkspaces,
   removeWorkspace,
   setActiveWorkspaceAction,
+  setWorkspaceLabel,
 } from "../handlers/workspaces"
-import { readRegistry, updateWorkspaceLocal } from "../lib/workspace-registry"
+import { readRegistry } from "../lib/workspace-registry"
 
 const ORIGINAL_REGISTRY_PATH = process.env.BEADBOX_REGISTRY_PATH
 const ORIGINAL_BEADS_REGISTRY_PATH = process.env.BEADS_REGISTRY_PATH
@@ -291,9 +292,9 @@ describe("getLocalWorkspaceOverlaps", () => {
   })
 })
 
-describe("registry write serialization", () => {
-  async function seedOne(): Promise<string> {
-    const beads = await makeBeadsDir("concurrent")
+describe("setWorkspaceLabel", () => {
+  async function registerOne(): Promise<string> {
+    const beads = await makeBeadsDir("labelled")
     await writeRegistry({
       version: 2,
       activeWorkspace: "w1",
@@ -311,34 +312,163 @@ describe("registry write serialization", () => {
     return beads
   }
 
-  test("concurrent mutations all land and leave valid JSON", async () => {
-    const beads = await seedOne()
-    const second = await makeBeadsDir("concurrent-second")
+  test("renames the entry and returns the resolved workspace", async () => {
+    await registerOne()
+    const result = await setWorkspaceLabel("w1", { name: "  Renamed   project " })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.workspace.name).toBe("Renamed project")
 
-    // Each mutation is a read-modify-write of registry.json. Interleaved,
-    // one update was lost and the truncating write left unparseable bytes.
-    await Promise.all([
-      addWorkspaceByPath(dirname(second)),
+    const reg = await readRegistry()
+    expect(reg.workspaces[0].name).toBe("Renamed project")
+  })
+
+  test("stores an emoji icon and clears it with null", async () => {
+    await registerOne()
+    const set = await setWorkspaceLabel("w1", { icon: "🚀" })
+    expect(set.success).toBe(true)
+    if (set.success) expect(set.workspace.icon).toBe("🚀")
+    expect((await readRegistry()).workspaces[0].icon).toBe("🚀")
+
+    const cleared = await setWorkspaceLabel("w1", { icon: null })
+    expect(cleared.success).toBe(true)
+    if (cleared.success) expect(cleared.workspace.icon).toBeUndefined()
+    expect((await readRegistry()).workspaces[0].icon).toBeUndefined()
+  })
+
+  test("an empty icon string clears the icon", async () => {
+    await registerOne()
+    await setWorkspaceLabel("w1", { icon: "🚀" })
+    await setWorkspaceLabel("w1", { icon: "   " })
+    expect((await readRegistry()).workspaces[0].icon).toBeUndefined()
+  })
+
+  test("rejects an empty name, an over-long name and a control-char icon", async () => {
+    await registerOne()
+    expect(await setWorkspaceLabel("w1", { name: "   " })).toEqual({
+      success: false,
+      error: "Name cannot be empty.",
+    })
+    const long = await setWorkspaceLabel("w1", { name: "x".repeat(65) })
+    expect(long.success).toBe(false)
+    const control = await setWorkspaceLabel("w1", { icon: "a\u0007" })
+    expect(control).toEqual({ success: false, error: "Icon must be a single emoji." })
+    const pasted = await setWorkspaceLabel("w1", { icon: "not an emoji, a sentence" })
+    expect(pasted).toEqual({ success: false, error: "Icon must be a single emoji." })
+
+    const reg = await readRegistry()
+    expect(reg.workspaces[0].name).toBe("Original")
+    expect(reg.workspaces[0].icon).toBeUndefined()
+  })
+
+  test("reports an unknown workspace id", async () => {
+    await registerOne()
+    expect(await setWorkspaceLabel("nope", { name: "x" })).toEqual({
+      success: false,
+      error: "Workspace not found.",
+    })
+  })
+
+  test("rejects a short non-emoji icon and accepts multi-code-point emoji", async () => {
+    await registerOne()
+    // Short enough to clear the length cap: only the emoji rule catches it.
+    expect(await setWorkspaceLabel("w1", { icon: "abc" })).toEqual({
+      success: false,
+      error: "Icon must be a single emoji.",
+    })
+    expect((await readRegistry()).workspaces[0].icon).toBeUndefined()
+
+    const zwj = await setWorkspaceLabel("w1", { icon: "\uD83D\uDC69\u200D\uD83D\uDCBB" })
+    expect(zwj.success).toBe(true)
+    expect((await readRegistry()).workspaces[0].icon).toBe("\uD83D\uDC69\u200D\uD83D\uDCBB")
+
+    const vs16 = await setWorkspaceLabel("w1", { icon: "\u2764\uFE0F" })
+    expect(vs16.success).toBe(true)
+    expect((await readRegistry()).workspaces[0].icon).toBe("\u2764\uFE0F")
+  })
+
+  test("rejects a non-string name and a non-object label without throwing", async () => {
+    await registerOne()
+    expect((await setWorkspaceLabel("w1", { name: 42 as never })).success).toBe(false)
+    expect((await setWorkspaceLabel("w1", "Renamed" as never)).success).toBe(false)
+    expect((await setWorkspaceLabel("w1", null as never)).success).toBe(false)
+    expect((await setWorkspaceLabel("w1", { icon: 7 as never })).success).toBe(false)
+
+    const reg = await readRegistry()
+    expect(reg.workspaces[0].name).toBe("Original")
+    expect(reg.workspaces[0].icon).toBeUndefined()
+  })
+
+  test("rejects a name carrying a control character or a bidi override", async () => {
+    await registerOne()
+    expect(await setWorkspaceLabel("w1", { name: "Proj\u0007ect" })).toEqual({
+      success: false,
+      error: "Name contains characters that cannot be displayed.",
+    })
+    expect(await setWorkspaceLabel("w1", { name: "Proj\u202Eect" })).toEqual({
+      success: false,
+      error: "Name contains characters that cannot be displayed.",
+    })
+    expect((await readRegistry()).workspaces[0].name).toBe("Original")
+  })
+
+  test("an empty patch returns the workspace without touching the registry file", async () => {
+    await registerOne()
+    const before = await readFile(sandboxRegistry, "utf-8")
+    const result = await setWorkspaceLabel("w1", {})
+    expect(result.success).toBe(true)
+    if (result.success) expect(result.workspace.name).toBe("Original")
+    expect(await readFile(sandboxRegistry, "utf-8")).toBe(before)
+  })
+
+  test("an unknown workspace id does not rewrite the registry file", async () => {
+    await registerOne()
+    const before = await readFile(sandboxRegistry, "utf-8")
+    expect(await setWorkspaceLabel("nope", { name: "x" })).toEqual({
+      success: false,
+      error: "Workspace not found.",
+    })
+    expect(await readFile(sandboxRegistry, "utf-8")).toBe(before)
+  })
+})
+
+describe("registry write serialization", () => {
+  test("concurrent label writes both land and leave valid JSON", async () => {
+    const beads = await makeBeadsDir("concurrent")
+    await writeRegistry({
+      version: 2,
+      activeWorkspace: "w1",
+      workspaces: [
+        {
+          id: "w1",
+          name: "Original",
+          addedAt: "2026-01-01",
+          local: { path: beads },
+          server: null,
+          mode: "embedded",
+        },
+      ],
+    })
+
+    // The rail used to fire name and icon as two rpc calls; each is a
+    // read-modify-write of registry.json. Interleaved, one update was lost
+    // and the truncating write left unparseable bytes on disk.
+    const [renamed, iconed] = await Promise.all([
+      setWorkspaceLabel("w1", { name: "Renamed" }),
+      setWorkspaceLabel("w1", { icon: "🐏" }),
       setActiveWorkspaceAction(beads),
-      updateWorkspaceLocal("w1", beads),
     ])
+    expect(renamed.success).toBe(true)
+    expect(iconed.success).toBe(true)
 
     const raw = await readFile(sandboxRegistry, "utf-8")
     expect(() => JSON.parse(raw)).not.toThrow()
 
     const reg = await readRegistry()
-    expect(reg.workspaces).toHaveLength(2)
-    expect(reg.workspaces.map((w) => w.name)).toContain("Original")
+    expect(reg.workspaces).toHaveLength(1)
+    expect(reg.workspaces[0].name).toBe("Renamed")
+    expect(reg.workspaces[0].icon).toBe("🐏")
     expect(reg.activeWorkspace).toBe("w1")
-  })
-
-  test("a mutation that changes nothing does not rewrite the file", async () => {
-    await seedOne()
-    const before = await readFile(sandboxRegistry, "utf-8")
-
-    await updateWorkspaceLocal("does-not-exist", "/tmp/nope/.beads")
-
-    expect(await readFile(sandboxRegistry, "utf-8")).toBe(before)
   })
 
   test("an unparseable registry is quarantined instead of silently emptied", async () => {
@@ -352,29 +482,79 @@ describe("registry write serialization", () => {
     expect(files).not.toContain("registry.json")
   })
 
-  test("a structurally odd but valid-JSON entry is skipped, not quarantined", async () => {
-    await writeFile(
-      sandboxRegistry,
-      JSON.stringify({
-        version: 2,
-        activeWorkspace: null,
-        workspaces: [
-          { id: "bad", name: "bad", addedAt: "2026-01-01", local: {}, server: null },
-          {
-            id: "good",
-            name: "good",
-            addedAt: "2026-01-01",
-            local: { path: "/tmp/good/.beads" },
-            server: null,
-            mode: "embedded",
-          },
-        ],
-      }),
-    )
+  test("a valid-JSON registry with a structurally odd entry is not quarantined", async () => {
+    const beads = await makeBeadsDir("sane")
+    await writeRegistry({
+      version: 2,
+      activeWorkspace: null,
+      workspaces: [
+        {
+          id: "odd",
+          name: "Odd",
+          addedAt: "2026-01-01",
+          local: {},
+          server: null,
+          mode: "embedded",
+        },
+        {
+          id: "bad-path",
+          name: "BadPath",
+          addedAt: "2026-01-01",
+          local: { path: 42 },
+          server: null,
+          mode: "embedded",
+        },
+        {
+          id: "sane",
+          name: "Sane",
+          addedAt: "2026-01-01",
+          local: { path: beads },
+          server: null,
+          mode: "embedded",
+        },
+      ],
+    })
 
-    const reg = await readRegistry()
-    expect(reg.workspaces.map((w) => w.id)).toEqual(["good"])
+    // Odd entries are dropped on load; they are not evidence of corrupt JSON.
+    expect((await getWorkspaces()).map((w) => w.id)).toEqual(["sane"])
+
     const files = await readdir(sandboxDir)
+    expect(files).toContain("registry.json")
     expect(files.some((f) => f.startsWith("registry.json.corrupt-"))).toBe(false)
+  })
+
+  test("a read failure that is not ENOENT propagates instead of reporting empty", async () => {
+    // A directory where the registry should be makes readFile fail with
+    // EISDIR. Swallowing that returned an empty registry, and the next
+    // mutation persisted the emptiness over a file it had failed to read.
+    const asDirectory = join(sandboxDir, "registry-as-dir.json")
+    await mkdir(asDirectory, { recursive: true })
+    process.env.BEADBOX_REGISTRY_PATH = asDirectory
+
+    await expect(readRegistry()).rejects.toThrow()
+  })
+
+  test("the written registry is owner-only and leaves no tmp file behind", async () => {
+    const beads = await makeBeadsDir("perms")
+    await writeRegistry({
+      version: 2,
+      activeWorkspace: null,
+      workspaces: [
+        {
+          id: "w1",
+          name: "Original",
+          addedAt: "2026-01-01",
+          local: { path: beads },
+          server: null,
+          mode: "embedded",
+        },
+      ],
+    })
+
+    expect((await setWorkspaceLabel("w1", { name: "Renamed" })).success).toBe(true)
+
+    const mode = (await stat(sandboxRegistry)).mode & 0o777
+    expect(mode).toBe(0o600)
+    expect((await readdir(sandboxDir)).filter((f) => f.endsWith(".tmp"))).toEqual([])
   })
 })
