@@ -387,6 +387,30 @@ describe("setWorkspaceLabel", () => {
     expect((await readRegistry()).workspaces[0].icon).toBe("\u2764\uFE0F")
   })
 
+  test("accepts a keycap icon but still rejects its bare base character", async () => {
+    await registerOne()
+    // The OS emoji picker offers keycaps, and the tab dialog's free-text
+    // field passes through whatever it produces. The base is an ASCII digit,
+    // so the Extended_Pictographic rule alone rejects it.
+    const keycap = await setWorkspaceLabel("w1", { icon: "1\uFE0F\u20E3" })
+    expect(keycap.success).toBe(true)
+    expect((await readRegistry()).workspaces[0].icon).toBe("1\uFE0F\u20E3")
+
+    const hash = await setWorkspaceLabel("w1", { icon: "#\uFE0F\u20E3" })
+    expect(hash.success).toBe(true)
+
+    // Without the enclosing keycap the same base is just a character.
+    expect(await setWorkspaceLabel("w1", { icon: "1" })).toEqual({
+      success: false,
+      error: "Icon must be a single emoji.",
+    })
+    expect(await setWorkspaceLabel("w1", { icon: "#" })).toEqual({
+      success: false,
+      error: "Icon must be a single emoji.",
+    })
+    expect((await readRegistry()).workspaces[0].icon).toBe("#\uFE0F\u20E3")
+  })
+
   test("rejects a non-string name and a non-object label without throwing", async () => {
     await registerOne()
     expect((await setWorkspaceLabel("w1", { name: 42 as never })).success).toBe(false)

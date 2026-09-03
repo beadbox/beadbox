@@ -962,12 +962,18 @@ const MAX_WORKSPACE_ICON_LENGTH = 16
 
 // One emoji grapheme: an Extended_Pictographic base carrying its variation
 // selector, skin-tone modifier or tag characters, optionally ZWJ-joined to
-// more of the same ("👩‍💻"), or a two-character regional-indicator flag.
+// more of the same ("👩‍💻"), a two-character regional-indicator flag, or a
+// keycap ("1️⃣"). Keycaps need their own alternative: their base is an ASCII
+// digit, "#" or "*", which is not Extended_Pictographic, so the first branch
+// rejects them even though the OS emoji picker offers them and the tab
+// dialog's free-text field accepts whatever it produces.
 // The icon is rendered as the workspace avatar, so a plain string like "abc"
 // — which a length-only check accepts — must not reach it.
 const EMOJI_PART = String.raw`\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}|[\u{E0020}-\u{E007F}])*`
+// U+20E3 is mandatory here, so a bare "1" stays rejected.
+const KEYCAP = String.raw`[0-9#*]\uFE0F?\u20E3`
 const SINGLE_EMOJI = new RegExp(
-  `^(?:${EMOJI_PART}(?:\\u200D${EMOJI_PART})*|\\p{Regional_Indicator}{2})$`,
+  `^(?:${EMOJI_PART}(?:\\u200D${EMOJI_PART})*|\\p{Regional_Indicator}{2}|${KEYCAP})$`,
   "u",
 )
 
