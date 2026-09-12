@@ -1,5 +1,8 @@
 # Beadbox
 
+> Beadbox has a sister project, [initech](https://github.com/nmelo/initech) — a runtime for agents that collaborate with each other from one terminal, optimized for steerability.
+> Beadbox is built and maintained with it; worth a look.
+
 A fast, native GUI for the [beads](https://github.com/gastownhall/beads) issue tracker.
 
 Beadbox gives `bd` users a visual interface for the things a terminal can't show well — epic trees, dependency structure, pipeline state, and live activity — without making simple operations slower than typing `bd show`.
