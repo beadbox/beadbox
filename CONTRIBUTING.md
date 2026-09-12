@@ -12,6 +12,22 @@ Beadbox is licensed under the [MIT License](LICENSE). By submitting a contributi
 - **Features:** open an issue first to discuss scope before investing in an implementation. Beadbox has a strong point of view — it's a GUI over the `bd` CLI, and the CLI is the source of truth. Features that bypass `bd` or duplicate its state won't be accepted.
 - **Small fixes:** typos, obvious bugs — just open a PR.
 
+## How we handle your PR
+
+**AI-assisted PRs are welcome.** Write your patch however you work best — by hand, with an agent, or somewhere in between. What matters is that the change is right, tested, and something you can stand behind; not how it was typed.
+
+**We would rather fix your PR than bounce it.** Asking you for changes is our last resort: it's a slow round-trip against a fast-moving `main`, and a PR that stalls helps nobody. So when a change is valuable but not quite there, we will usually land it and fix forward, fix it ourselves before landing, take the parts that fit, or split it into pieces we can land separately. You keep the credit either way — external PRs land as a single squashed commit authored by the project, with your `Co-authored-by:` trailer, and the change is credited in the release notes.
+
+If we can't take a change, we'll close the PR with a specific reason rather than letting it sit: superseded by other work, too narrow for core, or a problem we decided to solve differently — in which case we'll point you at how we solved it.
+
+**Hygiene that makes this work** — if you miss one we'll usually just fix it and mention it when we land:
+
+- **One concern per PR.** Two unrelated fixes are two PRs.
+- **No drafts.** Open it when you want it looked at.
+- **Minimal diff.** No drive-by reformatting, no stray files, no lockfile churn your change didn't need.
+- **Rebase on the latest `main` right before you submit.**
+- **Prefer extension points to core.** If a change teaches Beadbox about one specific third-party tool, it usually belongs at an extension point rather than in the core data path.
+
 ## Development setup
 
 Prerequisites: [Bun](https://bun.sh), [Rust](https://rustup.rs) (stable), Node.js, the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform, and the [beads CLI](https://github.com/gastownhall/beads) ≥ 1.0.1.
