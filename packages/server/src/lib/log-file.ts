@@ -8,7 +8,17 @@
 // installs the mirror at boot, then the existing console.error /
 // process.stderr.write paths produce file content for free.
 
-import { closeSync, fstatSync, mkdirSync, openSync, renameSync, statSync, writeSync } from "node:fs"
+import {
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs"
 import { homedir } from "node:os"
 import { isAbsolute, join } from "node:path"
 
@@ -57,6 +67,67 @@ export function _setLogRotationForTests(opts: { maxBytes?: number; checkEvery?: 
   if (opts.checkEvery !== undefined) checkEvery = opts.checkEvery
 }
 
+// beadbox-qyl: which sidecar build wrote a log. Before v0.27 the log was
+// rewritten on every boot, so anything leaked into it lived until the next
+// launch; the append-only log would carry it across an upgrade instead. The
+// sidecar is not told its app version, so the build is the binary itself: an
+// upgrade replaces it (new size/mtime), a relaunch of the same install doesn't.
+let buildIdOverride: string | null = null
+
+/** Test seam: pretend to be a given build. */
+export function _setBuildIdForTests(id: string): void {
+  buildIdOverride = id
+}
+
+function buildId(): string {
+  if (buildIdOverride !== null) return buildIdOverride
+  try {
+    const st = statSync(process.execPath)
+    return `${st.size}-${Math.floor(st.mtimeMs)}`
+  } catch {
+    return "unknown"
+  }
+}
+
+/** The build= value of a log file's first header; null if it has none or can't be read. */
+function firstHeaderBuild(path: string): string | null {
+  let fd: number | null = null
+  try {
+    fd = openSync(path, "r")
+    const buf = Buffer.alloc(512)
+    const n = readSync(fd, buf, 0, buf.length, 0)
+    const header = buf
+      .subarray(0, n)
+      .toString("utf8")
+      .match(/^--- .* ---$/m)?.[0]
+    return header?.match(/ build=(\S+)/)?.[1] ?? null
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) closeSync(fd)
+  }
+}
+
+/**
+ * Delete <log> and <log>.1 when an earlier (or any other) build wrote them.
+ * Deleted, not rotated: a secret an earlier version leaked must not survive
+ * as a .1. Returns true when anything was removed.
+ */
+function discardOtherBuildsLogs(path: string, build: string): boolean {
+  let removed = false
+  for (const candidate of [path, `${path}.1`]) {
+    if (statFile(candidate) === null) continue
+    if (firstHeaderBuild(candidate) === build) continue
+    try {
+      unlinkSync(candidate)
+      removed = true
+    } catch {
+      /* best-effort: logging must never stop the sidecar */
+    }
+  }
+  return removed
+}
+
 function openAt(path: string, header: string): number {
   mkdirSync(join(path, ".."), { recursive: true })
   // O_APPEND keeps concurrent Production and Local sidecars from overwriting
@@ -70,9 +141,12 @@ function openWriter(): number | null {
   if (logFd !== null || openFailed) return logFd
   try {
     logPath = resolveLogPath()
+    const build = buildId()
+    const removed = discardOtherBuildsLogs(logPath, build)
     logFd = openAt(
       logPath,
-      `\n--- ${new Date().toISOString()} sidecar boot pid=${process.pid} ---\n`,
+      `\n--- ${new Date().toISOString()} sidecar boot pid=${process.pid} build=${build} ---\n` +
+        (removed ? "previous log from another build removed\n" : ""),
     )
     maintainLog()
   } catch (err) {
@@ -99,13 +173,15 @@ function maintainLog(): void {
     const ours = fstatSync(logFd)
     if (!onDisk || onDisk.ino !== ours.ino || onDisk.dev !== ours.dev) {
       reopen(
-        `\n--- ${new Date().toISOString()} log reopened after rotation pid=${process.pid} ---\n`,
+        `\n--- ${new Date().toISOString()} log reopened after rotation pid=${process.pid} build=${buildId()} ---\n`,
       )
       return
     }
     if (onDisk.size <= maxBytes) return
     renameSync(logPath, `${logPath}.1`)
-    reopen(`\n--- ${new Date().toISOString()} log rotated pid=${process.pid} ---\n`)
+    reopen(
+      `\n--- ${new Date().toISOString()} log rotated pid=${process.pid} build=${buildId()} ---\n`,
+    )
   } catch {
     /* rotation is best-effort; logging continues on the current fd */
   }
