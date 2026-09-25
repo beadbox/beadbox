@@ -29,6 +29,10 @@ export interface RegistryEntry {
   // Server lifecycle ownership must therefore be independent of `local`.
   serverOwnership?: "external" | "managed" | "unknown"
   credentialKey?: string // OS keychain account name (host:port/database/user)
+  // Opt-in to reading through bd serve (pilot). Only a literal true enables it:
+  // the registry is read without validation, so treat anything else as off.
+  // Not carried by replaceWorkspace, which creates a different target.
+  serveReads?: boolean
 }
 
 export type ServerOwnership = NonNullable<RegistryEntry["serverOwnership"]>

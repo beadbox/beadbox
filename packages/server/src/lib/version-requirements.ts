@@ -5,6 +5,9 @@
 // Used by the Settings System section, incompatibility banner, and diagnostics.
 
 export const MIN_BD_VERSION = "1.1.0"
+// bd serve (the HTTP read API) first shipped stable in 1.3.0. Below it, and
+// for every workspace that has not opted in, reads use the CLI.
+export const SERVE_MIN_BD_VERSION = "1.3.0"
 export const MIN_DOLT_VERSION = "1.0.0"
 export const RECOMMENDED_DOLT_VERSION = "1.82.0"
 
