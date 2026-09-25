@@ -368,13 +368,36 @@ async function readRegistryUnqueued(): Promise<{ registry: WorkspaceRegistry; mi
   return { registry: emptyRegistry(), migrated: false }
 }
 
+/** An unusable registry file set aside this session, for startup to report. */
+export interface RegistryQuarantine {
+  registryPath: string
+  reason: string
+  /** Where the bytes went; null if moving them aside failed. */
+  movedTo: string | null
+}
+
+// Kept for the sidecar's lifetime: quarantining leaves the app with an empty
+// workspace list, and without this the user is never told why (beadbox-4n0).
+let registryQuarantine: RegistryQuarantine | null = null
+
+export function getRegistryQuarantine(): RegistryQuarantine | null {
+  return registryQuarantine
+}
+
+/** Test hook. */
+export function _resetRegistryQuarantine(): void {
+  registryQuarantine = null
+}
+
 async function quarantineUnreadableRegistry(registryPath: string, reason: string): Promise<void> {
   try {
     await stat(registryPath)
     const quarantined = `${registryPath}.corrupt-${Date.now()}`
     await rename(registryPath, quarantined)
+    registryQuarantine = { registryPath, reason, movedTo: quarantined }
     console.error(`[beadbox-registry] registry is unusable (${reason}); moved to ${quarantined}`)
   } catch {
+    registryQuarantine = { registryPath, reason, movedTo: null }
     console.error(`[beadbox-registry] registry is unreadable (${reason})`)
   }
 }

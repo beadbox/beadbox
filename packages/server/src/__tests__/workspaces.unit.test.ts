@@ -28,7 +28,8 @@ import {
   setActiveWorkspaceAction,
   setWorkspaceLabel,
 } from "../handlers/workspaces"
-import { addWorkspace, readRegistry } from "../lib/workspace-registry"
+import { runStartupHealth } from "../handlers/health"
+import { _resetRegistryQuarantine, addWorkspace, readRegistry } from "../lib/workspace-registry"
 
 const ORIGINAL_REGISTRY_PATH = process.env.BEADBOX_REGISTRY_PATH
 const ORIGINAL_BEADS_REGISTRY_PATH = process.env.BEADS_REGISTRY_PATH
@@ -565,6 +566,31 @@ describe("registry write serialization", () => {
     const files = await readdir(sandboxDir)
     expect(files.some((f) => f.startsWith("registry.json.corrupt-"))).toBe(true)
     expect(files).not.toContain("registry.json")
+  })
+
+  // Quarantining keeps the bytes, but on its own the app then starts with an
+  // empty list and no word about why (beadbox-4n0, folded into beadbox-x3y).
+  // Startup health reports it so the gate can show an error screen.
+  test("startup health reports a quarantined registry: where it went and why", async () => {
+    const original = '{"version": 2, "workspa'
+    await writeFile(sandboxRegistry, original)
+    _resetRegistryQuarantine()
+
+    const health = await runStartupHealth()
+    expect(health.hasWorkspaces).toBe(false)
+    expect(health.registryQuarantine).toBeDefined()
+    const q = health.registryQuarantine!
+    expect(q.registryPath).toBe(sandboxRegistry)
+    expect(q.reason).toContain("not valid JSON")
+    expect(q.movedTo).toStartWith(`${sandboxRegistry}.corrupt-`)
+    expect(await readFile(q.movedTo!, "utf-8")).toBe(original)
+  })
+
+  test("control: a readable registry reports no quarantine", async () => {
+    _resetRegistryQuarantine()
+    await writeRegistry({ version: 2, activeWorkspace: null, workspaces: [] })
+    const health = await runStartupHealth()
+    expect(health.registryQuarantine).toBeUndefined()
   })
 
   test("a valid-JSON registry with a structurally odd entry is not quarantined", async () => {

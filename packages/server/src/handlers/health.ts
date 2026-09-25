@@ -12,9 +12,10 @@ import { isValidDbPath } from "../lib/path-validation"
 import type { HealthError } from "../lib/startup-machine"
 import type { Workspace } from "../lib/types"
 import { checkHealth, resolvePort } from "../lib/workspace-health"
-import type { RegistryEntry } from "../lib/workspace-registry"
+import type { RegistryEntry, RegistryQuarantine } from "../lib/workspace-registry"
 import {
   findWorkspace,
+  getRegistryQuarantine,
   projectDirFromDatabasePath,
   readRegistry,
   removeWorkspaceFromRegistry,
@@ -127,6 +128,8 @@ interface StartupHealthResult {
   bdVersion?: string
   bdPath?: string
   doltVersion?: string
+  /** Set when the registry file was unusable and moved aside this session. */
+  registryQuarantine?: RegistryQuarantine
 }
 
 function registryEntryToWorkspace(entry: RegistryEntry): Workspace {
@@ -229,9 +232,10 @@ export async function runStartupHealth(cookieWorkspaceId?: string): Promise<Star
   resetPathCaches()
 
   const registry = await readRegistry()
+  const registryQuarantine = getRegistryQuarantine() ?? undefined
 
   if (registry.workspaces.length === 0) {
-    return { hasWorkspaces: false, workspaces: [], platform: process.platform }
+    return { hasWorkspaces: false, workspaces: [], platform: process.platform, registryQuarantine }
   }
 
   // Resolve target workspace: cookie UUID -> registry activeWorkspace -> first entry
@@ -281,5 +285,6 @@ export async function runStartupHealth(cookieWorkspaceId?: string): Promise<Star
     platform: process.platform,
     bdVersion: healthResult.bdVersion,
     bdPath: healthResult.bdPath,
+    registryQuarantine,
   }
 }

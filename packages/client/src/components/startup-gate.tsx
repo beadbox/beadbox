@@ -116,6 +116,11 @@ export function StartupGate({ children }: StartupGateProps) {
   // "checking", i.e. the same phase the effect already ran for.
   const [checkNonce, setCheckNonce] = useState(0)
 
+  // The registry file was unusable and set aside, so the workspace list is
+  // empty for a reason the user must hear before anything else (beadbox-4n0).
+  const [registryQuarantine, setRegistryQuarantine] = useState<StartupHealthResult["registryQuarantine"]>()
+  const [registryQuarantineSeen, setRegistryQuarantineSeen] = useState(false)
+
   // Fallback for no_registry redirect: if router.push doesn't navigate within 3s,
   // show a clickable link so the user isn't stuck on an infinite spinner.
   const [showRedirectFallback, setShowRedirectFallback] = useState(false)
@@ -209,6 +214,7 @@ export function StartupGate({ children }: StartupGateProps) {
         if (cancelled) return
 
         setServerPlatform(result.platform)
+        setRegistryQuarantine(result.registryQuarantine)
 
         if (!result.hasWorkspaces) {
           dispatch({ type: "NO_WORKSPACES" })
@@ -344,6 +350,17 @@ export function StartupGate({ children }: StartupGateProps) {
   }, [])
 
   // --- Render ---
+
+  // Ahead of the /workspaces bypass: an empty registry redirects there, which
+  // is exactly where the user would otherwise find a blank list and no reason.
+  if (registryQuarantine && !registryQuarantineSeen) {
+    return (
+      <RegistryQuarantineScreen
+        quarantine={registryQuarantine}
+        onContinue={() => setRegistryQuarantineSeen(true)}
+      />
+    )
+  }
 
   // Bypass: /workspaces has its own workspace management flow and must render
   // even when the gate hasn't reached "healthy" (e.g., first launch with no workspaces,
@@ -917,3 +934,40 @@ function ErrorGuidance({
 // fired on transient WS/polling blips and covered the top of the app
 // with a Retry button. Real bd failures still surface through action
 // error toasts and the AppHealth status surface.
+
+function RegistryQuarantineScreen({
+  quarantine,
+  onContinue,
+}: {
+  quarantine: NonNullable<StartupHealthResult["registryQuarantine"]>
+  onContinue: () => void
+}) {
+  return (
+    <div className="h-full flex items-center justify-center bg-background p-6">
+      <div role="alert" className="max-w-lg space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-5 text-sm">
+        <h2 className="text-base font-semibold text-foreground">Your workspace list could not be read</h2>
+        <p className="text-muted-foreground">
+          Beadbox could not read <code className="font-mono">{quarantine.registryPath}</code> ({quarantine.reason}).
+        </p>
+        {quarantine.movedTo ? (
+          <p className="text-muted-foreground">
+            The file was moved to <code className="font-mono">{quarantine.movedTo}</code>, so nothing in it was lost,
+            and Beadbox started with an empty workspace list. To get your workspaces back, repair that file, move it
+            back to <code className="font-mono">{quarantine.registryPath}</code>, and restart Beadbox.
+          </p>
+        ) : (
+          <p className="text-muted-foreground">
+            The file could not be moved aside and was left where it is. Beadbox started with an empty workspace list.
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={onContinue}
+          className="rounded bg-primary px-3 py-1.5 font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          Continue with an empty list
+        </button>
+      </div>
+    </div>
+  )
+}
