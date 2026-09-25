@@ -4,8 +4,11 @@
 // identical signatures and return shapes.
 
 import { homedir } from "os"
+import { isAbsolute, resolve } from "path"
+import { flagArg } from "../lib/bd-argv"
 import { COMMON_BD_PATHS, resetPathCaches, resolveBdPath } from "../lib/bd-paths"
 import { execFileAsync } from "../lib/exec"
+import { isValidDbPath } from "../lib/path-validation"
 import type { HealthError } from "../lib/startup-machine"
 import type { Workspace } from "../lib/types"
 import { checkHealth, resolvePort } from "../lib/workspace-health"
@@ -175,16 +178,38 @@ export interface MigrationResult {
  * migrations. Used by the schema_migration_needed error screen so the user
  * can recover without leaving Beadbox. --yes auto-confirms the interactive
  * prompt; bd migrate is idempotent when the schema is already up to date.
+ *
+ * This is a webview-callable WRITE, so the path is validated before bd is
+ * spawned (beadbox-226): it must be an absolute .beads path (the siblings'
+ * isValidDbPath check, plus isAbsolute, which isValidDbPath does not enforce)
+ * AND a registered local workspace. The client only ever sends back the
+ * workspacePath the server gave it, which is a registered local.path, so
+ * anything else is refused. bd receives the registered path, not the client's.
  */
 export async function runWorkspaceMigration(workspacePath: string): Promise<MigrationResult> {
   if (!workspacePath) {
     return { ok: false, error: "Missing workspace path" }
   }
+  if (!isAbsolute(workspacePath) || !isValidDbPath(workspacePath)) {
+    return {
+      ok: false,
+      error: `Invalid database path: ${workspacePath} (must be a .beads directory or a file inside one)`,
+    }
+  }
+  const registry = await readRegistry()
+  const target = resolve(workspacePath)
+  const entry = registry.workspaces.find((w) => w.local && resolve(w.local.path) === target)
+  if (!entry?.local) {
+    return {
+      ok: false,
+      error: `Invalid database path: ${workspacePath} (not a registered workspace)`,
+    }
+  }
   const bdPath = resolveBdPath()
   try {
     const { stdout, stderr } = await execFileAsync(
       bdPath,
-      ["migrate", "--db", workspacePath, "--yes"],
+      ["migrate", flagArg("--db", entry.local.path), "--yes"],
       { timeout: 60_000 },
     )
     return { ok: true, stdout, stderr }

@@ -51,7 +51,7 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
   },
   "handlers/health.ts::runWorkspaceMigration::execFileAsync": {
     count: 1,
-    why: "migrate --db <workspacePath> --yes: the path is the value of a two-token --db, so it cannot become a flag. KNOWN GAP (beadbox-c29 finding F-2): no isValidDbPath check on this client-supplied path, unlike its siblings",
+    why: "migrate --db=<path> --yes: refuses a relative, non-.beads or unregistered path before spawning; bd receives the REGISTERED local.path as a single --db= token (beadbox-226, health-migration.security.test.ts)",
   },
   "handlers/recovery.ts::runRecoveryCommand::execFileAsync": {
     count: 1,
