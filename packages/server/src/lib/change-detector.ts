@@ -272,7 +272,7 @@ function bdServerPoll(dbPath: string): Promise<string> {
     const serverKey = `${server.host}:${server.port}/${server.database}`
     const password = getWorkspacePassword(serverKey)
     Object.assign(env, buildServerEnv(server, password))
-    args = ["sql", SERVER_POLL_SQL, "--json", "--quiet"]
+    args = ["sql", SERVER_POLL_SQL, "--json", "--quiet", "--readonly"]
     cwd = undefined
   } else {
     const port = readDoltPort(dbPath)
@@ -280,7 +280,7 @@ function bdServerPoll(dbPath: string): Promise<string> {
     const wsPath = projectRootFromDb(dbPath)
     const password = wsPath ? getWorkspacePassword(wsPath) : undefined
     if (password) env.BEADS_DOLT_PASSWORD = password
-    args = ["sql", SERVER_POLL_SQL, "--db", normalizeDbPath(dbPath), "--json", "--quiet"]
+    args = ["sql", SERVER_POLL_SQL, "--db", normalizeDbPath(dbPath), "--json", "--quiet", "--readonly"]
     cwd = wsPath ?? undefined
   }
 
@@ -638,7 +638,7 @@ BD="$3"
 LAST=""
 ERRS=0
 while true; do
-  RESULT=$("$BD" sql '${POLL_SQL}' --db "$DBPATH" --json --quiet 2>/dev/null)
+  RESULT=$("$BD" sql '${POLL_SQL}' --db "$DBPATH" --json --quiet --readonly 2>/dev/null)
   RC=$?
   if [ $RC -ne 0 ]; then
     ERRS=$((ERRS + 1))

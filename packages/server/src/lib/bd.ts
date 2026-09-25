@@ -34,6 +34,7 @@ import type {
   MolProgressRaw,
   ServerDatabase,
 } from "./types"
+import { readOnlyQuery } from "./read-only-query"
 import { parseServerUri, type ServerConnection } from "./workspace-registry"
 
 // Reset helpers are exported for test teardown only.
@@ -1234,8 +1235,7 @@ async function serverSqlQuery<T>(sql: string, options: BdOptions): Promise<T[]> 
     connectTimeout: 5000,
   })
   try {
-    const [rows] = await conn.query(sql)
-    return rows as T[]
+    return await readOnlyQuery<T>(conn, sql)
   } finally {
     await conn.end().catch(() => {})
   }
@@ -1274,7 +1274,7 @@ export async function getDataFingerprint(options: BdOptions = {}): Promise<strin
   }
   const sql =
     "SELECT HASHOF('HEAD') as h, (SELECT MAX(updated_at) FROM issues) as i, (SELECT COUNT(*) FROM comments) as c"
-  const rows = await bdExec<Array<Record<string, string>>>(["sql", sql], options)
+  const rows = await bdExec<Array<Record<string, string>>>(["sql", sql, "--readonly"], options)
   return JSON.stringify(rows)
 }
 
@@ -1298,7 +1298,7 @@ export async function getChangedBeadIds(since: string, options: BdOptions = {}):
     return rows.map((r) => r.id)
   }
   const sql = `SELECT id FROM issues WHERE updated_at > '${since}'`
-  const rows = await bdExec<Array<{ id: string }>>(["sql", sql], options)
+  const rows = await bdExec<Array<{ id: string }>>(["sql", sql, "--readonly"], options)
   return rows.map((r) => r.id)
 }
 
@@ -1347,7 +1347,7 @@ async function runBlocksQuery(schema: BlocksSchema, options: BdOptions & { db: s
   const sql = BLOCKS_SQL[schema]
   const rows = isServerOnlyWithoutScaffold(options.db)
     ? await serverSqlQuery<BlocksRow>(sql, options)
-    : await bdExec<BlocksRow[]>(["sql", sql], options)
+    : await bdExec<BlocksRow[]>(["sql", sql, "--readonly"], options)
   // The old code reached its catch only via a TypeError from iterating a
   // non-array. Say what actually happened instead.
   if (!Array.isArray(rows)) throw new Error(`bd sql returned ${rows === null ? "null" : typeof rows}, not rows`)
