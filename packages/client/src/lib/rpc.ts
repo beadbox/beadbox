@@ -30,6 +30,17 @@ export type RemoteApi = typeof serverHandlers
 
 const SIDECAR_NAME = "beadbox-sidecar"
 
+/**
+ * The sidecar did not answer within the client deadline. The process may be
+ * alive but not reading its stdin, so the manager restarts it (beadbox-x3y).
+ */
+export class RpcDeadlineError extends Error {
+  constructor(deadlineMs: number) {
+    super(`The Beadbox sidecar did not respond within ${Math.round(deadlineMs / 1000)}s and is being restarted`)
+    this.name = "RpcDeadlineError"
+  }
+}
+
 export class RpcUnavailableError extends Error {
   constructor(method: string) {
     super(`rpc.${method} is not available outside the Tauri shell`)
@@ -109,6 +120,14 @@ interface SidecarManagerOptions {
    */
   onConnect?: (api: RemoteApi) => Promise<void>
   onConnectTimeoutMs?: number
+  /**
+   * How long `call` waits for a reply. Must exceed the sidecar's own 30s
+   * handler race, so a slow bd call is reported by the sidecar instead of
+   * getting a healthy process restarted.
+   */
+  callDeadlineMs?: number
+  /** Consecutive deadline misses that trigger a restart. */
+  maxConsecutiveMisses?: number
 }
 
 // Keep the exit listener alive across reconnects. Destroying kkrpc rejects
@@ -138,6 +157,8 @@ export function createSidecarManager(
     now = Date.now,
     onConnect,
     onConnectTimeoutMs = 5_000,
+    callDeadlineMs = 45_000,
+    maxConsecutiveMisses = 1,
   } = options
   let channelPromise: Promise<RemoteApi> | null = null
   let session: SidecarSession | null = null
@@ -145,19 +166,31 @@ export function createSidecarManager(
   let generation = 0
   let recentExits: number[] = []
   let resubscribeOnConnect = false
+  let consecutiveMisses = 0
+  // A restart's kill must finish before the next spawn: the plugin refuses a
+  // second process under a name that is still registered.
+  let pendingKill: Promise<unknown> | null = null
+
+  // Counts an exit or a restart against the respawn budget and says whether
+  // subscribers may be told to re-attach right away.
+  function recordLoss(): boolean {
+    const at = now()
+    recentExits = recentExits.filter((t) => at - t < windowMs)
+    recentExits.push(at)
+    const withinBudget = recentExits.length <= maxAutoReconnects
+    if (!withinBudget) resubscribeOnConnect = true
+    return withinBudget
+  }
 
   function ensureExitListener(): Promise<unknown> {
     listenerPromise ??= runtime
       .onExit(() => {
         generation++
+        consecutiveMisses = 0
         const oldSession = session
         session = null
         channelPromise = null
-        const at = now()
-        recentExits = recentExits.filter((t) => at - t < windowMs)
-        recentExits.push(at)
-        const withinBudget = recentExits.length <= maxAutoReconnects
-        if (!withinBudget) resubscribeOnConnect = true
+        const withinBudget = recordLoss()
         try {
           oldSession?.destroy()
         } finally {
@@ -177,6 +210,7 @@ export function createSidecarManager(
     let initializing: Promise<RemoteApi>
     initializing = (async () => {
       await ensureExitListener()
+      if (pendingKill) await pendingKill
       if (generation !== expectedGeneration) throw new Error("Sidecar exited during startup")
       await runtime.spawn()
       if (generation !== expectedGeneration) throw new Error("Sidecar exited during startup")
@@ -208,7 +242,62 @@ export function createSidecarManager(
     return initializing
   }
 
-  return { getRemoteApi }
+  // A sidecar that is alive but not reading stdin never exits, so the exit
+  // listener above never fires, and killing it through the plugin emits no
+  // exit event either (kill removes the process entry first). A restart
+  // therefore does the exit listener's whole job itself: new generation, the
+  // old session destroyed so its pending calls reject, the loss counted
+  // against the budget, and subscribers told to re-attach. Without that last
+  // step the subscription keeps the dead sidecar's id and live updates stop
+  // silently (beadbox-x3y).
+  function restart(expectedGeneration: number = generation): void {
+    if (generation !== expectedGeneration) return // already restarted or exited
+    generation++
+    consecutiveMisses = 0
+    const oldSession = session
+    session = null
+    channelPromise = null
+    const withinBudget = recordLoss()
+    const killing = runtime
+      .kill()
+      .catch(() => {}) // the process may already be gone
+      .finally(() => {
+        if (pendingKill === killing) pendingKill = null
+      })
+    pendingKill = killing
+    try {
+      oldSession?.destroy()
+    } finally {
+      if (withinBudget) onExitUnexpected?.()
+    }
+  }
+
+  // Run one call against the sidecar with a deadline covering the connect as
+  // well, since a wedged process can also hang the channel handshake.
+  async function call<T>(invoke: (api: RemoteApi) => Promise<T>): Promise<T> {
+    const callGeneration = generation
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new RpcDeadlineError(callDeadlineMs)), callDeadlineMs)
+    })
+    try {
+      const result = await Promise.race([getRemoteApi().then(invoke), deadline])
+      if (generation === callGeneration) consecutiveMisses = 0
+      return result
+    } catch (error) {
+      // A miss counts only against the sidecar the call was sent to; a late
+      // miss from before a restart must not restart the new one.
+      if (error instanceof RpcDeadlineError && generation === callGeneration) {
+        consecutiveMisses++
+        if (consecutiveMisses >= maxConsecutiveMisses) restart(callGeneration)
+      }
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  return { getRemoteApi, call, restart }
 }
 
 // A keychain read can raise an OS prompt that nobody answers, so the hook is
@@ -265,7 +354,6 @@ const sidecarManager = createSidecarManager(
   SIDECAR_MANAGER_OPTIONS,
 )
 
-const getRemoteApi = sidecarManager.getRemoteApi
 
 /**
  * Build a Proxy that routes `rpc.<namespace>.<method>(...args)` to the
@@ -281,18 +369,19 @@ function buildTauriRpc(): RemoteApi {
         get(_target, prop: string) {
           return async (...args: unknown[]): Promise<unknown> => {
             const startMs = Date.now()
-            const api = await getRemoteApi()
-            const namespace = (
-              api as unknown as Record<
-                string,
-                Record<string, (...a: unknown[]) => Promise<unknown>>
-              >
-            )[ns]
-            if (!namespace) throw new RpcUnavailableError(`${ns} (unknown namespace)`)
-            const fn = namespace[prop]
-            if (typeof fn !== "function") throw new RpcUnavailableError(`${ns}.${prop}`)
             try {
-              const result = await fn(...args)
+              const result = await sidecarManager.call((api) => {
+                const namespace = (
+                  api as unknown as Record<
+                    string,
+                    Record<string, (...a: unknown[]) => Promise<unknown>>
+                  >
+                )[ns]
+                if (!namespace) throw new RpcUnavailableError(`${ns} (unknown namespace)`)
+                const fn = namespace[prop]
+                if (typeof fn !== "function") throw new RpcUnavailableError(`${ns}.${prop}`)
+                return fn(...args)
+              })
               // bb-ck7j: emit Commands-tab entry with source="app". Skip the
               // "console" namespace — handleExecuteCommand emits richer
               // entries (with stdout + source="console") for typed commands.
