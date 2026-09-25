@@ -1,0 +1,32 @@
+name: Build (every main push)
+
+# beadbox-5yv: every push to main produces signed, notarized macOS + Linux
+# artifacts, so a release promotes an existing build (beadbox-z3j) instead of
+# compiling at release time. Build mode never creates a tag, draft or release;
+# its output is the Actions artifact beadbox-build-<sha> (30-day retention).
+#
+# TODO(beadbox-5yv, D2): also build pushes to rc/** branches. Blocked until the
+# `release` environment's branch policy admits rc/* (today: main + v* tags),
+# a secrets/environments settings change that is Nelson's call.
+
+on:
+  push:
+    branches: [main]
+
+# A newer push to the same branch supersedes an in-flight build.
+concurrency:
+  group: build-main-${{ github.ref }}
+  cancel-in-progress: true
+
+# The called jobs declare contents: write for their release uploads (skipped in
+# build mode); a caller must grant at least what the callee's jobs request.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/release.yml
+    with:
+      mode: build
+      ref: ${{ github.sha }}
+    secrets: inherit

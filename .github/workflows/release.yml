@@ -29,16 +29,35 @@ on:
         description: "Build Windows (requires installer signing credentials)"
         type: boolean
         default: false
+  # beadbox-5yv: build-main.yml calls this workflow in mode "build" on every
+  # push to main, so a main build and a release build run the SAME build jobs.
+  # Build mode makes signed, notarized artifacts only (an Actions artifact +
+  # build-manifest.json); it never creates a tag, draft or release.
+  workflow_call:
+    inputs:
+      mode:
+        description: 'Always "build" from build-main.yml'
+        type: string
+        required: true
+      ref:
+        description: "The commit SHA to build"
+        type: string
+        required: true
 
 concurrency:
-  group: release
+  # Builds never share the release group, so a main push can't cancel a release.
+  group: ${{ inputs.mode == 'build' && format('build-{0}', inputs.ref) || 'release' }}
   cancel-in-progress: true
 
 env:
   RUST_BACKTRACE: 1
   HUSKY: "0"
-  # Normalize tag name across push and workflow_dispatch triggers
-  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  # "build" when called from build-main.yml, "release" otherwise.
+  BUILD_MODE: ${{ inputs.mode || 'release' }}
+  # Normalize tag name across push and workflow_dispatch triggers (empty in build mode)
+  RELEASE_TAG: ${{ inputs.mode != 'build' && (github.event.inputs.tag || github.ref_name) || '' }}
+  # What every job checks out: the tag for a release, the commit SHA for a build.
+  CHECKOUT_REF: ${{ inputs.ref || github.event.inputs.tag || github.ref_name }}
 
 # beadbox-l5i.1: read-only default for GITHUB_TOKEN; the jobs that create
 # tags, draft releases, or upload assets opt up with their own permissions:.
@@ -62,12 +81,38 @@ jobs:
       tag: ${{ steps.v.outputs.tag }}
       version: ${{ steps.v.outputs.version }}
       is_final: ${{ steps.v.outputs.is_final }}
+      build_tag: ${{ steps.v.outputs.build_tag }}
     steps:
+      # beadbox-5yv: a build has no tag; its version is main's package.json
+      # (main carries the next release version, bumped after each release).
+      - if: env.BUILD_MODE == 'build'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          sparse-checkout: package.json
+          sparse-checkout-cone-mode: false
       - id: v
         env:
           RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
+          if [ "$BUILD_MODE" = "build" ]; then
+            if ! printf '%s' "$CHECKOUT_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "::error::build mode needs a full commit SHA as ref, got '$CHECKOUT_REF'"; exit 1
+            fi
+            VERSION=$(jq -r .version package.json)
+            if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::package.json version '$VERSION' is not X.Y.Z"; exit 1
+            fi
+            {
+              echo "tag="
+              echo "version=$VERSION"
+              echo "is_final=false"
+              echo "build_tag=${VERSION}+${CHECKOUT_REF:0:7}"
+            } >> "$GITHUB_OUTPUT"
+            echo "build of $CHECKOUT_REF (version $VERSION); no release objects are created"
+            exit 0
+          fi
           # Accept a final (vX.Y.Z) or an RC (vX.Y.Z-rc.N) for BUILDING. Only a
           # final may reach the Homebrew tap; is_final carries that decision so
           # the cask job never re-parses the tag itself.
@@ -87,6 +132,7 @@ jobs:
           echo "tag=$RAW_TAG"       >> "$GITHUB_OUTPUT"
           echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
           echo "is_final=$IS_FINAL" >> "$GITHUB_OUTPUT"
+          echo "build_tag=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
           echo "tag validated: $RAW_TAG (version $VERSION, final=$IS_FINAL)"
   build-frontend:
     needs: [validate-tag]
@@ -96,7 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.CHECKOUT_REF }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -154,7 +200,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.CHECKOUT_REF }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
@@ -189,7 +235,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.CHECKOUT_REF }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
@@ -253,6 +299,7 @@ jobs:
 
   # ── Create draft release for build jobs to upload into ──
   create-draft:
+    if: inputs.mode != 'build'
     needs: [validate-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -281,8 +328,13 @@ jobs:
     # environment to read them, and a fork PR's head ref matches neither, so a
     # fork-triggered run cannot reach these secrets even if it reaches this job.
     environment: release
-    if: github.event_name == 'push' || inputs.build_macos_arm64
-    needs: [build-frontend, create-draft]
+    if: >-
+      !cancelled()
+      && needs.validate-tag.result == 'success'
+      && needs.build-frontend.result == 'success'
+      && (needs.create-draft.result == 'success' || (inputs.mode == 'build' && needs.create-draft.result == 'skipped'))
+      && (github.event_name == 'push' || inputs.build_macos_arm64)
+    needs: [validate-tag, build-frontend, create-draft]
     runs-on: macos-14
     timeout-minutes: 45
     permissions:
@@ -291,18 +343,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.CHECKOUT_REF }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
 
-      - name: Extract version from tag
+      - name: Version (from validate-tag)
         id: version
         run: |
-          RAW="${RELEASE_TAG#v}"
-          echo "version=${RAW%%-rc.*}" >> "$GITHUB_OUTPUT"
-          echo "build_tag=${RAW}" >> "$GITHUB_OUTPUT"
+          echo "version=${{ needs.validate-tag.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "build_tag=${{ needs.validate-tag.outputs.build_tag }}" >> "$GITHUB_OUTPUT"
           echo "build_id=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
@@ -426,12 +477,16 @@ jobs:
         if: always()
         run: security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
 
-      - name: Upload .app to draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${RELEASE_TAG}" Beadbox-app-arm64.tar.gz \
-            --clobber --repo "${{ github.repository }}"
+      # beadbox-5yv: the signed .app goes to create-arm64-dmg as an Actions
+      # artifact (was a temporary release asset), so a build needs no release.
+      # tar.gz survives upload-artifact's zip layer (see build-arm-dmg.yml).
+      - name: Hand the signed .app to the DMG job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-app-arm64
+          path: Beadbox-app-arm64.tar.gz
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Upload updater bundle + signature (macOS arm64)
         env:
@@ -453,9 +508,21 @@ jobs:
           fi
           cp "$BUNDLE"        "Beadbox_aarch64.app.tar.gz"
           cp "${BUNDLE}.sig"  "Beadbox_aarch64.app.tar.gz.sig"
-          gh release upload "${RELEASE_TAG}" \
-            "Beadbox_aarch64.app.tar.gz" "Beadbox_aarch64.app.tar.gz.sig" \
-            --clobber --repo "${{ github.repository }}"
+          if [ "$BUILD_MODE" != "build" ]; then
+            gh release upload "${RELEASE_TAG}" \
+              "Beadbox_aarch64.app.tar.gz" "Beadbox_aarch64.app.tar.gz.sig" \
+              --clobber --repo "${{ github.repository }}"
+          fi
+
+      - name: Keep the updater bundle as a build asset
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: assets-macos-updater
+          path: |
+            Beadbox_aarch64.app.tar.gz
+            Beadbox_aarch64.app.tar.gz.sig
+          retention-days: 30
+          if-no-files-found: error
 
   create-arm64-dmg:
     # beadbox-l5i.6.1: signing secrets are scoped to the `release` environment,
@@ -464,7 +531,7 @@ jobs:
     # fork-triggered run cannot reach these secrets even if it reaches this job.
     environment: release
     if: github.event_name == 'push' || inputs.build_macos_arm64
-    needs: [build-macos-arm64]
+    needs: [validate-tag, build-macos-arm64]
     runs-on: macos-14
     timeout-minutes: 15
     permissions:
@@ -475,21 +542,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.CHECKOUT_REF }}
 
-      - name: Extract version from tag
+      - name: Version (from validate-tag)
         id: version
-        run: |
-          RAW="${RELEASE_TAG#v}"
-          echo "version=${RAW%%-rc.*}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${{ needs.validate-tag.outputs.version }}" >> "$GITHUB_OUTPUT"
 
-      - name: Download signed app from draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release download "${RELEASE_TAG}" --pattern "Beadbox-app-arm64.tar.gz" \
-            --repo "${{ github.repository }}"
-          tar -xzf Beadbox-app-arm64.tar.gz
+      - name: Receive the signed .app
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: macos-app-arm64
+
+      - name: Unpack the signed .app
+        run: tar -xzf Beadbox-app-arm64.tar.gz
 
       - name: Create DMG
         run: |
@@ -595,27 +660,20 @@ jobs:
         run: security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
 
       - name: Upload DMG to draft release
+        if: env.BUILD_MODE != 'build'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${RELEASE_TAG}" "${{ steps.artifact.outputs.dmg }}" \
             --clobber --repo "${{ github.repository }}"
 
-  cleanup-arm64-tarball:
-    if: (github.event_name == 'push' || inputs.build_macos_arm64) && success()
-    needs: [create-arm64-dmg]
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-
-    steps:
-      - name: Remove intermediate .app.tar.gz from release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release delete-asset "${RELEASE_TAG}" Beadbox-app-arm64.tar.gz \
-            --yes --repo "${{ github.repository }}" || true
+      - name: Keep the DMG as a build asset
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: assets-macos-dmg
+          path: ${{ steps.artifact.outputs.dmg }}
+          retention-days: 30
+          if-no-files-found: error
 
   build-linux:
     # beadbox-l5i.6.1: signing secrets are scoped to the `release` environment,
@@ -623,8 +681,13 @@ jobs:
     # environment to read them, and a fork PR's head ref matches neither, so a
     # fork-triggered run cannot reach these secrets even if it reaches this job.
     environment: release
-    if: github.event_name == 'push' || inputs.build_linux
-    needs: [build-frontend, create-draft]
+    if: >-
+      !cancelled()
+      && needs.validate-tag.result == 'success'
+      && needs.build-frontend.result == 'success'
+      && (needs.create-draft.result == 'success' || (inputs.mode == 'build' && needs.create-draft.result == 'skipped'))
+      && (github.event_name == 'push' || inputs.build_linux)
+    needs: [validate-tag, build-frontend, create-draft]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -633,7 +696,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.CHECKOUT_REF }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -654,12 +717,11 @@ jobs:
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
             librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file
 
-      - name: Extract version from tag
+      - name: Version (from validate-tag)
         id: version
         run: |
-          RAW="${RELEASE_TAG#v}"
-          echo "version=${RAW%%-rc.*}" >> "$GITHUB_OUTPUT"
-          echo "build_tag=${RAW}" >> "$GITHUB_OUTPUT"
+          echo "version=${{ needs.validate-tag.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "build_tag=${{ needs.validate-tag.outputs.build_tag }}" >> "$GITHUB_OUTPUT"
           echo "build_id=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Rust cache
@@ -708,6 +770,7 @@ jobs:
           echo "deb=$DEB_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload to draft release
+        if: env.BUILD_MODE != 'build'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -747,9 +810,11 @@ jobs:
             base="Beadbox_x86_64.${ext}"
             cp "$candidate" "$base"
             cp "$sig"       "${base}.sig"
-            gh release upload "${RELEASE_TAG}" "$base" "${base}.sig" \
-              --clobber --repo "${{ github.repository }}"
-            echo "uploaded $base (+ .sig) from $candidate"
+            if [ "$BUILD_MODE" != "build" ]; then
+              gh release upload "${RELEASE_TAG}" "$base" "${base}.sig" \
+                --clobber --repo "${{ github.repository }}"
+            fi
+            echo "staged $base (+ .sig) from $candidate"
             UPLOADED=$((UPLOADED + 1))
           done
           if [ $UPLOADED -eq 0 ]; then
@@ -761,6 +826,16 @@ jobs:
             find "$BUNDLE_DIR" -type f \( -name "*.sig" -o -name "*.tar.gz" -o -name "*.AppImage" -o -name "*.deb" \) | head -10
             exit 1
           fi
+
+      - name: Keep the Linux package + updater bundle as build assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: assets-linux
+          path: |
+            ${{ steps.artifact.outputs.deb }}
+            Beadbox_x86_64.*
+          retention-days: 30
+          if-no-files-found: error
 
   build-windows:
     # beadbox-l5i.6.1: signing secrets are scoped to the `release` environment,
@@ -786,7 +861,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.CHECKOUT_REF }}
 
       - name: Extract version from tag
         id: version
@@ -1412,6 +1487,7 @@ jobs:
     # in the draft before the release goes public.
     if: >-
       always() && !cancelled()
+      && inputs.mode != 'build'
       && !contains(needs.*.result, 'failure')
     needs: [create-arm64-dmg, build-linux, build-windows]
     runs-on: ubuntu-latest
@@ -1531,6 +1607,7 @@ jobs:
   promote:
     if: >-
       always() && !cancelled()
+      && inputs.mode != 'build'
       && !contains(needs.*.result, 'failure')
     needs: [create-arm64-dmg, build-linux, build-windows, test, test-integration, publish-update-manifest]
     runs-on: ubuntu-latest
@@ -1570,6 +1647,7 @@ jobs:
       && needs.validate-tag.result == 'success'
       && needs.promote.result == 'success'
       && github.event_name == 'push'
+      && inputs.mode != 'build'
       && needs.validate-tag.outputs.is_final == 'true'
     needs: [validate-tag, promote]
     runs-on: ubuntu-latest
@@ -1652,6 +1730,7 @@ jobs:
       && needs.validate-tag.result == 'success'
       && needs.promote.result == 'success'
       && github.event_name == 'push'
+      && inputs.mode != 'build'
       && needs.validate-tag.outputs.is_final == 'true'
     needs: [validate-tag, promote]
     runs-on: ubuntu-latest
@@ -1765,6 +1844,7 @@ jobs:
     needs: [validate-tag, publish-changelog, publish-cask]
     if: >-
       always() && github.event_name == 'push'
+      && inputs.mode != 'build'
       && needs.validate-tag.outputs.is_final == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -1782,3 +1862,65 @@ jobs:
             exit 1
           fi
           echo "both post-publish jobs succeeded"
+
+  # beadbox-5yv: build mode's output. One Actions artifact per commit,
+  # beadbox-build-<sha>, holding the six release assets and
+  # build-manifest.json {sha, version, build_tag, assets: {name: sha256}}.
+  # A release promotes it (beadbox-z3j) instead of building. Only a build whose
+  # tests passed is assembled, so every artifact that exists is promotable.
+  assemble-build:
+    name: "Assemble the build artifact"
+    if: >-
+      !cancelled()
+      && inputs.mode == 'build'
+      && needs.create-arm64-dmg.result == 'success'
+      && needs.build-linux.result == 'success'
+      && needs.test.result == 'success'
+      && needs.test-integration.result == 'success'
+    needs: [validate-tag, create-arm64-dmg, build-linux, test, test-integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Collect the platform assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: assets-*
+          path: build
+          merge-multiple: true
+
+      - name: Write build-manifest.json
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          BUILD_TAG: ${{ needs.validate-tag.outputs.build_tag }}
+          SHA: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          cd build
+          # The full release set; a missing one means this build can't be promoted.
+          for f in "Beadbox-${VERSION}-macOS-arm64.dmg" "beadbox_${VERSION}_Linux_amd64.deb" \
+                   Beadbox_aarch64.app.tar.gz Beadbox_aarch64.app.tar.gz.sig; do
+            [ -f "$f" ] || { echo "::error::missing build asset: $f"; ls -la; exit 1; }
+          done
+          ls Beadbox_x86_64.* >/dev/null 2>&1 || { echo "::error::missing Linux updater bundle"; ls -la; exit 1; }
+          python3 - <<'EOF'
+          import hashlib, json, os
+          assets = {}
+          for name in sorted(os.listdir(".")):
+              with open(name, "rb") as fh:
+                  assets[name] = hashlib.sha256(fh.read()).hexdigest()
+          manifest = {"sha": os.environ["SHA"], "version": os.environ["VERSION"],
+                      "build_tag": os.environ["BUILD_TAG"], "assets": assets}
+          with open("build-manifest.json", "w") as fh:
+              json.dump(manifest, fh, indent=2)
+          print(json.dumps(manifest, indent=2))
+          EOF
+
+      - name: Upload beadbox-build-<sha>
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: beadbox-build-${{ inputs.ref }}
+          path: build/
+          retention-days: 30
+          if-no-files-found: error
