@@ -214,6 +214,71 @@ describe("handlers/epics — molecule type fidelity", () => {
   })
 })
 
+describe("handlers/epics — milestone hierarchy", () => {
+  let milestoneWorkspace: Workspace
+
+  beforeAll(async () => {
+    milestoneWorkspace = await createBdWorkspace()
+  })
+
+  afterAll(async () => {
+    await milestoneWorkspace?.cleanup()
+  })
+
+  test("milestone contains its epic and task once; an empty milestone remains a root", async () => {
+    const milestone = JSON.parse(
+      await runBdInWorkspace(
+        ["create", "Milestone parent", "--type", "milestone", "--json"],
+        milestoneWorkspace.root,
+      ),
+    ) as { id: string }
+    const emptyMilestone = JSON.parse(
+      await runBdInWorkspace(
+        ["create", "Empty milestone", "--type", "milestone", "--json"],
+        milestoneWorkspace.root,
+      ),
+    ) as { id: string }
+    await runBdInWorkspace(
+      ["update", milestoneWorkspace.seedIds.epic1, "--parent", milestone.id],
+      milestoneWorkspace.root,
+    )
+
+    const result = await epics.getEpics(milestoneWorkspace.dbPath)
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    const root = result.epics.find((epic) => epic.id === milestone.id)
+    const nestedEpic = root?.childEpics?.find(
+      (epic) => epic.id === milestoneWorkspace.seedIds.epic1,
+    )
+    expect(root?.type).toBe("milestone")
+    expect(nestedEpic?.type).toBe("epic")
+    expect(nestedEpic?.children.map((bead) => bead.id)).toContain(milestoneWorkspace.seedIds.test1)
+    expect(result.epics.find((epic) => epic.id === emptyMilestone.id)).toMatchObject({
+      type: "milestone",
+      children: [],
+      childEpics: [],
+    })
+
+    type TreeNode = { id: string; children?: TreeNode[]; childEpics?: TreeNode[] }
+    const allIds = result.epics.flatMap(function visit(node: TreeNode): string[] {
+      return [
+        node.id,
+        ...(node.children ?? []).flatMap(visit),
+        ...(node.childEpics ?? []).flatMap(visit),
+      ]
+    })
+    for (const id of [
+      milestone.id,
+      emptyMilestone.id,
+      milestoneWorkspace.seedIds.epic1,
+      milestoneWorkspace.seedIds.test1,
+    ]) {
+      expect(allIds.filter((seen) => seen === id)).toHaveLength(1)
+    }
+  })
+})
+
 describe("handlers/epics — epic below a non-epic parent", () => {
   let nestedWorkspace: Workspace
 

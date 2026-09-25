@@ -106,7 +106,7 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
   // Step 1: Get ALL beads in one call (includes parent field)
   const allBeads = await listBeads(readOptions)
 
-  const hierarchicalTypes = new Set(["epic", "convoy", "molecule"])
+  const hierarchicalTypes = new Set(["epic", "milestone", "convoy", "molecule"])
   const epicBeads = allBeads.filter((b) => hierarchicalTypes.has(b.issue_type))
   const nonEpicBeads = allBeads.filter((b) => !hierarchicalTypes.has(b.issue_type))
 

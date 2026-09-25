@@ -38,6 +38,7 @@ interface UseEpicNavigationOpts {
   onMarkAllRead: (beads: Bead[]) => void
   updateBeadInEpicsRef: React.RefObject<(beadId: string, fn: (bead: Bead) => Bead) => void>
   activeEpicsFiltered: Epic[]
+  activeMilestonesFiltered: Epic[]
   activeConvoysFiltered: Epic[]
   activeMoleculesFiltered: Epic[]
   backlogBeads: Bead[]
@@ -69,6 +70,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     onMarkAllRead,
     updateBeadInEpicsRef,
     activeEpicsFiltered,
+    activeMilestonesFiltered,
     activeConvoysFiltered,
     activeMoleculesFiltered,
     backlogBeads,
@@ -280,6 +282,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     if (!hasRealEpics && flatBeads.length > 0) {
       flatBeads.forEach(addBead)
     } else {
+      activeMilestonesFiltered.forEach(addEpic)
       activeEpicsFiltered.forEach(addEpic)
       activeMoleculesFiltered.forEach(addEpic)
       activeConvoysFiltered.forEach(addEpic)
@@ -295,6 +298,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     hasRealEpics,
     flatBeads,
     activeEpicsFiltered,
+    activeMilestonesFiltered,
     activeMoleculesFiltered,
     activeConvoysFiltered,
     backlogBeads,
