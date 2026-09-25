@@ -916,6 +916,23 @@ export async function addServerWorkspace(
 // Store a password for a workspace in server-side process memory.
 // Called from the client after re-auth to update the in-memory password map
 // (passwords are not persisted to disk by bd; keychain is handled client-side).
+// Saved server credentials, as KEYS only (beadbox-ct1). The client reads each
+// password from the OS keychain (account = credentialKey) and hands it back
+// through setServerPassword under passwordMapKey, on every sidecar start.
+// Passwords never cross this call.
+export async function getSavedCredentialKeys(): Promise<
+  Array<{ credentialKey: string; passwordMapKey: string }>
+> {
+  const registry = await readRegistry()
+  return registry.workspaces.flatMap((entry) => {
+    const credentialKey = entry.credentialKey
+    if (!credentialKey) return []
+    const lastSlash = credentialKey.lastIndexOf("/")
+    if (lastSlash <= 0) return []
+    return [{ credentialKey, passwordMapKey: credentialKey.slice(0, lastSlash) }]
+  })
+}
+
 export async function setServerPassword(passwordMapKey: string, password: string): Promise<void> {
   bdSetWorkspacePassword(passwordMapKey, password)
 }

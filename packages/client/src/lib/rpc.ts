@@ -19,6 +19,7 @@
 import type { handlers as serverHandlers } from "@beadbox/server/handlers"
 import { createChannel, kill, onExit, spawn } from "tauri-plugin-js-api"
 import type { BdCommandEvent } from "./console-types"
+import { hydrateSavedPasswords } from "./tauri-credentials"
 
 /**
  * Type of the remote API exposed by the sidecar's kkrpc handler registry.
@@ -100,6 +101,14 @@ interface SidecarManagerOptions {
   maxAutoReconnects?: number
   windowMs?: number
   now?: () => number
+  /**
+   * Runs on every new sidecar session, before the API is handed to callers
+   * (beadbox-ct1: restore saved server passwords, which a fresh sidecar
+   * process does not have). Bounded by onConnectTimeoutMs; a failure or a
+   * timeout is logged and the session is used anyway.
+   */
+  onConnect?: (api: RemoteApi) => Promise<void>
+  onConnectTimeoutMs?: number
 }
 
 // Keep the exit listener alive across reconnects. Destroying kkrpc rejects
@@ -123,7 +132,13 @@ export function createSidecarManager(
   onExitUnexpected?: () => void,
   options: SidecarManagerOptions = {},
 ) {
-  const { maxAutoReconnects = 3, windowMs = 60_000, now = Date.now } = options
+  const {
+    maxAutoReconnects = 3,
+    windowMs = 60_000,
+    now = Date.now,
+    onConnect,
+    onConnectTimeoutMs = 5_000,
+  } = options
   let channelPromise: Promise<RemoteApi> | null = null
   let session: SidecarSession | null = null
   let listenerPromise: Promise<unknown> | null = null
@@ -179,6 +194,7 @@ export function createSidecarManager(
         throw new Error("Sidecar exited during startup")
       }
       session = nextSession
+      if (onConnect) await runOnConnect(onConnect, nextSession.api, onConnectTimeoutMs)
       if (resubscribeOnConnect) {
         resubscribeOnConnect = false
         onExitUnexpected?.()
@@ -194,6 +210,33 @@ export function createSidecarManager(
 
   return { getRemoteApi }
 }
+
+// A keychain read can raise an OS prompt that nobody answers, so the hook is
+// raced against a timeout. On timeout or failure the session is still used:
+// the startup health check then reports access_denied and the re-auth prompt
+// appears, which is exactly what happened before the hook existed.
+async function runOnConnect(
+  onConnect: (api: RemoteApi) => Promise<void>,
+  api: RemoteApi,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs)
+  })
+  try {
+    const outcome = await Promise.race([onConnect(api).then(() => "done" as const), timeout])
+    if (outcome === "timeout")
+      console.warn(`[rpc] sidecar onConnect timed out after ${timeoutMs}ms`)
+  } catch (err) {
+    console.warn("[rpc] sidecar onConnect failed:", err)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// Restore saved server passwords on every new sidecar (beadbox-ct1).
+export const SIDECAR_MANAGER_OPTIONS: SidecarManagerOptions = { onConnect: hydrateSavedPasswords }
 
 const sidecarManager = createSidecarManager(
   {
@@ -219,6 +262,7 @@ const sidecarManager = createSidecarManager(
   // Also fired when a session connects after a suppressed exit: either way it
   // means "the sidecar you subscribed to is gone; subscribe again".
   () => window.dispatchEvent(new Event("beadbox:sidecar-exit")),
+  SIDECAR_MANAGER_OPTIONS,
 )
 
 const getRemoteApi = sidecarManager.getRemoteApi

@@ -144,26 +144,11 @@ async function retryOnFlock<T>(fn: () => Promise<T>, dbPath: string | undefined)
 // Passwords never touch disk; they live only in the Node.js sidecar process.
 const workspacePasswords = new Map<string, string>()
 
-// Hydrate passwords from BEADBOX_CRED_* env vars injected by the Tauri host.
-// Env var name: BEADBOX_CRED_{url_encoded_credentialKey}
-// credentialKey format: host:port/database/user
-// Map key format: host:port/database (strip last /segment)
-// Do NOT delete env vars after reading (Turbopack reloads modules).
-const credEnvKeys = Object.keys(process.env).filter((k) => k.startsWith("BEADBOX_CRED_"))
-console.log(
-  `[bd] credential hydration: found ${credEnvKeys.length} BEADBOX_CRED_* env vars: [${credEnvKeys.join(", ")}]`,
-)
-for (const [key, value] of Object.entries(process.env)) {
-  if (key.startsWith("BEADBOX_CRED_") && value) {
-    const encoded = key.slice("BEADBOX_CRED_".length)
-    const credentialKey = decodeURIComponent(encoded)
-    // Strip /user suffix to get the Map key (host:port/database)
-    const lastSlash = credentialKey.lastIndexOf("/")
-    const mapKey = lastSlash > 0 ? credentialKey.slice(0, lastSlash) : credentialKey
-    console.log(`[bd] credential hydration: ${key} -> mapKey="${mapKey}" (has password: true)`)
-    workspacePasswords.set(mapKey, value)
-  }
-}
+// Saved passwords arrive over kkrpc, not the environment (beadbox-ct1): on
+// every new sidecar session the client reads each one from the OS keychain
+// and calls workspaces.setServerPassword (lib/rpc.ts onConnect ->
+// hydrateSavedPasswords). An environment variable would expose the password
+// to any same-user process and bypass the keychain's per-app access control.
 
 export function setWorkspacePassword(workspacePath: string, password: string): void {
   workspacePasswords.set(workspacePath, password)
