@@ -21,6 +21,14 @@ rules:
     # follow-up (see the DONE comment on beadbox-l5i.1). Partial mitigation
     # already in place: release.yml uses distinct `shared-key`s per platform,
     # and the artifacts are signed + notarized after the build.
+    #
+    # beadbox-5p1 made the macOS path live: rust-cache-warm.yml saves the
+    # macos-arm64 key from main, and every tag's build-macos-arm64 restores
+    # it. The writer is bounded to the same trust as the release itself: it
+    # saves only when github.ref is refs/heads/main (push to main, the daily
+    # schedule, or a dispatch on main), main holds the code a tag releases,
+    # and pull_request runs save to their own refs/pull/* scope, which a tag
+    # cannot restore. release.yml itself no longer saves from tags.
     ignore:
       - release.yml
       - deploy-website.yml

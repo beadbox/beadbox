@@ -337,6 +337,10 @@ jobs:
         with:
           workspaces: src-tauri
           shared-key: macos-arm64
+          # beadbox-5p1: rust-cache-warm.yml saves this key from main, and a tag
+          # restores it. A cache saved from a tag is readable only by that tag,
+          # so saving here would cost ~20s per release for nothing.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Import signing certificate
         env:
