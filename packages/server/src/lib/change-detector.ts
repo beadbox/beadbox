@@ -59,6 +59,7 @@ import { beadsDirFromDatabasePath } from "./beadtrain-fs"
 import { drainPool, getPool, PortFileMissingError } from "./dolt-pool"
 import { getDoltDir, getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import { findExternalWorkspaceByDbPath, parseServerUri } from "./workspace-registry"
+import { activeLogPath } from "./log-file"
 
 // Re-export getDoltDir for any out-of-tree consumer that imported it from
 // here historically (bb-onv3.11 moved the implementation to a shared
@@ -643,6 +644,7 @@ export function buildPollShellArgs(
   dbArg: string,
   bdPath: string,
   timeoutS: number = POLL_TIMEOUT_S,
+  logPath: string = "",
 ): string[] {
   const POLL_SQL = buildPollSql('"')
   // beadbox-db6: the loop must die with the sidecar however the sidecar dies
@@ -662,6 +664,16 @@ ID="$1"
 DBPATH="$2"
 BD="$3"
 TMO="$4"
+# beadbox-01f.4: every line this loop emits goes to the inherited stderr fd
+# (the wire, unchanged) AND is appended to the sidecar log, so the log holds
+# what the change detector actually said. The sidecar never relays these
+# lines itself, which keeps live updates off its kkrpc-gated main thread.
+# $5 is empty when the log file sink is unavailable.
+LOG="$5"
+emit() {
+  printf '%s\\n' "$1" >&2
+  if [ -n "$LOG" ]; then printf '%s\\n' "$1" >> "$LOG" 2>/dev/null; fi
+}
 LAST=""
 ERRS=0
 HB=0
@@ -694,25 +706,25 @@ while true; do
   if [ $RC -ne 0 ]; then
     ERRS=$((ERRS + 1))
     if [ "$ERRS" = "3" ]; then
-      printf '[SUBSCRIPTION:%s] {"type":"polling_error"}\\n' "$ID" >&2
+      emit "$(printf '[SUBSCRIPTION:%s] {"type":"polling_error"}' "$ID")"
     elif [ "$ERRS" -gt 3 ]; then
       # bb-v340: emit reconnecting on each retry past the initial broadcast
       # so the renderer can fire ws_reconnecting at parity with v0.24.x.
       # backoff_ms is the fixed 5000ms wait the shell loop uses between
       # retries (in-process change-detector exponentially backs off; shell
       # variant is intentionally simpler — see comment block above).
-      printf '[SUBSCRIPTION:%s] {"type":"reconnecting","attempt_number":%s,"backoff_ms":5000}\\n' "$ID" "$ERRS" >&2
+      emit "$(printf '[SUBSCRIPTION:%s] {"type":"reconnecting","attempt_number":%s,"backoff_ms":5000}' "$ID" "$ERRS")"
     fi
     sleep 5
     continue
   fi
   if [ "$ERRS" -ge 3 ]; then
-    printf '[SUBSCRIPTION:%s] {"type":"recovered"}\\n' "$ID" >&2
+    emit "$(printf '[SUBSCRIPTION:%s] {"type":"recovered"}' "$ID")"
   fi
   ERRS=0
   if [ -n "$LAST" ] && [ "$RESULT" != "$LAST" ]; then
     TS=$(date +%s)000
-    printf '[SUBSCRIPTION:%s] {"type":"change","timestamp":%s}\\n' "$ID" "$TS" >&2
+    emit "$(printf '[SUBSCRIPTION:%s] {"type":"change","timestamp":%s}' "$ID" "$TS")"
   fi
   LAST="$RESULT"
   # beadbox-01f.2: a heartbeat after a SUCCESSFUL poll, on the first one and
@@ -720,13 +732,22 @@ while true; do
   # paused", which covers every way this pipeline can go quiet.
   NOW=$(date +%s)
   if [ $((NOW - HB)) -ge 10 ]; then
-    printf '[SUBSCRIPTION:%s] {"type":"heartbeat"}\\n' "$ID" >&2
+    emit "$(printf '[SUBSCRIPTION:%s] {"type":"heartbeat"}' "$ID")"
     HB=$NOW
   fi
   sleep 1
 done
 `
-  return ["-c", SHELL_LOOP, "--", id, dbArg, bdPath, String(Math.max(1, Math.floor(timeoutS)))]
+  return [
+    "-c",
+    SHELL_LOOP,
+    "--",
+    id,
+    dbArg,
+    bdPath,
+    String(Math.max(1, Math.floor(timeoutS))),
+    logPath,
+  ]
 }
 
 /** Signal the poll child's process group, or just the child where there is no group. */
@@ -773,7 +794,7 @@ function startServerPollChild(state: DetectorState, id: string): void {
   // its own process group so that notice, and stop(), can take down the
   // whole group. Not on Windows, where detached opens a console window.
   const timeoutS = _testOverrides.pollTimeoutS ?? POLL_TIMEOUT_S
-  const child = spawn("/bin/sh", buildPollShellArgs(id, dbArg, resolveBdPath(), timeoutS), {
+  const child = spawn("/bin/sh", buildPollShellArgs(id, dbArg, resolveBdPath(), timeoutS, activeLogPath() ?? ""), {
     stdio: ["pipe", "ignore", "inherit"],
     env,
     cwd,

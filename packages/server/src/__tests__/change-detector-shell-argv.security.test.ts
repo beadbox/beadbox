@@ -26,8 +26,22 @@ describe("buildPollShellArgs", () => {
     expect(args[0]).toBe("-c")
     expect(script).not.toContain("/tmp/ws/.beads")
     // The 5th positional is the per-poll bound in whole seconds (beadbox-01f.2),
-    // derived in code, never from input.
-    expect(args.slice(2)).toEqual(["--", "sub-1", "/tmp/ws/.beads", BD, "10"])
+    // derived in code, never from input. The 6th is the sidecar log path the
+    // loop appends its lines to (beadbox-01f.4); empty when there is no log.
+    expect(args.slice(2)).toEqual(["--", "sub-1", "/tmp/ws/.beads", BD, "10", ""])
+  })
+
+  test("the log path is a positional read through a quoted variable, never spliced", () => {
+    const hostile = "/tmp/log; rm -rf ~ $(touch /tmp/pwned) `id`.log"
+    const args = buildPollShellArgs("sub-1", "/tmp/ws/.beads", BD, 10, hostile)
+    const script = args[1]
+    expect(args[7]).toBe(hostile)
+    expect(script).not.toContain(hostile)
+    expect(script).toContain('LOG="$5"')
+    // Every use of the log path is the quoted variable.
+    const uses = script.match(/\$LOG\b|"\$LOG"/g) ?? []
+    expect(uses.length).toBeGreaterThan(0)
+    expect(script).not.toMatch(/[^"]\$LOG[^"]/)
   })
 
   test("the poll bound is a positive integer however it is passed", () => {
