@@ -120,16 +120,29 @@ else
   fail "subscription: no change-detector start for the workspace"
 fi
 
-# (d) Live update: a CLI write reaches the app, which refetches. The event is
-# the subscription line itself: {"type":"change","timestamp":N}, with no
-# "trigger" field (the synthetic event at subscribe time carries
-# "trigger":"initial"). The "change detected for" log line exists only on the
-# server-mode poll path, so it is not used here.
-CHANGE_EVENT='\[SUBSCRIPTION:[^]]+\] \{"type":"change","timestamp":[0-9]+\}'
+# (d) Live update: a CLI write reaches the app, which refetches. An event is a
+# subscription line with "type":"change"; the one sent at subscribe time is
+# marked "trigger":"initial". Count real events as all change events minus
+# initial ones, which holds whatever other fields an event carries (newer
+# builds add a "trigger" naming the file that changed). The "change detected
+# for" log line exists only on the server-mode poll path, so it is not used.
+count_changes() {
+  local all initial
+  all=$(count_log '\[SUBSCRIPTION:[^]]+\] \{"type":"change"')
+  initial=$(count_log '\[SUBSCRIPTION:[^]]+\] \{"type":"change".*"trigger":"initial"')
+  echo $((all - initial))
+}
+wait_changes() { # count, timeout seconds
+  for ((i = 0; i < $2; i++)); do
+    [ "$(count_changes)" -ge "$1" ] && return 0
+    sleep 1
+  done
+  return 1
+}
 lists_before=$(count_log '\[bd\] list completed')
-changes_before=$(count_log "$CHANGE_EVENT")
+changes_before=$(count_changes)
 (cd "$WS" && bd update "$TASK_B" --status in_progress >/dev/null)
-if wait_log "$CHANGE_EVENT" $((changes_before + 1)) 30 &&
+if wait_changes $((changes_before + 1)) 30 &&
   wait_log '\[bd\] list completed' $((lists_before + 1)) 30; then
   pass "live update: bd update → change detected → the UI refetched ($(elapsed))"
 else
