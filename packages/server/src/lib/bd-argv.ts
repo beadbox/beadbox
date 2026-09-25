@@ -57,13 +57,18 @@ export function assertSafeBeadId(id: string): string {
   return id
 }
 
-// Names that bd resolves itself (formula names, formula variable names) take
-// the same shape as bead IDs. They are not machine-generated: formulas load
-// from <repo>/.beads/formulas/, so a cloned repository chooses them
-// (beadbox-c29). bd's own generator emits [a-z0-9-] with no leading '-'
-// (mol_distill.go sanitizeFormulaName), which this admits.
-const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
-const MAX_NAME_LENGTH = 128
+// Names that bd resolves itself (formula names, formula variable names). They
+// are not machine-generated: users write formula names as filenames, and
+// formulas also load from <repo>/.beads/formulas/, so a cloned repository
+// chooses them (beadbox-c29). The guard is exactly as wide as the threat: bd
+// is spawned with an argv array and no shell, so the only character that
+// means anything is a LEADING '-', which pflag lexes as a flag. '_x', '.x',
+// 'a+b', 'a@b', 'café' and 'sp ace' are plain data to bd and are accepted.
+//
+// Length bound: every name bd loads comes from a filename, and APFS / ext4 cap
+// a filename at 255 bytes (242 once ".formula.toml" is removed). 4096 sits far
+// above that and still bounds the argv we build.
+const MAX_NAME_LENGTH = 4096
 
 /** Validate a bd-resolved name destined for argv as a positional. Returns it unchanged. */
 export function assertSafeName(value: string, label: string): string {
@@ -76,10 +81,25 @@ export function assertSafeName(value: string, label: string): string {
   if (value.length > MAX_NAME_LENGTH) {
     throw new BdArgvError(`Invalid ${label}: longer than ${MAX_NAME_LENGTH} characters`)
   }
-  if (!NAME_PATTERN.test(value)) {
-    throw new BdArgvError(
-      `Invalid ${label}: ${value} (must start with a letter or digit and contain only letters, digits, '.', '-' and '_')`,
-    )
+  if (value.includes("\0")) {
+    throw new BdArgvError(`Invalid ${label}: contains a NUL byte`)
+  }
+  if (value.startsWith("-")) {
+    throw new BdArgvError(`Invalid ${label}: ${value} (must not start with '-')`)
+  }
+  return value
+}
+
+/**
+ * Validate a formula variable name for a --var=<name>=<value> token. Same as
+ * assertSafeName, plus no '=': bd splits the token at the FIRST '=', so a name
+ * containing one could never be set from the CLI and would silently assign a
+ * different variable.
+ */
+export function assertSafeVarName(value: string): string {
+  assertSafeName(value, "formula variable name")
+  if (value.includes("=")) {
+    throw new BdArgvError(`Invalid formula variable name: ${value} (must not contain '=')`)
   }
   return value
 }

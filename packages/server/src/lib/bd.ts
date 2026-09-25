@@ -12,6 +12,7 @@ import {
   assertSafeBeadId,
   assertSafeBeadIds,
   assertSafeName,
+  assertSafeVarName,
   buildCommentArgs,
   buildUpdateArgs,
   flagArg,
@@ -1560,11 +1561,11 @@ export async function showFormula(name: string, options: BdOptions = {}): Promis
 }
 
 // Formula variables as single --var=<name>=<value> tokens. The value is free
-// text and stays inside the token; the name is validated so a variable cannot
-// be named like a flag (beadbox-c29).
+// text and stays inside the token; the name is validated so it can neither be
+// read as a flag nor split the token (beadbox-c29).
 function varArgs(vars: Record<string, string> | undefined): string[] {
   return Object.entries(vars ?? {}).map(([k, v]) =>
-    flagArg("--var", `${assertSafeName(k, "formula variable name")}=${v}`),
+    flagArg("--var", `${assertSafeVarName(k)}=${v}`),
   )
 }
 

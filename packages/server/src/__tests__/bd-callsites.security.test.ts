@@ -8,11 +8,18 @@
 // functions here would pass vacuously for any function it forgot to name,
 // which is how beadbox-c29's six sites went uncaught.
 
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { __resetBdPathCache, deleteComment, setCustomStatuses, showFormula } from "../lib/bd"
+import {
+  __resetBdPathCache,
+  cookFormula,
+  deleteComment,
+  pourMolecule,
+  setCustomStatuses,
+  showFormula,
+} from "../lib/bd"
 import { BdArgvError, buildCommentArgs, buildUpdateArgs } from "../lib/bd-argv"
 
 const HOSTILE_ID = "--db=/tmp/evil"
@@ -57,31 +64,111 @@ describe("buildCommentArgs", () => {
   })
 })
 
-describe("sec's reported shape (beadbox-c29): a formula name cannot retarget --db", () => {
+describe("formula names (beadbox-c29): refuse what bd would lex as a flag, pass everything else", () => {
   const originalBdPath = process.env.BD_PATH
-  let root: string | undefined
+  let root: string
+  let db: string
+  let log: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "beadbox-c29-shape-"))
+    db = join(root, ".beads")
+    await mkdir(db)
+    log = join(root, "argv.log")
+    const fakeBd = join(root, "bd")
+    // One record per invocation; tokens separated by \037 so names with
+    // spaces keep their boundaries.
+    await writeFile(
+      fakeBd,
+      `#!/bin/sh\nprintf '%s\\037' "$@" >> "${log}"\nprintf '\\036' >> "${log}"\necho '{}'\n`,
+      { mode: 0o700 },
+    )
+    process.env.BD_PATH = fakeBd
+    __resetBdPathCache()
+  })
 
   afterEach(async () => {
     if (originalBdPath === undefined) delete process.env.BD_PATH
     else process.env.BD_PATH = originalBdPath
     __resetBdPathCache()
-    if (root) await rm(root, { recursive: true, force: true })
-    root = undefined
+    await rm(root, { recursive: true, force: true })
   })
 
-  test("showFormula('--db=/tmp/evil') throws before bd is spawned", async () => {
-    root = await mkdtemp(join(tmpdir(), "beadbox-c29-shape-"))
-    const db = join(root, ".beads")
-    await mkdir(db)
-    const log = join(root, "argv.log")
-    const fakeBd = join(root, "bd")
-    await writeFile(fakeBd, `#!/bin/sh\necho "$*" >> "${log}"\necho '{}'\n`, { mode: 0o700 })
-    process.env.BD_PATH = fakeBd
-    __resetBdPathCache()
+  async function spawned(): Promise<string[][]> {
+    const raw = await readFile(log, "utf-8").catch(() => "")
+    return raw
+      .split("\x1e")
+      .filter(Boolean)
+      .map((rec) => rec.split("\x1f").slice(0, -1))
+  }
 
+  test("showFormula('--db=/tmp/evil') throws before bd is spawned (sec's reported shape)", async () => {
     await expect(showFormula(HOSTILE_ID, { db })).rejects.toThrow(BdArgvError)
     // The observable that matters: bd never saw the hostile token at all.
-    expect(await readFile(log, "utf-8").catch(() => "")).toBe("")
+    expect(await spawned()).toEqual([])
+  })
+
+  // Names users write as filenames and bd accepts (qa2 on beadbox-c29). They
+  // worked in v0.26.2; execFile has no shell, so none of these characters
+  // means anything to anything but bd.
+  const ACCEPTED = [
+    "_leading",
+    ".dotleading",
+    "plus+name",
+    "at@name",
+    "café",
+    "a".repeat(129),
+    "sp ace",
+  ]
+
+  for (const name of ACCEPTED) {
+    const label = name.length > 20 ? `${name.length} x 'a'` : name
+    test(`'${label}' reaches bd intact as its own argument (show, cook, pour)`, async () => {
+      await showFormula(name, { db })
+      await cookFormula(name, { component: "x" }, { db }).catch(() => {})
+      await pourMolecule(name, { component: "x" }, "qa tester", { db })
+      const [show, cook, pour] = await spawned()
+      expect(show.slice(show.indexOf("formula"), show.indexOf("formula") + 3)).toEqual([
+        "formula",
+        "show",
+        name,
+      ])
+      expect(cook[cook.indexOf("cook") + 1]).toBe(name)
+      expect(pour.slice(pour.indexOf("mol"), pour.indexOf("mol") + 3)).toEqual([
+        "mol",
+        "pour",
+        name,
+      ])
+      expect(pour).toContain("--var=component=x")
+      expect(pour).toContain("--assignee=qa tester")
+    })
+  }
+
+  const REFUSED: Array<[string, string]> = [
+    ["a leading '-'", "-dash"],
+    ["a flag with a value", HOSTILE_ID],
+    ["empty", ""],
+    ["a NUL byte", "name\0x"],
+    ["longer than the bound", "a".repeat(4097)],
+  ]
+
+  for (const [label, name] of REFUSED) {
+    test(`${label} is refused before bd is spawned (show, cook, pour)`, async () => {
+      await expect(showFormula(name, { db })).rejects.toThrow(BdArgvError)
+      await expect(cookFormula(name, undefined, { db })).rejects.toThrow(BdArgvError)
+      await expect(pourMolecule(name, {}, undefined, { db })).rejects.toThrow(BdArgvError)
+      expect(await spawned()).toEqual([])
+    })
+  }
+
+  test("a variable name with '=' or a leading '-' is refused; café is fine", async () => {
+    // bd splits --var at the FIRST '=', so a key containing '=' could never be
+    // set from the CLI; refusing it prevents a silent mis-assignment.
+    await expect(cookFormula("f", { "a=b": "c" }, { db })).rejects.toThrow(BdArgvError)
+    await expect(cookFormula("f", { "--db": "x" }, { db })).rejects.toThrow(BdArgvError)
+    expect(await spawned()).toEqual([])
+    await cookFormula("f", { café: "x=y" }, { db }).catch(() => {})
+    expect((await spawned())[0]).toContain("--var=café=x=y")
   })
 })
 
