@@ -1612,12 +1612,85 @@ jobs:
 
   # ── Promote draft release ──
 
+  # ── Packaged-app smoke (beadbox-rgc): the signed macOS app from this
+  #    release, launched and checked on a runner before anything is published:
+  #    sidecar boot, the UI's handshake, the tree load, a live update from the
+  #    bd CLI, a clean quit with nothing left running, and latest.json plus the
+  #    bundle's signature. Draft assets are not public, so they are staged as a
+  #    workflow artifact for the read-only smoke job.
+  #    Whether to run is decided from the draft itself, not from which build
+  #    jobs ran: if its latest.json has a darwin-aarch64 entry, this release
+  #    ships a macOS app and the smoke must pass. That holds on every path that
+  #    publishes a manifest, including a rebuild dispatched without macOS (no
+  #    entry, smoke skipped) and a release promoted from an earlier build.
+  stage-packaged-smoke:
+    if: >-
+      always() && !cancelled()
+      && needs.publish-update-manifest.result == 'success'
+    needs: [publish-update-manifest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # draft release assets are only visible with write access
+    outputs:
+      has_mac: ${{ steps.stage.outputs.has_mac }}
+    steps:
+      - name: Stage the draft's macOS updater bundle and latest.json
+        id: stage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Drafts are not reliably addressable by tag: resolve the release by
+          # ID, then each asset by ID.
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+                 --jq '.[] | select(.tag_name==env.RELEASE_TAG) | .id' | head -1)
+          [ -n "$ID" ] || { echo "::error::no release object found for $RELEASE_TAG"; exit 1; }
+          fetch() { # asset name -> staged/<name>
+            local asset
+            asset=$(gh api "repos/$GITHUB_REPOSITORY/releases/$ID/assets" --paginate \
+                      --jq ".[] | select(.name==\"$1\") | .id" | head -1)
+            [ -n "$asset" ] || { echo "::error::release $RELEASE_TAG has no asset named $1"; return 1; }
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset" > "staged/$1"
+            [ -s "staged/$1" ] || { echo "::error::$1 downloaded as 0 bytes"; return 1; }
+          }
+          mkdir -p staged
+          fetch latest.json
+          if jq -e '.platforms["darwin-aarch64"]' staged/latest.json >/dev/null; then
+            fetch Beadbox_aarch64.app.tar.gz
+            echo "has_mac=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest.json has no darwin-aarch64 entry: no macOS app in this release, smoke skipped"
+            echo "has_mac=false" >> "$GITHUB_OUTPUT"
+          fi
+          ls -la staged
+      - if: steps.stage.outputs.has_mac == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaged-smoke-inputs
+          path: staged
+          retention-days: 7
+
+  packaged-smoke:
+    if: needs.stage-packaged-smoke.outputs.has_mac == 'true'
+    needs: [stage-packaged-smoke]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/packaged-smoke.yml
+    with:
+      tag: ${{ github.event.inputs.tag || github.ref_name }}
+      artifact: packaged-smoke-inputs
+
   promote:
     if: >-
       always() && !cancelled()
       && inputs.mode != 'build'
       && !contains(needs.*.result, 'failure')
-    needs: [create-arm64-dmg, build-linux, build-windows, test, test-integration, publish-update-manifest]
+    # stage-packaged-smoke is listed as well: when a job fails, the jobs that
+    # need it are skipped, not failed, so a staging failure would otherwise
+    # skip the smoke and let this promote anyway.
+    needs: [create-arm64-dmg, build-linux, build-windows, test, test-integration, publish-update-manifest, stage-packaged-smoke, packaged-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:

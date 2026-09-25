@@ -1,0 +1,97 @@
+name: Packaged smoke (macOS)
+
+# Launches the built Beadbox.app on a macOS runner and checks it from the
+# outside: sidecar boot, the UI's handshake, the tree load, a live update from
+# the bd CLI, a clean quit with nothing left running, and the updater
+# manifest plus its signature (beadbox-rgc). Details in
+# scripts/packaged-smoke.sh.
+#
+# It needs no secrets and no write access. For a published release it
+# downloads the release's own updater bundle (which is the .app) and
+# latest.json. release.yml calls it before publishing, when those assets are
+# still on a draft: it then stages them as the workflow artifact named by
+# `artifact`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose macOS app to test (e.g. v0.27.0)"
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      artifact:
+        description: "Workflow artifact holding a draft's Beadbox_aarch64.app.tar.gz and latest.json"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Packaged app smoke (macOS arm64, ${{ matrix.tag }})
+    runs-on: macos-14
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(format('["{0}"]', inputs.tag)) }}
+    env:
+      TAG: ${{ matrix.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Staged draft assets
+        if: inputs.artifact != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ runner.temp }}/staged
+
+      - name: Download the app (the release's updater bundle)
+        env:
+          STAGED: ${{ inputs.artifact != '' }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::not a release tag: $TAG"; exit 1
+          fi
+          if [ "$STAGED" = "true" ]; then
+            cp "$RUNNER_TEMP/staged/Beadbox_aarch64.app.tar.gz" "$RUNNER_TEMP/app.tar.gz"
+          else
+            curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Beadbox_aarch64.app.tar.gz" -o "$RUNNER_TEMP/app.tar.gz"
+          fi
+          mkdir -p "$RUNNER_TEMP/app"
+          tar -xzf "$RUNNER_TEMP/app.tar.gz" -C "$RUNNER_TEMP/app"
+          ls "$RUNNER_TEMP/app"
+
+      - name: Install bd and minisign
+        run: |
+          brew install beads minisign
+          bd --version
+
+      - name: Smoke test
+        env:
+          STAGED: ${{ inputs.artifact != '' }}
+          # The release's own repository (a fork or sandbox publishes its own
+          # assets and latest.json).
+          SMOKE_REPO: ${{ github.repository }}
+        run: |
+          if [ "$STAGED" = "true" ]; then
+            export SMOKE_MANIFEST="$RUNNER_TEMP/staged/latest.json"
+            export SMOKE_BUNDLE="$RUNNER_TEMP/staged/Beadbox_aarch64.app.tar.gz"
+          fi
+          bash scripts/packaged-smoke.sh "$RUNNER_TEMP/app/Beadbox.app" "$TAG" "$RUNNER_TEMP/smoke-out"
+
+      - name: Upload log and screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaged-smoke-${{ matrix.tag }}
+          path: ${{ runner.temp }}/smoke-out
+          if-no-files-found: warn
