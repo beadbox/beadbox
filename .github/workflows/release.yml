@@ -1678,7 +1678,14 @@ jobs:
           retention-days: 7
 
   packaged-smoke:
-    if: needs.stage-packaged-smoke.outputs.has_mac == 'true'
+    # always() + explicit results: without a status function the implicit
+    # success() inherits any designed skip upstream (build-windows is skipped
+    # by default), which skipped this job on a release that had a macOS app
+    # and let promote publish unchecked.
+    if: >-
+      always() && !cancelled()
+      && needs.stage-packaged-smoke.result == 'success'
+      && needs.stage-packaged-smoke.outputs.has_mac == 'true'
     needs: [stage-packaged-smoke]
     permissions:
       contents: read
@@ -1688,10 +1695,14 @@ jobs:
       artifact: packaged-smoke-inputs
 
   promote:
+    # Fail closed on the packaged smoke: a skipped job is not a failed one, so
+    # "no failure" alone let a release with a macOS app publish when the smoke
+    # never ran. When the draft has a macOS app, the smoke must have passed.
     if: >-
       always() && !cancelled()
       && inputs.mode != 'build'
       && !contains(needs.*.result, 'failure')
+      && (needs.stage-packaged-smoke.outputs.has_mac != 'true' || needs.packaged-smoke.result == 'success')
     # stage-packaged-smoke is listed as well: when a job fails, the jobs that
     # need it are skipped, not failed, so a staging failure would otherwise
     # skip the smoke and let this promote anyway.
