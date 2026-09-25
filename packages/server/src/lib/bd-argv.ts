@@ -151,6 +151,28 @@ export function assertNumericId(value: string | number): string {
   return trimmed
 }
 
+const COMMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Validate a comment row ID that is interpolated into SQL (beadbox-vav).
+ *
+ * bd >= 1.1.0 stores comments.id as a CHAR(36) UUID (migration 0037 converts
+ * older integer ids), so this accepts exactly the 8-4-4-4-12 hex shape and
+ * nothing else: no trimming, no integers. That charset cannot contain a
+ * quote, backslash or semicolon, which is what makes the caller's quoted
+ * string literal safe. The value is returned unchanged (Dolt compares ids
+ * in a binary collation, so case must be preserved).
+ */
+export function assertCommentId(value: string): string {
+  if (typeof value !== "string") {
+    throw new BdArgvError(`Invalid comment ID: expected a string, got ${typeof value}`)
+  }
+  if (value.length !== 36 || !COMMENT_ID_PATTERN.test(value)) {
+    throw new BdArgvError(`Invalid comment ID: ${JSON.stringify(value)} (must be a UUID)`)
+  }
+  return value
+}
+
 /**
  * Build argv for `bd update <id> --<flag>=<value>`.
  *

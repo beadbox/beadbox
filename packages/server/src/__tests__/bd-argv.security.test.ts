@@ -24,6 +24,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   assertNotFlagLike,
+  assertCommentId,
   assertNumericId,
   assertSafeBeadId,
   assertSafeBeadIds,
@@ -108,6 +109,42 @@ describe("flagArg", () => {
   test("rejects a malformed flag name (developer error, caught at the seam)", () => {
     expect(() => flagArg("title", "x")).toThrow(BdArgvError)
     expect(() => flagArg("--title=", "x")).toThrow(BdArgvError)
+  })
+})
+
+describe("assertCommentId (beadbox-vav)", () => {
+  const ID = "01a0d997-40fa-7a12-807e-c472c48e3efd"
+
+  test("returns a lowercase or uppercase UUID unchanged", () => {
+    expect(assertCommentId(ID)).toBe(ID)
+    expect(assertCommentId(ID.toUpperCase())).toBe(ID.toUpperCase())
+  })
+
+  test("accepts any UUID version (v4 and v7 are both real bd ids)", () => {
+    const v4 = "3f2b8c1e-9a4d-4e6f-8b2a-1c3d5e7f9a0b"
+    expect(assertCommentId(v4)).toBe(v4)
+  })
+
+  test.each([
+    ["OR-injection", "1 OR 1=1"],
+    ["quote break after a UUID", `${ID}' OR '1'='1`],
+    ["trailing semicolon", `${ID};`],
+    ["empty", ""],
+    ["37 chars", `${ID}0`],
+    ["35 chars", ID.slice(0, -1)],
+    ["trailing newline (JS $ is end of input)", `${ID}\n`],
+    ["leading space", ` ${ID}`],
+    ["non-hex", `${ID.slice(0, -1)}g`],
+    ["no hyphens", ID.replaceAll("-", "")],
+    ["hyphens moved", "01a0d99740fa-7a12-807e-c472c48e3efd-"],
+    ["integer string", "42"],
+  ])("refuses %s", (_label, value) => {
+    expect(() => assertCommentId(value)).toThrow(BdArgvError)
+  })
+
+  test("refuses non-strings", () => {
+    expect(() => assertCommentId(42 as unknown as string)).toThrow(BdArgvError)
+    expect(() => assertCommentId(null as unknown as string)).toThrow(BdArgvError)
   })
 })
 

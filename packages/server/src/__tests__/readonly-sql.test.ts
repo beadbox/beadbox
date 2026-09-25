@@ -55,7 +55,10 @@ esac
   const blocks = await getAllBlocksDependencies({ db: beadsDir })
   expect(blocks.status).toBe("ok")
   expect(blocks.status === "ok" && blocks.map.get("task-a")).toEqual(["task-b"])
-  await expect(deleteComment(42, { db: beadsDir })).resolves.toBeUndefined()
+  // Comment ids are UUIDs on every supported bd (beadbox-vav).
+  await expect(
+    deleteComment("01a0d997-40fa-7a12-807e-c472c48e3efd", { db: beadsDir }),
+  ).resolves.toBeUndefined()
 })
 
 // server:// workspaces bypass the bd CLI (direct mysql2), so --readonly cannot

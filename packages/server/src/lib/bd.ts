@@ -7,8 +7,8 @@ import { type BdLoadError, classifyBdError, toBdLoadError } from "./bd-error"
 import { __resetBdPathCache, COMMON_BD_PATHS, resolveBdPath as getBdPath } from "./bd-paths"
 import { getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import {
+  assertCommentId,
   assertNotFlagLike,
-  assertNumericId,
   assertSafeBeadId,
   assertSafeBeadIds,
   assertSafeName,
@@ -715,22 +715,20 @@ export async function addComment(id: string, text: string, options: BdOptions = 
 // Delete a comment by ID. Uses bd sql DELETE — embedded mode can't run
 // bd sql, so surface a clear error instead of letting bd's
 // "bd sql is not yet supported in embedded mode" propagate to the UI.
-export async function deleteComment(
-  commentId: string | number,
-  options: BdOptions = {},
-): Promise<void> {
+export async function deleteComment(commentId: string, options: BdOptions = {}): Promise<void> {
   if (!options.db) {
     throw new Error("Database path required for deleteComment")
   }
-  // Positive-integer-only: the DELETE below interpolates this into SQL, and
-  // a numeric identifier removes the quoting question entirely.
-  const id = assertNumericId(commentId)
+  // The DELETE below interpolates this into SQL. assertCommentId admits only
+  // an exact UUID, whose charset cannot close the quoted literal; the quotes
+  // are needed because comments.id is CHAR(36) on every supported bd.
+  const id = assertCommentId(commentId)
   if (isEmbeddedMode(options.db)) {
     throw new Error(
       "Comment deletion requires server-mode workspace. Embedded-mode bd has no comment-delete CLI.",
     )
   }
-  const sql = `DELETE FROM comments WHERE id = ${id}`
+  const sql = `DELETE FROM comments WHERE id = '${id}'`
   await bdExecRaw(["sql", sql], options)
 }
 

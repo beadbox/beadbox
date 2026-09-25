@@ -191,12 +191,81 @@ describe("formula names (beadbox-c29): refuse what bd would lex as a flag, pass 
   })
 })
 
-describe("deleteComment", () => {
-  test("rejects a non-numeric comment ID before it reaches the SQL string", async () => {
-    await expect(deleteComment("1' OR '1'='1", { db: "/tmp/x/.beads" })).rejects.toThrow(
-      BdArgvError,
+describe("deleteComment (beadbox-vav): UUID comment ids, refused before bd runs otherwise", () => {
+  // bd >= 1.1.0 stores comments.id as CHAR(36) UUIDs (migration 0037 converts
+  // older integer ids), so a real id looks like this one, taken from bd 1.1.0.
+  const REAL_ID = "01a0d997-40fa-7a12-807e-c472c48e3efd"
+  const originalBdPath = process.env.BD_PATH
+  let root: string
+  let db: string
+  let log: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "beadbox-vav-"))
+    db = join(root, ".beads")
+    await mkdir(db)
+    // Server mode, so a valid id gets past the embedded-mode refusal and
+    // actually reaches bd: the accepted case must be observed, not assumed.
+    await writeFile(join(db, "metadata.json"), JSON.stringify({ dolt_mode: "server" }))
+    log = join(root, "argv.log")
+    const fakeBd = join(root, "bd")
+    await writeFile(
+      fakeBd,
+      `#!/bin/sh\nprintf '%s\\037' "$@" >> "${log}"\nprintf '\\036' >> "${log}"\necho '{}'\n`,
+      { mode: 0o700 },
     )
+    process.env.BD_PATH = fakeBd
+    __resetBdPathCache()
   })
+
+  afterEach(async () => {
+    if (originalBdPath === undefined) delete process.env.BD_PATH
+    else process.env.BD_PATH = originalBdPath
+    __resetBdPathCache()
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function spawned(): Promise<string[][]> {
+    const raw = await readFile(log, "utf-8").catch(() => "")
+    return raw
+      .split("\x1e")
+      .filter(Boolean)
+      .map((rec) => rec.split("\x1f").slice(0, -1))
+  }
+
+  test("deletes a real UUID comment with the id quoted as a string literal", async () => {
+    await expect(deleteComment(REAL_ID, { db })).resolves.toBeUndefined()
+    const calls = await spawned()
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain("sql")
+    expect(calls[0]).toContain(`DELETE FROM comments WHERE id = '${REAL_ID}'`)
+  })
+
+  test("accepts an uppercase UUID unchanged (the guard is no stricter than the threat)", async () => {
+    const upper = REAL_ID.toUpperCase()
+    await expect(deleteComment(upper, { db })).resolves.toBeUndefined()
+    expect((await spawned())[0]).toContain(`DELETE FROM comments WHERE id = '${upper}'`)
+  })
+
+  const REFUSED: [string, unknown][] = [
+    ["an OR-injection", "1 OR 1=1"],
+    ["a UUID followed by a quote-breaking OR", `${REAL_ID}' OR '1'='1`],
+    ["a UUID with a trailing semicolon", `${REAL_ID};`],
+    ["an empty string", ""],
+    ["a 37-char near-UUID", `${REAL_ID}0`],
+    ["a UUID with a trailing newline", `${REAL_ID}\n`],
+    ["a UUID with surrounding spaces", ` ${REAL_ID} `],
+    ["a UUID with a non-hex character", `${REAL_ID.slice(0, -1)}g`],
+    ["a UUID missing its hyphens", REAL_ID.replaceAll("-", "")],
+    ["a pre-1.1.0 integer id", "42"],
+    ["a number", 42],
+  ]
+  for (const [label, id] of REFUSED) {
+    test(`refuses ${label} before bd is spawned`, async () => {
+      await expect(deleteComment(id as string, { db })).rejects.toThrow(BdArgvError)
+      expect(await spawned()).toEqual([])
+    })
+  }
 })
 
 describe("setCustomStatuses", () => {
