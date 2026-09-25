@@ -472,6 +472,9 @@ jobs:
         run: |
           APP="${{ steps.paths.outputs.bundle_dir }}/macos/Beadbox.app"
           tar -czf Beadbox-app-arm64.tar.gz -C "$(dirname "$APP")" "$(basename "$APP")"
+          # beadbox-5yv: logged here and after the DMG job receives it, so the
+          # hand-off can be shown byte-identical.
+          echo "handoff sha256 (sent): $(shasum -a 256 Beadbox-app-arm64.tar.gz | cut -d' ' -f1)"
 
       - name: Restore keychain search list
         if: always()
@@ -562,7 +565,9 @@ jobs:
           name: macos-app-arm64
 
       - name: Unpack the signed .app
-        run: tar -xzf Beadbox-app-arm64.tar.gz
+        run: |
+          echo "handoff sha256 (received): $(shasum -a 256 Beadbox-app-arm64.tar.gz | cut -d' ' -f1)"
+          tar -xzf Beadbox-app-arm64.tar.gz
 
       - name: Create DMG
         run: |
@@ -2005,3 +2010,35 @@ jobs:
           path: build/
           retention-days: 30
           if-no-files-found: error
+
+  # beadbox-5yv: a build run must not report success without its artifact.
+  # GitHub counts a SKIPPED job as fine, so a skip anywhere in the chain (the
+  # first build-mode run skipped the DMG this way) would otherwise leave a
+  # green run and nothing to promote. Runs whatever happened upstream and
+  # fails unless every required build job succeeded.
+  build-complete:
+    name: "Build produced its promotable artifact"
+    if: always() && inputs.mode == 'build'
+    needs:
+      [validate-tag, build-frontend, test, test-integration, build-macos-arm64, create-arm64-dmg, build-linux, assemble-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Every required build job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          BAD=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
+          COUNT=$(echo "$NEEDS" | jq 'length')
+          # Positive control: the check must have seen every required job.
+          if [ "$COUNT" -ne 8 ]; then
+            echo "::error::expected 8 required jobs, saw $COUNT"; exit 1
+          fi
+          if [ -n "$BAD" ]; then
+            echo "::error::build incomplete: $BAD did not succeed, so there is no promotable beadbox-build artifact"
+            exit 1
+          fi
+          echo "all 8 required build jobs succeeded"
