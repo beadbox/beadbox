@@ -8,23 +8,25 @@
 import { randomUUID } from "node:crypto"
 
 import { createChangeDetector } from "../lib/change-detector"
-import { formatLine, type SubscriptionEvent } from "../subscribe-protocol"
-import { state } from "./subscribe-internals"
+import type { SubscriptionEvent } from "../subscribe-protocol"
+import { emitForSubscription, state } from "./subscribe-internals"
 
 export async function start(workspacePath: string): Promise<{ id: string }> {
   const id = randomUUID()
   const emit = (payload: SubscriptionEvent): void => {
-    state.writer(formatLine(id, payload))
+    emitForSubscription(id, payload)
   }
   // bb-xe8g: pass id so the server-mode shell-spawn child can format
   // [SUBSCRIPTION:<id>] lines matching the in-process formatLine emit.
   const detector = await createChangeDetector(workspacePath, emit, id)
   state.detectors.set(id, detector)
+  state.paths.set(id, workspacePath)
   return { id }
 }
 
 export async function stop(id: string): Promise<void> {
   const detector = state.detectors.get(id)
+  state.paths.delete(id)
   if (!detector) return
   state.detectors.delete(id)
   await detector.stop()

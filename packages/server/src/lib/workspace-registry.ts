@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto"
+import { readFileSync } from "fs"
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "fs/promises"
 import { homedir } from "os"
 import { basename, dirname, join, resolve } from "path"
@@ -24,7 +25,67 @@ export interface RegistryEntry {
   local: { path: string } | null // null for server-only
   server: ServerConnection | null // null for local-only
   mode: "server" | "embedded"
+  // A local .beads scaffold is also used for externally managed servers.
+  // Server lifecycle ownership must therefore be independent of `local`.
+  serverOwnership?: "external" | "managed" | "unknown"
   credentialKey?: string // OS keychain account name (host:port/database/user)
+}
+
+export type ServerOwnership = NonNullable<RegistryEntry["serverOwnership"]>
+
+export function isBeadboxScaffold(entry: RegistryEntry): boolean {
+  if (!entry.local) return false
+  const scaffoldPath = join(dirname(getBeadboxRegistryPath()), "workspaces", entry.id, ".beads")
+  return resolve(entry.local.path) === resolve(scaffoldPath)
+}
+
+/**
+ * Infer ownership for registry entries written before serverOwnership existed.
+ *
+ * External needs positive evidence: a server-only entry, Beadbox's own
+ * scaffold, or metadata naming an explicit port (bd itself will not auto-start
+ * a server for that) or a non-loopback host. Everything else is managed. Local
+ * entries routinely carry a server block backfilled at registration that goes
+ * stale when bd moves its server, so "has a server block" proves nothing, and
+ * treating it as external would cut our own workspaces off from health
+ * recovery and the recovery console.
+ */
+function inferServerOwnership(entry: RegistryEntry & { server: ServerConnection }): ServerOwnership {
+  if (!entry.local) return "external"
+  if (isBeadboxScaffold(entry)) return "external"
+
+  try {
+    const metadata = JSON.parse(readFileSync(join(entry.local.path, "metadata.json"), "utf-8"))
+    if (typeof metadata.dolt_server_port === "number") return "external"
+    if (metadata.dolt_server_host && !["127.0.0.1", "localhost", "::1"].includes(metadata.dolt_server_host)) {
+      return "external"
+    }
+  } catch {
+    // Unreadable metadata is no evidence of an external server.
+  }
+  return "managed"
+}
+
+// "unknown" is no longer inferred, but registries read by an earlier build may
+// have it persisted; it counts as absent so those entries are re-inferred.
+function hasSettledOwnership(entry: RegistryEntry): boolean {
+  return entry.serverOwnership !== undefined && entry.serverOwnership !== "unknown"
+}
+
+export function getServerOwnership(entry: RegistryEntry): ServerOwnership | null {
+  if (!entry.server) return null
+  if (hasSettledOwnership(entry)) return entry.serverOwnership!
+  return inferServerOwnership({ ...entry, server: entry.server })
+}
+
+function persistInferredOwnership(registry: WorkspaceRegistry): boolean {
+  let changed = false
+  for (const entry of registry.workspaces) {
+    if (!entry.server || hasSettledOwnership(entry)) continue
+    entry.serverOwnership = inferServerOwnership({ ...entry, server: entry.server })
+    changed = true
+  }
+  return changed
 }
 
 export interface WorkspaceRegistry {
@@ -101,6 +162,25 @@ export function findWorkspaceByDbPath(
     if (entry.local && resolve(entry.local.path) === normalized) return entry
   }
   return null
+}
+
+/** Resolve a scaffold-backed external connection from a bd database path. */
+export function findExternalWorkspaceByDbPath(dbPath: string): RegistryEntry | null {
+  if (dbPath.startsWith("server://")) return null
+  const path = resolve(dbPath)
+  const beadsPath = basename(path) === ".beads" ? path : basename(dirname(path)) === ".beads" ? dirname(path) : path
+  try {
+    const registry = JSON.parse(readFileSync(getBeadboxRegistryPath(), "utf-8")) as WorkspaceRegistry
+    if (!Array.isArray(registry.workspaces)) return null
+    return registry.workspaces.find(
+      (entry) =>
+        entry.local?.path &&
+        resolve(entry.local.path) === beadsPath &&
+        getServerOwnership(entry) === "external",
+    ) ?? null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -253,7 +333,8 @@ async function readRegistryUnqueued(): Promise<{ registry: WorkspaceRegistry; mi
     if (parsed !== null) {
       const record = parsed as Partial<WorkspaceRegistry> & Partial<V1Registry>
       if (record.version === 2) {
-        return { registry: deduplicateEntries(parsed as WorkspaceRegistry), migrated: false }
+        const registry = deduplicateEntries(parsed as WorkspaceRegistry)
+        return { registry, migrated: persistInferredOwnership(registry) }
       }
       // v1 registry (no version field): migrate
       const v1: V1Registry = {
@@ -262,22 +343,23 @@ async function readRegistryUnqueued(): Promise<{ registry: WorkspaceRegistry; mi
           : [],
         activeWorkspace: typeof record.activeWorkspace === "string" ? record.activeWorkspace : null,
       }
-      return { registry: deduplicateEntries(migrateV1ToV2(v1)), migrated: true }
+      const registry = deduplicateEntries(migrateV1ToV2(v1))
+      persistInferredOwnership(registry)
+      return { registry, migrated: true }
     }
   }
 
   // No registry (or an unusable one): attempt migration from legacy registry
   const legacy = await migrateFromLegacyRegistry()
   if (legacy.workspaces.length > 0) {
-    return {
-      registry: deduplicateEntries(
-        migrateV1ToV2({
+    const registry = deduplicateEntries(
+      migrateV1ToV2({
           workspaces: legacy.workspaces,
           activeWorkspace: legacy.activeWorkspace,
-        }),
-      ),
-      migrated: true,
-    }
+      }),
+    )
+    persistInferredOwnership(registry)
+    return { registry, migrated: true }
   }
   return { registry: emptyRegistry(), migrated: false }
 }
@@ -509,6 +591,7 @@ export async function addServerWorkspaceEntry(
       // Update server block in place
       existing.server = server
       existing.name = name
+      existing.serverOwnership = "external"
       existing.credentialKey = credentialKey
       console.log(
         `[beadbox-registry] updated server workspace: ${name} (${server.host}:${server.port}/${server.database})`,
@@ -524,6 +607,7 @@ export async function addServerWorkspaceEntry(
       local: null,
       server,
       mode: "server",
+      serverOwnership: "external",
       credentialKey,
     })
     console.log(
@@ -559,6 +643,7 @@ export async function replaceWorkspace(
       local: null,
       server,
       mode: "server",
+      serverOwnership: "external",
       credentialKey: `${server.host}:${server.port}/${server.database}/${server.user}`,
     })
 
@@ -636,6 +721,7 @@ export async function updateWorkspaceServer(
     if (!entry) return
     entry.server = server
     entry.mode = "server"
+    if (!hasSettledOwnership(entry)) entry.serverOwnership = getServerOwnership(entry) ?? undefined
   })
 }
 

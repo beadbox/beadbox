@@ -87,3 +87,5 @@ packages/client/src/components/bead-metadata-controls.tsx:MetadataControls  # CC
 packages/client/src/components/home-page.tsx:BeadsEpicsViewer  # CCN 94 — home-page god-component (1132 LOC); pre-existing, surfaced via bb-pgb0.1 deletion shrinking the file into lizard's parsable range  # bb-pgb0.1
 packages/client/src/components/bead-detail-panel.tsx:BeadDetailPanel  # pre-existing (CCN 85 on main, never listed); #40 adds type-catalog props (88). Decomposition is not landing-sized  # beadbox-01f.13
 packages/client/src/components/filter-bar.tsx:FilterBar  # pre-existing (CCN 19 on main, never listed); #40 lowers it to 18  # beadbox-01f.13
+packages/server/src/handlers/workspaces.ts:updateServerConnection  # CCN 22 — connection edit with external-scaffold write/restore (PR #42); refactor proposed  # beadbox-01f.12
+packages/server/src/lib/workspace-health.ts:resolvePort  # CCN 16 — registry-endpoint branch for external servers (PR #42); refactor proposed  # beadbox-01f.12

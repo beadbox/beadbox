@@ -26,6 +26,7 @@
 //      module's security contract.
 
 import { resolveBdPath } from "../lib/bd-paths"
+import { buildEnv } from "../lib/bd"
 import { execFileAsync } from "../lib/exec"
 import { isValidDbPath } from "../lib/path-validation"
 
@@ -138,6 +139,7 @@ export async function run(opts: ConsoleRunArgs): Promise<ConsoleRunResult> {
     const { stdout, stderr } = await execFileAsync(resolveBdPath(), bdArgs, {
       timeout: EXEC_TIMEOUT_MS,
       maxBuffer: 10 * 1024 * 1024,
+      env: db ? buildEnv({ db }) : undefined,
     })
     return {
       stdout: stdout ?? "",

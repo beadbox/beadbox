@@ -6,11 +6,13 @@
 // no auto-confirm in the sidecar.
 
 import { execFile } from "node:child_process"
+import { readFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import { promisify } from "node:util"
-import { getBdPath } from "../lib/bd"
+import { buildEnv, getBdPath } from "../lib/bd"
 import { isValidDbPath } from "../lib/path-validation"
+import { findWorkspaceByDbPath, getBeadboxRegistryPath, getServerOwnership, type WorkspaceRegistry } from "../lib/workspace-registry"
 
 const execFileAsync = promisify(execFile)
 
@@ -43,6 +45,23 @@ function projectRootFromDb(dbPath: string): string | undefined {
   return undefined
 }
 
+function isExternallyManaged(databasePath: string): boolean {
+  let registry: WorkspaceRegistry
+  try {
+    registry = JSON.parse(readFileSync(getBeadboxRegistryPath(), "utf-8")) as WorkspaceRegistry
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false
+    throw error
+  }
+  const beadsDir = databasePath.startsWith("server://")
+    ? databasePath
+    : basename(databasePath) === ".beads"
+      ? databasePath
+      : dirname(databasePath)
+  const entry = findWorkspaceByDbPath(registry, beadsDir)
+  return !!entry?.server && getServerOwnership(entry) !== "managed"
+}
+
 export async function runRecoveryCommand(
   command: string,
   databasePath: string,
@@ -59,6 +78,10 @@ export async function runRecoveryCommand(
     }
   }
 
+  if (isExternallyManaged(databasePath)) {
+    return { success: false, error: "Recovery commands are unavailable for an externally managed Dolt server" }
+  }
+
   const bdPath = getBdPath()
   const normalizedDb = normalizeDbPath(databasePath)
   const cwd = projectRootFromDb(databasePath)
@@ -67,6 +90,7 @@ export async function runRecoveryCommand(
     const { stdout } = await execFileAsync(bdPath, [...args, "--db", normalizedDb], {
       timeout: 30_000,
       cwd,
+      env: buildEnv({ db: databasePath }),
     })
     return { success: true, output: stdout.trim() }
   } catch (error: unknown) {
@@ -119,6 +143,10 @@ export async function migrateToServerMode(
       success: false,
       error: `Invalid database path: ${databasePath} (must be a .beads directory or a file inside one)`,
     }
+  }
+
+  if (isExternallyManaged(databasePath)) {
+    return { success: false, error: "Migration is unavailable for an externally managed Dolt server" }
   }
 
   const bdPath = getBdPath()

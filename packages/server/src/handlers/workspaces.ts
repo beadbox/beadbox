@@ -9,7 +9,8 @@
 // P6 will delete the action.
 
 import { constants, existsSync, readdirSync } from "fs"
-import { access, mkdir, readFile, stat, writeFile } from "fs/promises"
+import { access, mkdir, readFile, rename, rm, stat, writeFile } from "fs/promises"
+import { randomUUID } from "crypto"
 import { homedir, tmpdir } from "os"
 import { basename, dirname, isAbsolute, join, parse, relative, resolve } from "path"
 import {
@@ -22,11 +23,15 @@ import {
 import { expandHome, isValidWorkspaceDir } from "../lib/path-validation"
 import { scanPorts } from "../lib/port-scan"
 import { getPostHogNode } from "../lib/posthog-node"
+import { drainPool } from "../lib/dolt-pool"
+import { ensureExternalScaffold } from "../lib/external-scaffold"
+import { restartWorkspaceSubscriptions } from "./subscribe-internals"
 import type { ScanResult, ServerDatabase, Workspace, WorkspaceCard } from "../lib/types"
 import {
   addServerWorkspaceEntry,
   findWorkspace,
   findWorkspaceByDbPath,
+  getServerOwnership,
   getBeadboxRegistryPath,
   projectDirFromDatabasePath,
   type RegistryEntry,
@@ -197,7 +202,17 @@ async function resolveLocalEntry(entry: RegistryEntry): Promise<InlineWorkspace>
   dbPath = await migrateStaleDbPath(dbPath, beadsDir)
 
   const projectDir = projectDirFromDatabasePath(dbPath)
-  const modeInfo = await inlineReadWorkspaceMode(beadsDir)
+  const modeInfo =
+    getServerOwnership(entry) === "external" && entry.server
+      ? {
+          mode: "server" as const,
+          serverHost: entry.server.host,
+          serverPort: entry.server.port,
+          serverDatabase: entry.server.database,
+          serverUser: entry.server.user,
+          serverTls: entry.server.tls,
+        }
+      : await inlineReadWorkspaceMode(beadsDir)
   wsLog("resolve", formatResolveLog(entry.name, dbPath, modeInfo))
   return {
     id: entry.id,
@@ -869,6 +884,7 @@ export async function addServerWorkspace(
     await mkdir(scaffoldDir, { recursive: true })
     await initServerScaffold(scaffoldDir, { host, port, database: databaseName, user }, password)
     localBeadsPath = join(scaffoldDir, ".beads")
+    await ensureExternalScaffold(localBeadsPath, server)
     // Update the registry entry with the local scaffold path
     await updateWorkspaceLocal(workspaceId, localBeadsPath)
     console.log(`[workspace-server] created scaffold at ${scaffoldDir}`)
@@ -920,7 +936,7 @@ export async function scanForDoltServers(): Promise<ScanActionResult> {
     const workspaces = await inlineGetRegisteredWorkspaces()
     for (const ws of workspaces) {
       // Server-only workspaces: use port from server connection, no port file
-      if (ws.serverOnly && ws.serverPort) {
+      if (ws.serverPort && (ws.serverOnly || (ws.registered && ws.mode === "server"))) {
         ports.push(ws.serverPort)
         continue
       }
@@ -1192,6 +1208,27 @@ export async function replaceLocalWithServer(
 
 // Update an existing server workspace's connection details.
 // Validates the connection before saving. Returns updated workspace card on success.
+async function writeAtomic(path: string, content: string): Promise<void> {
+  const tempPath = `${path}.${randomUUID()}.tmp`
+  try {
+    const mode = await stat(path)
+      .then((file) => file.mode & 0o777)
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return 0o600
+        throw error
+      })
+    await writeFile(tempPath, content, { flag: "wx", mode })
+    await rename(tempPath, path)
+  } finally {
+    await rm(tempPath, { force: true }).catch(() => {})
+  }
+}
+
+async function syncExternalPortFile(beadsDir: string, port: number): Promise<void> {
+  const portPath = join(beadsDir, "dolt-server.port")
+  await writeAtomic(portPath, `${port}\n`)
+}
+
 export async function updateServerConnection(
   workspaceId: string,
   host: string,
@@ -1229,13 +1266,56 @@ export async function updateServerConnection(
     }
   }
 
-  // Update registry
-  await updateWorkspaceServer(workspaceId, newServer)
-
   // Store password in process memory
   const serverKey = `${host}:${port}/${database}`
   if (password) {
     bdSetWorkspacePassword(serverKey, password)
+  }
+
+  const externalScaffold =
+    getServerOwnership(entry) === "external" && entry.local ? entry.local.path : null
+  let restoreScaffold: (() => Promise<void>) | null = null
+  try {
+    if (externalScaffold) {
+      const metaPath = join(externalScaffold, "metadata.json")
+      const configPath = join(externalScaffold, "config.yaml")
+      const [originalMeta, originalConfig] = await Promise.all([
+        readFile(metaPath, "utf-8"),
+        readFile(configPath, "utf-8"),
+      ])
+      const originalPort = await readFile(
+        join(externalScaffold, "dolt-server.port"),
+        "utf-8",
+      ).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null
+        throw error
+      })
+      restoreScaffold = async () => {
+        await writeAtomic(metaPath, originalMeta)
+        await writeAtomic(configPath, originalConfig)
+        const portPath = join(externalScaffold, "dolt-server.port")
+        if (originalPort === null) await rm(portPath, { force: true })
+        else await writeAtomic(portPath, originalPort)
+      }
+      await ensureExternalScaffold(externalScaffold, newServer)
+      await syncExternalPortFile(externalScaffold, port)
+    }
+    await updateWorkspaceServer(workspaceId, newServer)
+  } catch (error) {
+    if (restoreScaffold) await restoreScaffold().catch(() => {})
+    return { success: false, error: `Could not save server connection: ${String(error)}` }
+  }
+
+  if (entry.local) {
+    const dbPath = entry.local.path
+    // drainPool evicts the cache before awaiting pool.end(); an in-flight query
+    // against the old endpoint must not hold up the connection edit response.
+    void drainPool(dbPath).catch((error) =>
+      console.warn(`[workspaces] pool drain failed: ${error}`),
+    )
+    await restartWorkspaceSubscriptions(dbPath).catch((error) =>
+      console.warn(`[workspaces] subscription restart failed: ${error}`),
+    )
   }
 
   // Express the updated entry in the shape resolveRegistryEntry would produce
