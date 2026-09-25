@@ -32,7 +32,7 @@ If we can't take a change, we'll close the PR with a specific reason rather than
 
 ## Development setup
 
-Prerequisites: [Bun](https://bun.sh), [Rust](https://rustup.rs) (stable), Node.js, the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform, and the [beads CLI](https://github.com/gastownhall/beads) ≥ 1.0.1.
+Prerequisites: [Bun](https://bun.sh), [Rust](https://rustup.rs) (stable), Node.js, the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform, and the [beads CLI](https://github.com/gastownhall/beads) ≥ 1.1.0.
 
 ```sh
 bun install          # install dependencies (also sets up git hooks via husky)

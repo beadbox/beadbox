@@ -24,7 +24,7 @@ Beadbox gives `bd` users a visual interface for the things a terminal can't show
 
 ## Install
 
-**Requires the [beads](https://github.com/gastownhall/beads) CLI, version 1.0.1 or newer** (`brew install beads`). Beadbox is a GUI over `bd`; issue data lives in your beads database. `.beadtrain` files in `.beads/` are optional plans (see [Beadtrains](https://github.com/acrinym/Beadtrains)) shown on the Trains tab.
+**Requires the [beads](https://github.com/gastownhall/beads) CLI, version 1.1.0 or newer** (`brew install beads`). Beadbox is a GUI over `bd`; issue data lives in your beads database. `.beadtrain` files in `.beads/` are optional plans (see [Beadtrains](https://github.com/acrinym/Beadtrains)) shown on the Trains tab.
 
 ### macOS
 
