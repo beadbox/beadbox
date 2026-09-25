@@ -11,7 +11,7 @@ name: Install Smoke
 #   Gate 1 — capability-error-zero (parse Tauri log file for permission/
 #            capability errors; assert count = 0)
 #   Gate 3 — 1000-event subscription burst (bd create loop; assert all
-#            events arrive in order within 30s)
+#            events arrive in order within 30s). DISABLED, see the step.
 #   Gate 4 — clean process exit within 500ms (SIGTERM / WM_CLOSE; ps grep
 #            shows no orphans)
 #
@@ -213,6 +213,8 @@ jobs:
           fi
 
       - name: "Gate 3 — 1000-event subscription burst"
+        # Disabled (beadbox-01f.2): it times 1000 sequential `bd create` calls (bd's speed, 249-355s on runners since v0.26.2), not Beadbox event delivery; the rewrite is proposed on beadbox-01f.2.
+        if: false
         run: |
           set -euo pipefail
           bash src-tauri/scripts/install-smoke-helpers/burst-bd-create.sh
@@ -335,6 +337,8 @@ jobs:
           }
 
       - name: "Gate 3 — 1000-event subscription burst"
+        # Disabled (beadbox-01f.2): it times 1000 sequential `bd create` calls (bd's speed, 249-355s on runners since v0.26.2), not Beadbox event delivery; the rewrite is proposed on beadbox-01f.2.
+        if: false
         shell: bash
         run: |
           set -euo pipefail
