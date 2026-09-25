@@ -60,6 +60,7 @@ export type BdErrorCategory =
   | "timeout"
   | "unexpected-output"
   | "output-too-large"
+  | "project-identity-mismatch"
   | "unknown"
 
 export type BdErrorSeverity = "fatal" | "recoverable" | "transient"
@@ -117,6 +118,16 @@ interface ErrorPattern {
 }
 
 const ERROR_PATTERNS: ErrorPattern[] = [
+  {
+    // beadbox-287: mirrors the sidecar's pattern. The sidecar tailors the advice
+    // for Beadbox scaffolds; here there is no workspace context, so neutral.
+    test: (t) => /project identity mismatch/i.test(t),
+    category: "project-identity-mismatch",
+    severity: "fatal",
+    fixCommand: null,
+    fixDescription:
+      "This workspace's project identity differs from the database it connects to. For a server workspace added in Beadbox, remove it and add the server again; for a project folder, run `bd doctor` there. Do not run `bd init`.",
+  },
   {
     // bd 1.0+ embedded mode uses flock for concurrency control
     test: (t) => /another process holds the exclusive lock/i.test(t) || /flock.*locked/i.test(t),

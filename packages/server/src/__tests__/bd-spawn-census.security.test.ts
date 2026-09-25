@@ -77,6 +77,10 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
     count: 1,
     why: "fixed argv (list --json --limit 1); --db is resolveBdDbPath of the registry entry, value of a two-token --db",
   },
+  "lib/workspace-health.ts::probeScaffoldIdentity::execFileAsync": {
+    count: 1,
+    why: "fixed argv (list --json --limit 1); --db is resolveBdDbPath of a registry entry that isBeadboxScaffold has confirmed lies inside the scaffold root, passed as a single --db= token (beadbox-287)",
+  },
   "lib/workspace-health.ts::tryAutoRecoverDolt::execFileAsync": {
     count: 2,
     why: "fixed argv (dolt start / list --json --limit 1); --db is derived from the registry entry, value of a two-token --db",

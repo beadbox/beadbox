@@ -7,17 +7,18 @@ import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
 import { getWorkspacePassword, initServerScaffold, stripBdWarnings } from "./bd"
 import { resolveBdPath } from "./bd-paths"
+import { flagArg } from "./bd-argv"
 import { drainPool } from "./dolt-pool"
 import { ensureExternalScaffold } from "./external-scaffold"
 import { execFileAsync } from "./exec"
 import type { HealthError } from "./startup-machine"
 import { compareVersions, MIN_BD_VERSION } from "./version-requirements"
 import {
-  getBeadboxRegistryPath,
   getServerOwnership,
   isBeadboxScaffold,
   type RegistryEntry,
   resolveBdDbPath,
+  scaffoldDirFor,
   updateWorkspaceLocal,
 } from "./workspace-registry"
 
@@ -148,6 +149,8 @@ async function checkServerOnlyWorkspace(
         bdPath,
       }
     }
+    const mismatch = await probeScaffoldIdentity(workspace, bdPath)
+    if (mismatch) return { ok: false, error: mismatch, bdVersion: bdResult.version, bdPath }
   }
   const serverKey = `${s.host}:${s.port}/${s.database}`
   const password = getWorkspacePassword(serverKey)
@@ -181,8 +184,8 @@ async function checkServerOnlyWorkspace(
   // commands (list, show, config) work for data loading. Without this,
   // bd fails with "no beads database found".
   try {
-    const registryDir = dirname(getBeadboxRegistryPath())
-    const scaffoldDir = join(registryDir, "workspaces", workspace.id)
+    // Validated before mkdir: the id must stay inside the scaffold root.
+    const scaffoldDir = scaffoldDirFor(workspace.id)
     await mkdir(scaffoldDir, { recursive: true })
     await initServerScaffold(
       scaffoldDir,
@@ -204,6 +207,34 @@ async function checkServerOnlyWorkspace(
   }
 
   return { ok: true, bdVersion: bdResult.version, bdPath }
+}
+
+// beadbox-287: this path only dials MySQL, and bd itself is what refuses a
+// scaffold whose project_id differs from the server's. One bd probe finds it.
+// Only a PROJECT IDENTITY MISMATCH changes the outcome; any other result
+// (success, unreachable, timeout) returns null so the existing flow decides,
+// exactly as before this probe existed.
+async function probeScaffoldIdentity(
+  workspace: RegistryEntry,
+  bdPath: string,
+): Promise<HealthError | null> {
+  const env = { ...(buildHealthEnv(workspace) ?? process.env), BEADS_DOLT_AUTO_START: "0" }
+  try {
+    await execFileAsync(
+      bdPath,
+      ["list", flagArg("--db", resolveBdDbPath(workspace)), "--json", "--limit", "1"],
+      { timeout: HEALTH_TIMEOUT_MS, env },
+    )
+    return null
+  } catch (err: unknown) {
+    const { message, stderr, stdout } = extractBdError(err)
+    if (!`${message}\n${stderr}\n${stdout}`.toLowerCase().includes("project identity mismatch")) {
+      return null
+    }
+    const classified = classifyHealthError(message, stderr, workspace, stdout)
+    console.log(`[ws:health] "${workspace.name}" → scaffold identity mismatch (${classified.kind})`)
+    return classified
+  }
 }
 
 function buildHealthEnv(workspace: RegistryEntry): NodeJS.ProcessEnv | undefined {
@@ -354,11 +385,14 @@ export function classifyHealthError(
   }
 
   // beadbox-287: the scaffold's project_id differs from the served database's.
-  // For a server workspace that's a scaffold minted by an older Beadbox, so the
-  // fix is to re-add it (the scaffold then adopts the server's identity). bd's
-  // own text blames another project's server on the port, which is right only
-  // for local workspaces, so those fall through to the generic path.
-  if (workspace.server && combined.includes("project identity mismatch")) {
+  // Keyed on Beadbox's OWN scaffold, not on "has a server block": only there
+  // does re-adding the workspace fix it (the new scaffold adopts the server's
+  // identity). Local projects, managed ones included, keep bd's own message.
+  if (
+    workspace.server &&
+    isBeadboxScaffold(workspace) &&
+    combined.includes("project identity mismatch")
+  ) {
     const id = (label: RegExp) => rawCombined.match(label)?.[1] ?? "unknown"
     return {
       kind: "project_identity_mismatch",

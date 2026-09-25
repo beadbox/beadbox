@@ -26,6 +26,7 @@
 // in bd-spawn-census.security.test.ts.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { realpathSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -203,6 +204,8 @@ let root: string
 let db: string
 let argvLog: string
 const originalBdPath = process.env.BD_PATH
+const originalRegistry = process.env.BEADBOX_REGISTRY_PATH
+const originalLegacyRegistry = process.env.BEADS_REGISTRY_PATH
 const originalCwd = process.cwd()
 
 beforeAll(async () => {
@@ -223,7 +226,17 @@ beforeAll(async () => {
   // resolved relative to the process cwd. Run from a directory where both the
   // benign and the hostile value exist as directories, so the spawn happens and
   // the slot is observed instead of failing on a missing cwd.
-  const cwd = join(root, "cwd")
+  // The cwd is the scaffold root, so initServerScaffold's containment guard
+  // (beadbox-287) accepts a benign relative dir and every other slot is
+  // observed, while a hostile scaffoldDir is refused before any spawn. Both
+  // registries point at scratch so no export reads the real ones.
+  // realpath: on macOS the temp dir is /var/..., a symlink to /private/var/...,
+  // and after chdir the process cwd (which resolves the relative dir) is the
+  // real path. A registry named through the symlink would refuse every dir.
+  const realRoot = realpathSync(root)
+  process.env.BEADBOX_REGISTRY_PATH = join(realRoot, "registry.json")
+  process.env.BEADS_REGISTRY_PATH = join(realRoot, "legacy-registry.json")
+  const cwd = join(root, "workspaces")
   await mkdir(join(cwd, BENIGN), { recursive: true })
   await mkdir(join(cwd, HOSTILE), { recursive: true })
   process.chdir(cwd)
@@ -233,6 +246,10 @@ afterAll(async () => {
   process.chdir(originalCwd)
   if (originalBdPath === undefined) delete process.env.BD_PATH
   else process.env.BD_PATH = originalBdPath
+  if (originalRegistry === undefined) delete process.env.BEADBOX_REGISTRY_PATH
+  else process.env.BEADBOX_REGISTRY_PATH = originalRegistry
+  if (originalLegacyRegistry === undefined) delete process.env.BEADS_REGISTRY_PATH
+  else process.env.BEADS_REGISTRY_PATH = originalLegacyRegistry
   bd.__resetBdPathCache()
   await rm(root, { recursive: true, force: true })
 })

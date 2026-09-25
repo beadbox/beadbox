@@ -32,6 +32,7 @@ import {
 const CATEGORY_TITLES: Record<string, string> = {
   "out-of-sync": "Workspace out of sync",
   "database-not-found": "Workspace database not found",
+  "project-identity-mismatch": "Workspace needs to reconnect",
   "permission-denied": "Permission denied",
   "schema-missing": "Workspace not initialized",
   "server-unreachable": "Dolt server unreachable",

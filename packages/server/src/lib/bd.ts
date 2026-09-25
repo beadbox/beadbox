@@ -5,6 +5,7 @@ import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
 import {
   type BdLoadError,
+  type ClassifyContext,
   classifyBdError,
   MAXBUFFER_CODE,
   outputTooLargeError,
@@ -14,6 +15,7 @@ import { __resetBdPathCache, COMMON_BD_PATHS, resolveBdPath as getBdPath } from 
 import { getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import {
   assertCommentId,
+  BdArgvError,
   assertNotFlagLike,
   assertSafeBeadId,
   assertSafeBeadIds,
@@ -40,7 +42,13 @@ import type {
   ServerDatabase,
 } from "./types"
 import { readOnlyQuery } from "./read-only-query"
-import { findExternalWorkspaceByDbPath, parseServerUri, type ServerConnection } from "./workspace-registry"
+import {
+  findExternalWorkspaceByDbPath,
+  isBeadboxScaffoldPath,
+  parseServerUri,
+  scaffoldRoot,
+  type ServerConnection,
+} from "./workspace-registry"
 
 // Reset helpers are exported for test teardown only.
 // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -598,6 +606,11 @@ async function execBdWithRetry(
   }
 }
 
+// beadbox-287: lets classifyBdError tailor advice for Beadbox's own scaffolds.
+function classifyContext(db: string | undefined): ClassifyContext {
+  return { beadboxScaffold: db ? isBeadboxScaffoldPath(db) : false }
+}
+
 // Centralized error path for bdExec / bdExecRaw. Cleans stderr, optionally
 // re-throws context-canceled raw, then hands off to classifyBdError. Returns
 // nothing — always throws.
@@ -605,7 +618,12 @@ function handleBdError(
   error: unknown,
   subcmd: string,
   elapsed: number,
-  opts: { rethrowOnContextCanceled: boolean; logExecArgs?: string[]; maxBuffer: number },
+  opts: {
+    rethrowOnContextCanceled: boolean
+    logExecArgs?: string[]
+    maxBuffer: number
+    db?: string
+  },
 ): never {
   const execError = error as ExecError
   if (execError.code === MAXBUFFER_CODE) {
@@ -624,7 +642,7 @@ function handleBdError(
   if (cleanedStderr && execError.stderr !== cleanedStderr) {
     ;(error as { stderr?: string }).stderr = cleanedStderr
   }
-  classifyBdError(error)
+  classifyBdError(error, classifyContext(opts.db))
   // classifyBdError always throws; this is unreachable but TS needs it.
   throw error
 }
@@ -656,6 +674,7 @@ async function bdExec<T>(
         rethrowOnContextCanceled: true,
         logExecArgs: execArgs,
         maxBuffer,
+        db: options.db,
       })
     }
   }
@@ -680,6 +699,7 @@ async function bdExecRaw(args: string[], options: BdOptions = {}): Promise<strin
       handleBdError(error, subcmd, elapsed, {
         rethrowOnContextCanceled: false,
         maxBuffer: EXEC_OPTS_BASE.maxBuffer,
+        db: options.db,
       })
     }
   }
@@ -1156,7 +1176,7 @@ export async function listActivity(
           const cleaned = stripBdWarnings(innerExec.stderr)
           if (cleaned !== innerExec.stderr) innerExec.stderr = cleaned
         }
-        classifyBdError(innerError)
+        classifyBdError(innerError, classifyContext(options.db))
       }
     })
     return result
@@ -1244,6 +1264,13 @@ export async function initServerScaffold(
   // identity. The scaffold is Beadbox-owned and holds only connection config
   // (the data is on the server), so move a previous one aside and start fresh.
   const beadsDir = join(scaffoldDir, ".beads")
+  // Only ever a Beadbox-owned scaffold: the rename below must not reach a
+  // real project's .beads through a crafted registry id (beadbox-287).
+  if (!isBeadboxScaffoldPath(beadsDir)) {
+    throw new BdArgvError(
+      `Refusing to create a server scaffold outside ${scaffoldRoot()}: ${scaffoldDir}`,
+    )
+  }
   if (existsSync(beadsDir)) {
     await rename(beadsDir, join(scaffoldDir, `.beads.stale-${Date.now()}`))
   }

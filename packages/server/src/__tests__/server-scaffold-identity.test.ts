@@ -12,12 +12,15 @@ const SERVER = { host: "db.example.test", port: 3307, database: "team_beads", us
 
 describe("initServerScaffold (beadbox-287)", () => {
   const originalBdPath = process.env.BD_PATH
+  const originalRegistry = process.env.BEADBOX_REGISTRY_PATH
   let root: string
   let scaffold: string
   let log: string
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "beadbox-287-"))
+    // Scaffolds live next to the registry: <root>/workspaces/<id>.
+    process.env.BEADBOX_REGISTRY_PATH = join(root, "registry.json")
     scaffold = join(root, "workspaces", "ws-1")
     await mkdir(scaffold, { recursive: true })
     log = join(root, "argv.log")
@@ -35,6 +38,8 @@ describe("initServerScaffold (beadbox-287)", () => {
   afterEach(async () => {
     if (originalBdPath === undefined) delete process.env.BD_PATH
     else process.env.BD_PATH = originalBdPath
+    if (originalRegistry === undefined) delete process.env.BEADBOX_REGISTRY_PATH
+    else process.env.BEADBOX_REGISTRY_PATH = originalRegistry
     __resetBdPathCache()
     await rm(root, { recursive: true, force: true })
   })
@@ -60,6 +65,32 @@ describe("initServerScaffold (beadbox-287)", () => {
     expect(stale).toHaveLength(1)
     expect(await readFile(join(scaffold, stale[0], "metadata.json"), "utf-8")).toContain("stale")
     expect(await readFile(join(scaffold, ".beads", "metadata.json"), "utf-8")).toContain("adopted")
+  })
+
+  test("refuses a crafted id that escapes the scaffold root; the victim's .beads is untouched", async () => {
+    // A registry id of "../../victim" would put the scaffold at a real project.
+    const victim = join(root, "victim")
+    await mkdir(join(victim, ".beads"), { recursive: true })
+    await writeFile(join(victim, ".beads", "metadata.json"), '{"project_id":"victim-own"}')
+    const { scaffoldDirFor } = await import("../lib/workspace-registry")
+
+    expect(() => scaffoldDirFor("../victim")).toThrow(/outside/)
+    expect(() => scaffoldDirFor("../../victim")).toThrow(/outside/)
+    expect(() => scaffoldDirFor("a/b")).toThrow(/outside/)
+    expect(() => scaffoldDirFor("..")).toThrow(/outside/)
+    expect(() => scaffoldDirFor("")).toThrow(/outside/)
+    await expect(initServerScaffold(victim, SERVER)).rejects.toThrow(/Refusing/)
+
+    expect(await readdir(victim)).toEqual([".beads"])
+    expect(await readFile(join(victim, ".beads", "metadata.json"), "utf-8")).toContain("victim-own")
+    expect(await readFile(log, "utf-8").catch(() => "")).toBe("") // bd never ran
+  })
+
+  test("accepts a normal workspace id", async () => {
+    const { scaffoldDirFor } = await import("../lib/workspace-registry")
+    expect(scaffoldDirFor("3f1b8a24-0000-4000-8000-00000000e287")).toBe(
+      join(root, "workspaces", "3f1b8a24-0000-4000-8000-00000000e287"),
+    )
   })
 
   test("leaves the directory alone when there is no previous scaffold", async () => {

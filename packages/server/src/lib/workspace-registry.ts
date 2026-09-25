@@ -37,10 +37,44 @@ export interface RegistryEntry {
 
 export type ServerOwnership = NonNullable<RegistryEntry["serverOwnership"]>
 
+/** Where Beadbox keeps the local .beads scaffolds of server workspaces. */
+export function scaffoldRoot(): string {
+  return resolve(dirname(getBeadboxRegistryPath()), "workspaces")
+}
+
+/**
+ * The scaffold directory for a workspace id, which must be exactly one level
+ * inside scaffoldRoot() (beadbox-287). The id comes from the registry file, and
+ * the scaffold code renames and re-initialises whatever .beads it finds there,
+ * so an id such as "../../project" must never reach a real project's .beads.
+ */
+export function scaffoldDirFor(workspaceId: string): string {
+  const root = scaffoldRoot()
+  const dir = resolve(root, workspaceId)
+  if (dirname(dir) !== root || basename(dir) !== workspaceId) {
+    throw new Error(
+      `Refusing workspace id ${JSON.stringify(workspaceId)}: its scaffold would be outside ${root}`,
+    )
+  }
+  return dir
+}
+
+/** True when dbPath is <scaffoldRoot>/<one segment>/.beads (or a file inside it). */
+export function isBeadboxScaffoldPath(dbPath: string): boolean {
+  const resolved = resolve(dbPath)
+  const beadsDir = basename(resolved) === ".beads" ? resolved : dirname(resolved)
+  return basename(beadsDir) === ".beads" && dirname(dirname(beadsDir)) === scaffoldRoot()
+}
+
 export function isBeadboxScaffold(entry: RegistryEntry): boolean {
   if (!entry.local) return false
-  const scaffoldPath = join(dirname(getBeadboxRegistryPath()), "workspaces", entry.id, ".beads")
-  return resolve(entry.local.path) === resolve(scaffoldPath)
+  let scaffoldDir: string
+  try {
+    scaffoldDir = scaffoldDirFor(entry.id)
+  } catch {
+    return false
+  }
+  return resolve(entry.local.path) === join(scaffoldDir, ".beads")
 }
 
 /**

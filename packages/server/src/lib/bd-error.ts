@@ -59,6 +59,7 @@ export type BdErrorCategory =
   | "timeout"
   | "unexpected-output"
   | "output-too-large"
+  | "project-identity-mismatch"
   | "unknown"
 
 export type BdErrorSeverity = "fatal" | "recoverable" | "transient"
@@ -120,15 +121,42 @@ export interface BdLoadError {
 
 // Pattern table: ordered from most specific to most general.
 // First match wins. Checks stderr first, then error.message.
+/** What the caller knows about the workspace the failing bd call targeted. */
+export interface ClassifyContext {
+  /** The db is a Beadbox-owned server scaffold (~/.beadbox/workspaces/<id>/.beads). */
+  beadboxScaffold?: boolean
+}
+
 interface ErrorPattern {
   test: (text: string) => boolean
   category: BdErrorCategory
   severity: BdErrorSeverity
   fixCommand: string | null
-  fixDescription: string | null
+  fixDescription: string | null | ((ctx: ClassifyContext) => string)
+}
+
+function resolveFixDescription(pattern: ErrorPattern, ctx: ClassifyContext): string | null {
+  return typeof pattern.fixDescription === "function"
+    ? pattern.fixDescription(ctx)
+    : pattern.fixDescription
 }
 
 const ERROR_PATTERNS: ErrorPattern[] = [
+  {
+    // beadbox-287: bd refuses when metadata.json's project_id differs from the
+    // database's _project_id. For a Beadbox server scaffold that is a scaffold
+    // minted by an older Beadbox, and re-adding the workspace adopts the
+    // server's id. For a project folder bd's own advice applies. Fatal, not
+    // transient: retrying cannot fix it. No fixCommand: nothing safe to run.
+    test: (t) => /project identity mismatch/i.test(t),
+    category: "project-identity-mismatch",
+    severity: "fatal",
+    fixCommand: null,
+    fixDescription: (ctx) =>
+      ctx.beadboxScaffold
+        ? "Beadbox's connection to this server has a different project identity than the server. Remove this workspace and add the server again: Beadbox will reconnect using the server's own project identity."
+        : "This project's metadata.json names a different project than the database it connects to. Run `bd doctor` in the project to reconcile them, and check `bd dolt status`. Do not run `bd init`: the data is still on the server.",
+  },
   {
     // Fallback for exec paths that bypass handleBdError, where the limit is
     // not known; handleBdError names it (outputTooLargeError).
@@ -263,6 +291,8 @@ const ERROR_PATTERNS: ErrorPattern[] = [
 // where instanceof BdError is reliable. Use this instead of throwing
 // across the server action boundary.
 export function toBdLoadError(error: unknown): BdLoadError {
+  // No workspace context here: a plain error gets the neutral advice.
+  const ctx: ClassifyContext = {}
   if (error instanceof BdError) {
     return {
       category: error.category,
@@ -289,7 +319,7 @@ export function toBdLoadError(error: unknown): BdLoadError {
         message: humanMessage,
         stderr: stderr || null,
         fixCommand: pattern.fixCommand,
-        fixDescription: pattern.fixDescription,
+        fixDescription: resolveFixDescription(pattern, ctx),
       }
     }
   }
@@ -306,7 +336,7 @@ export function toBdLoadError(error: unknown): BdLoadError {
 
 // Classify a raw error (from Node's execFile or similar) into a structured
 // BdError. Always throws; never returns normally.
-export function classifyBdError(error: unknown): never {
+export function classifyBdError(error: unknown, ctx: ClassifyContext = {}): never {
   const e = error as { stderr?: string; message?: string; code?: string | number }
   const stderr = e.stderr ?? ""
   const message = e.message ?? ""
@@ -325,7 +355,7 @@ export function classifyBdError(error: unknown): never {
         stderr: stderr || null,
         exitCode,
         fixCommand: pattern.fixCommand,
-        fixDescription: pattern.fixDescription,
+        fixDescription: resolveFixDescription(pattern, ctx),
         cause: error,
       })
     }

@@ -32,7 +32,6 @@ import {
   findWorkspace,
   findWorkspaceByDbPath,
   getServerOwnership,
-  getBeadboxRegistryPath,
   projectDirFromDatabasePath,
   type RegistryEntry,
   readRegistry,
@@ -41,6 +40,7 @@ import {
   replaceWorkspace as registryReplaceWorkspace,
   setActiveWorkspace as registrySetActiveWorkspace,
   removeWorkspaceFromRegistry,
+  scaffoldDirFor,
   type ServerConnection,
   updateWorkspaceLabel,
   updateWorkspaceLocal,
@@ -877,10 +877,10 @@ export async function addServerWorkspace(
   // Create a local .beads/ scaffold so bd CLI commands work against the remote
   // server. Without this, bd fails with "no beads database found" because it
   // requires a local .beads/ directory for workspace discovery and metadata.
-  const registryDir = dirname(getBeadboxRegistryPath())
-  const scaffoldDir = join(registryDir, "workspaces", workspaceId)
   let localBeadsPath: string | null = null
   try {
+    // Validated before mkdir: the id must stay inside the scaffold root.
+    const scaffoldDir = scaffoldDirFor(workspaceId)
     await mkdir(scaffoldDir, { recursive: true })
     await initServerScaffold(scaffoldDir, { host, port, database: databaseName, user }, password)
     localBeadsPath = join(scaffoldDir, ".beads")
@@ -901,7 +901,7 @@ export async function addServerWorkspace(
     workspace: {
       id: workspaceId,
       name,
-      path: localBeadsPath ? scaffoldDir : null,
+      path: localBeadsPath ? dirname(localBeadsPath) : null,
       databasePath: localBeadsPath ?? `server://${host}:${port}/${databaseName}`,
       mode: "server",
       serverHost: host,
