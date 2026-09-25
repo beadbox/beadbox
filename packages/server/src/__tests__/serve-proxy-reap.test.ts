@@ -7,8 +7,10 @@
 //   2. a proxy for a DIFFERENT root survives;
 //   3. a proxy with a live foreign bd serve on the same root survives;
 //   4. an unrecorded (user-started) proxy survives;
-//   5. sidecar death: the next startup sweep reaps the recorded proxy.
-// (A reused pid is covered by the pure decision tests: it cannot be forced here.)
+//   5. sidecar death (SIGKILL, SIGTERM, exit, crash): the wrapper reaps it at once;
+//   6. sidecar death with a foreign bd serve on the root: left for the next sweep;
+//   7. the wrapper's R2: a record whose start time no longer matches is not signalled.
+// (A reused pid for the in-process reap is covered by the pure decision tests.)
 
 import { afterEach, beforeEach, expect, test } from "bun:test"
 import { type ChildProcess, execFileSync, spawn } from "node:child_process"
@@ -140,12 +142,12 @@ test("4. an unrecorded (user-started) proxy on the same root survives", async ()
   expect(await survives(users)).toBe(true)
 })
 
-test("5. sidecar death: the token goes at once, and the next startup sweep reaps the recorded proxy", async () => {
-  const ws = workspace("a")
+/** A sidecar stand-in (fixtures/serve-host.ts) with serve live and its proxy recorded. */
+async function startHost(ws: string, mode: string) {
   const tokenRoot = join(root, "tok")
-  mkdirSync(tokenRoot)
+  mkdirSync(tokenRoot, { recursive: true })
   const host = spawn(process.execPath, [HOST], {
-    env: { ...process.env, HOST_MODE: "hang", HOST_BD: bd, HOST_WS: ws, HOST_TOKEN_ROOT: tokenRoot, HOST_NOTE_HEALTHY: "1" },
+    env: { ...process.env, HOST_MODE: mode, HOST_BD: bd, HOST_WS: ws, HOST_TOKEN_ROOT: tokenRoot, HOST_NOTE_HEALTHY: "1" },
     stdio: ["ignore", "pipe", "inherit"],
   })
   extra.push(host)
@@ -158,14 +160,58 @@ test("5. sidecar death: the token goes at once, and the next startup sweep reaps
     })
     host.on("exit", (c) => reject(new Error(`host exited ${c}`)))
   })
-  expect(await until(() => existsSync(join(info.tokenDir, "proxy.json")))).toBe(true)
+  expect(await until(() => existsSync(join(info.tokenDir, "proxy.lines")))).toBe(true) // precondition: recorded
   const proxy = JSON.parse(readFileSync(join(info.tokenDir, "proxy.json"), "utf-8")).pid as number
+  return { host, tokenRoot, tokenDir: info.tokenDir, proxy }
+}
+
+// beadbox-6x2 lifetime: the app quits by SIGKILL (Tauri's kill_all), its host dies,
+// or it exits on its own. No sidecar code runs after any of these, so the
+// wrapper must reap the proxy itself, without waiting for a next launch.
+for (const [mode, how, signal] of [
+  ["hang", "SIGKILL", "SIGKILL"],
+  ["hang", "SIGTERM", "SIGTERM"],
+  ["exit", "its own exit", null],
+  ["crash", "a crash", null],
+] as const) {
+  test(`5. sidecar ends by ${how}: the recorded proxy and its dir are gone promptly, no relaunch`, async () => {
+    const ws = workspace("a")
+    const { host, tokenDir, proxy } = await startHost(ws, mode)
+    if (signal) host.kill(signal)
+    expect(await until(() => !existsSync(join(tokenDir, "token")))).toBe(true) // the secret goes at once
+    expect(await until(() => !alive(proxy), 8000)).toBe(true)
+    expect(await until(() => !existsSync(tokenDir), 8000)).toBe(true)
+  }, 30_000)
+}
+
+test("6. sidecar death with a foreign bd serve on the root: the wrapper leaves it; the next sweep reaps once that serve is gone", async () => {
+  const ws = workspace("a")
+  const { host, tokenRoot, tokenDir, proxy } = await startHost(ws, "hang")
+  const foreign = spawn(bd, ["serve", "--foreign"], { cwd: ws, env: { ...process.env, FAKE_FOREIGN_SERVE: "1" }, stdio: "ignore" })
+  extra.push(foreign)
+  await Bun.sleep(300)
   host.kill("SIGKILL")
-  expect(await until(() => !existsSync(join(info.tokenDir, "token")))).toBe(true) // the secret goes at once
-  expect(existsSync(join(info.tokenDir, "proxy.json"))).toBe(true) // the record waits for the sweep
-  expect(alive(proxy)).toBe(true) // its own session: the group kill missed it
+  expect(await until(() => !existsSync(join(tokenDir, "token")), 1500)).toBe(true) // at once, not after the wait
+  // The wrapper (its argv carries the token dir) waits a bounded time for the root to be free, then gives up.
+  expect(await until(() => !processTable().some((r) => r.command.includes(tokenDir)), 15_000)).toBe(true)
+  expect(await survives(proxy, 500)).toBe(true) // R3: left alive
+  expect(existsSync(join(tokenDir, "proxy.json"))).toBe(true) // the record waits for the sweep
+  foreign.kill("SIGKILL")
+  await until(() => !alive(foreign.pid as number))
   const outcomes = await sweepStaleServeProxies(tokenRoot)
   expect(outcomes.join()).toContain("reaped")
   expect(await until(() => !alive(proxy))).toBe(true)
-  expect(existsSync(info.tokenDir)).toBe(false)
-}, 20_000)
+  expect(existsSync(tokenDir)).toBe(false)
+}, 30_000)
+
+test("7. the wrapper never signals a pid whose start time no longer matches its record (R2)", async () => {
+  const ws = workspace("a")
+  const { host, tokenDir, proxy } = await startHost(ws, "hang")
+  // Same pid, a different start time: what a reused pid looks like to the wrapper.
+  const lines = join(tokenDir, "proxy.lines")
+  const [pid, , rootLine, command] = readFileSync(lines, "utf-8").split("\n")
+  writeFileSync(lines, `${pid}\nMon Jan 1 00:00:00 2001\n${rootLine}\n${command}\n`)
+  host.kill("SIGKILL")
+  expect(await until(() => !existsSync(tokenDir), 8000)).toBe(true) // record dropped: that process is not ours
+  expect(await survives(proxy)).toBe(true)
+}, 30_000)

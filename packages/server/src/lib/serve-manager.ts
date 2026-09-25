@@ -15,7 +15,9 @@
 // child is a /bin/sh wrapper whose stdin is a pipe the sidecar holds and
 // never writes. When the sidecar exits for any reason, including SIGKILL,
 // the kernel closes that pipe; the wrapper reads EOF, removes the token dir,
-// and signals its own process group, bd serve included.
+// and signals its own process group, bd serve included. It then reaps the
+// db-proxy-child our serve started (R2-R4, see buildServeShellArgs), since
+// the app quits by SIGKILL and no sidecar code runs after that.
 //
 // No timers: the sidecar's stdin reader can gate timers on its main thread
 // (see CLAUDE.md, sidecar gotchas), so idle stop and restart backoff are
@@ -38,6 +40,8 @@ import {
 export const SERVE_DIR_PREFIX = "beadbox-serve-"
 /** A recorded proxy (serve-proxy.ts) waiting to be reaped; kept after the token is removed. */
 export const PROXY_RECORD = "proxy.json"
+/** The same record as lines (pid, start, root, command) for the wrapper's own reap. */
+export const PROXY_LINES = "proxy.lines"
 const LISTENING = /^bd serve: listening on (http:\/\/127\.0\.0\.1:(\d{1,5}))$/
 const STARTUP_TIMEOUT_MS = 10_000
 const STOP_WAIT_MS = 5_000
@@ -69,11 +73,21 @@ export interface ServeHandle {
 
 /**
  * The /bin/sh argv for a serve child. The script is a constant (the only
- * interpolation is the module constant SERVE_DIR_PREFIX): the bd path and
- * token dir arrive as positionals and are only ever read through quoted
- * variables, so no caller-supplied text is spliced into shell code. The
- * cleanup refuses to remove anything whose LAST path component is not named
- * like our token dirs (a matching parent directory does not count).
+ * interpolation is module constants): the bd path and token dir arrive as
+ * positionals and are only ever read through quoted variables, so no
+ * caller-supplied text is spliced into shell code. The cleanup refuses to
+ * remove anything whose LAST path component is not named like our token dirs
+ * (a matching parent directory does not count).
+ *
+ * On EOF (the sidecar is gone, however it ended) the watcher ignores TERM,
+ * ends its own group, and reaps the proxy our serve started, under the same
+ * rules serve-proxy.ts applies:
+ *   R2  signal only the recorded pid, and only while ps still reports that
+ *       pid with the recorded start time and command line, under our uid;
+ *   R3  never while a live `bd serve` may use the root: one whose root is
+ *       unknown (--db, -C, unreadable cwd, no .beads above it) counts;
+ *   R4  SIGTERM, wait, re-check R2 and R3, then SIGKILL; never a group.
+ * Anything uncertain leaves the record for the next start's sweep.
  */
 export function buildServeShellArgs(bdPath: string, tokenDir: string): string[] {
   const SCRIPT = `
@@ -81,7 +95,36 @@ exec 3<&0 </dev/null
 BD="$1"
 TOKDIR="$2"
 cleanup() { case "\${TOKDIR##*/}" in ${SERVE_DIR_PREFIX}*) rm -f -- "$TOKDIR/token"; [ -e "$TOKDIR/${PROXY_RECORD}" ] || rm -rf -- "$TOKDIR" ;; esac; }
-( while read -r _ <&3; do :; done; cleanup; kill -TERM -$$ 2>/dev/null || kill -TERM $$ ) &
+same() {
+  [ "$(ps -o uid= -p "$1" 2>/dev/null | tr -d ' ')" = "$(id -u)" ] || return 1
+  ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | { read -r x; [ "$x" = "$2" ]; } || return 1
+  ps -ww -o command= -p "$1" 2>/dev/null | { read -r x; [ "$x" = "$3" ]; }
+}
+busy() {
+  for s in $(ps -axww -o pid=,command= | awk '{ for (i = 2; i < NF; i++) { n = split($i, p, "/"); if (p[n] == "bd") { if ($(i + 1) == "serve") print $1; break } } }'); do
+    ps -ww -o command= -p "$s" 2>/dev/null | grep -Eq -- ' (--db|-C|--directory)( |=|$)' && return 0
+    d=$(lsof -a -p "$s" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+    while [ -n "$d" ] && [ ! -e "$d/.beads/dolt" ]; do
+      [ "$d" = / ] && d= || { d=\${d%/*}; [ -n "$d" ] || d=/; }
+    done
+    d=$([ -n "$d" ] && cd -- "$d/.beads/dolt" 2>/dev/null && pwd -P)
+    [ -z "$d" ] || [ "$d" = "$1" ] && return 0
+  done
+  return 1
+}
+reap() {
+  [ -f "$TOKDIR/${PROXY_LINES}" ] || return 0
+  { read -r P; read -r S; read -r R; read -r C; } < "$TOKDIR/${PROXY_LINES}"
+  case "$P" in ''|*[!0-9]*) return 0 ;; esac
+  end=$(($(date +%s) + 5)); while busy "$R"; do [ "$(date +%s)" -ge "$end" ] && return 0; sleep 0.2; done
+  if same "$P" "$S" "$C"; then
+    kill -TERM "$P" 2>/dev/null
+    n=0; while [ "$n" -lt 30 ] && same "$P" "$S" "$C"; do n=$((n + 1)); sleep 0.1; done
+    if same "$P" "$S" "$C"; then busy "$R" && return 0; kill -KILL "$P" 2>/dev/null; fi
+  fi
+  rm -f -- "$TOKDIR/${PROXY_LINES}" "$TOKDIR/${PROXY_RECORD}"
+}
+( while read -r _ <&3; do :; done; cleanup; trap '' TERM; kill -TERM -$$ 2>/dev/null || kill -TERM $$; reap; cleanup ) &
 exec 3<&-
 "$BD" serve --addr 127.0.0.1:0 --auth-token-file "$TOKDIR/token" &
 wait $!
@@ -364,6 +407,13 @@ function recordProxy(child: Child): void {
     if (!rec) return
     child.proxy = rec
     writeFileSync(join(child.tokenDir, PROXY_RECORD), JSON.stringify(rec), { mode: 0o600 })
+    // The wrapper reads these with `read -r`, which trims: a field it could not
+    // read back exactly (a newline in a path) gets no line record, so only the
+    // next start's sweep may reap it.
+    const lines = [String(rec.pid), rec.start, rec.root, rec.command.trim()]
+    if (lines.every((l) => !l.includes("\n") && l === l.trim())) {
+      writeFileSync(join(child.tokenDir, PROXY_LINES), `${lines.join("\n")}\n`, { mode: 0o600 })
+    }
   } catch {
     /* no record: nothing of ours to reap */
   }
