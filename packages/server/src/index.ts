@@ -158,6 +158,8 @@ process.on("uncaughtException", (err) => {
   process.exit(1)
 })
 process.on("unhandledRejection", (reason) => {
-  process.stderr.write(`[beadbox-sidecar] unhandledRejection: ${String(reason)}\n`)
+  process.stderr.write(
+    `[beadbox-sidecar] unhandledRejection: ${reason instanceof Error ? (reason.stack ?? String(reason)) : String(reason)}\n`,
+  )
   process.exit(1)
 })

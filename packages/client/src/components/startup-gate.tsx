@@ -196,32 +196,44 @@ export function StartupGate({ children }: StartupGateProps) {
     }
 
     async function check() {
-      const cookieId = getWorkspaceCookie()
-      const validCookie = cookieId && isValidWorkspaceCookie(cookieId) ? cookieId : undefined
-      const result = await rpc.health.runStartupHealth(validCookie)
+      try {
+        const cookieId = getWorkspaceCookie()
+        const validCookie = cookieId && isValidWorkspaceCookie(cookieId) ? cookieId : undefined
+        const result = await rpc.health.runStartupHealth(validCookie)
 
-      if (cancelled) return
+        if (cancelled) return
 
-      setServerPlatform(result.platform)
+        setServerPlatform(result.platform)
 
-      if (!result.hasWorkspaces) {
-        dispatch({ type: "NO_WORKSPACES" })
-        return
+        if (!result.hasWorkspaces) {
+          dispatch({ type: "NO_WORKSPACES" })
+          return
+        }
+
+        // Track which workspace was checked so we can remove it if stale
+        if (result.activeWorkspaceId) {
+          setCheckedWorkspaceId(result.activeWorkspaceId)
+        }
+
+        if (result.healthCheck && !result.healthCheck.ok) {
+          // A previously-verified workspace that now fails loses its pass.
+          if (cookieId) verifiedWorkspacesRef.current.delete(cookieId)
+          dispatch({ type: "HEALTH_FAIL", error: result.healthCheck.error })
+          return
+        }
+
+        acceptHealthy(result, cookieId)
+      } catch (error) {
+        if (cancelled) return
+        dispatch({
+          type: "HEALTH_FAIL",
+          error: {
+            kind: "unknown",
+            message: error instanceof Error ? error.message : String(error),
+            bdOutput: "",
+          },
+        })
       }
-
-      // Track which workspace was checked so we can remove it if stale
-      if (result.activeWorkspaceId) {
-        setCheckedWorkspaceId(result.activeWorkspaceId)
-      }
-
-      if (result.healthCheck && !result.healthCheck.ok) {
-        // A previously-verified workspace that now fails loses its pass.
-        if (cookieId) verifiedWorkspacesRef.current.delete(cookieId)
-        dispatch({ type: "HEALTH_FAIL", error: result.healthCheck.error })
-        return
-      }
-
-      acceptHealthy(result, cookieId)
     }
 
     check()

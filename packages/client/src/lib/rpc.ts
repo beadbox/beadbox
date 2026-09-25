@@ -17,7 +17,7 @@
 // same in-flight promise.
 
 import type { handlers as serverHandlers } from "@beadbox/server/handlers"
-import { createChannel, spawn } from "tauri-plugin-js-api"
+import { createChannel, kill, onExit, spawn } from "tauri-plugin-js-api"
 import type { BdCommandEvent } from "./console-types"
 
 /**
@@ -83,22 +83,145 @@ function summarizeResult(result: unknown): string | null {
   return String(result)
 }
 
-let channelPromise: Promise<RemoteApi> | null = null
-
-async function getRemoteApi(): Promise<RemoteApi> {
-  if (!channelPromise) {
-    channelPromise = (async () => {
-      await spawn(SIDECAR_NAME, { sidecar: SIDECAR_NAME })
-      const { api } = await createChannel<Record<string, never>, RemoteApi>(SIDECAR_NAME)
-      return api
-    })().catch((err: unknown) => {
-      // Reset so a transient spawn failure can be retried.
-      channelPromise = null
-      throw err
-    })
-  }
-  return channelPromise
+interface SidecarSession {
+  api: RemoteApi
+  destroy: () => void
 }
+
+interface SidecarRuntime {
+  onExit: (callback: (code: number | null) => void) => Promise<unknown>
+  spawn: () => Promise<unknown>
+  kill: () => Promise<unknown>
+  connect: () => Promise<SidecarSession>
+}
+
+interface SidecarManagerOptions {
+  /** Unexpected exits allowed inside `windowMs` before auto-reconnect stops. */
+  maxAutoReconnects?: number
+  windowMs?: number
+  now?: () => number
+}
+
+// Keep the exit listener alive across reconnects. Destroying kkrpc rejects
+// pending requests, so a sidecar crash cannot leave the loading spinner
+// waiting forever for a reply that will never arrive.
+//
+// `onExitUnexpected` tells subscribers to re-attach (it respawns the sidecar
+// via their next call). A sidecar that dies at boot would turn that into an
+// endless respawn loop, so past the budget an exit still tears the session
+// down but does not ask anyone to reconnect; the next explicit call (Retry,
+// a user action) respawns. The budget is a sliding window of exit times and
+// is deliberately NOT reset by a successful connect: connecting does not
+// prove the process survives boot.
+//
+// When a session connects after a suppressed exit, subscribers are still
+// holding the dead sidecar's subscription id, and the new sidecar's events
+// would be filtered out as foreign. Notify them on that connect so they
+// re-subscribe; otherwise live updates stay silently dead after recovery.
+export function createSidecarManager(
+  runtime: SidecarRuntime,
+  onExitUnexpected?: () => void,
+  options: SidecarManagerOptions = {},
+) {
+  const { maxAutoReconnects = 3, windowMs = 60_000, now = Date.now } = options
+  let channelPromise: Promise<RemoteApi> | null = null
+  let session: SidecarSession | null = null
+  let listenerPromise: Promise<unknown> | null = null
+  let generation = 0
+  let recentExits: number[] = []
+  let resubscribeOnConnect = false
+
+  function ensureExitListener(): Promise<unknown> {
+    listenerPromise ??= runtime
+      .onExit(() => {
+        generation++
+        const oldSession = session
+        session = null
+        channelPromise = null
+        const at = now()
+        recentExits = recentExits.filter((t) => at - t < windowMs)
+        recentExits.push(at)
+        const withinBudget = recentExits.length <= maxAutoReconnects
+        if (!withinBudget) resubscribeOnConnect = true
+        try {
+          oldSession?.destroy()
+        } finally {
+          if (withinBudget) onExitUnexpected?.()
+        }
+      })
+      .catch((error: unknown) => {
+        listenerPromise = null
+        throw error
+      })
+    return listenerPromise
+  }
+
+  function getRemoteApi(): Promise<RemoteApi> {
+    if (channelPromise) return channelPromise
+    const expectedGeneration = generation
+    let initializing: Promise<RemoteApi>
+    initializing = (async () => {
+      await ensureExitListener()
+      if (generation !== expectedGeneration) throw new Error("Sidecar exited during startup")
+      await runtime.spawn()
+      if (generation !== expectedGeneration) throw new Error("Sidecar exited during startup")
+      let nextSession: SidecarSession
+      try {
+        nextSession = await runtime.connect()
+      } catch (error) {
+        // A failed channel handshake can leave a live process registered by
+        // tauri-plugin-js; remove it so the next attempt may spawn again.
+        if (generation === expectedGeneration) await runtime.kill().catch(() => {})
+        throw error
+      }
+      if (generation !== expectedGeneration) {
+        nextSession.destroy()
+        throw new Error("Sidecar exited during startup")
+      }
+      session = nextSession
+      if (resubscribeOnConnect) {
+        resubscribeOnConnect = false
+        onExitUnexpected?.()
+      }
+      return nextSession.api
+    })().catch((error: unknown) => {
+      if (channelPromise === initializing) channelPromise = null
+      throw error
+    })
+    channelPromise = initializing
+    return initializing
+  }
+
+  return { getRemoteApi }
+}
+
+const sidecarManager = createSidecarManager(
+  {
+    onExit: (callback) => onExit(SIDECAR_NAME, callback),
+    spawn: () => spawn(SIDECAR_NAME, { sidecar: SIDECAR_NAME }),
+    kill: () => kill(SIDECAR_NAME),
+    connect: async () => {
+      const { api, channel, io } = await createChannel<Record<string, never>, RemoteApi>(
+        SIDECAR_NAME,
+      )
+      return {
+        api,
+        destroy: () => {
+          try {
+            void Promise.resolve(channel.destroy()).catch(() => {})
+          } finally {
+            void io.destroy().catch(() => {})
+          }
+        },
+      }
+    },
+  },
+  // Also fired when a session connects after a suppressed exit: either way it
+  // means "the sidecar you subscribed to is gone; subscribe again".
+  () => window.dispatchEvent(new Event("beadbox:sidecar-exit")),
+)
+
+const getRemoteApi = sidecarManager.getRemoteApi
 
 /**
  * Build a Proxy that routes `rpc.<namespace>.<method>(...args)` to the

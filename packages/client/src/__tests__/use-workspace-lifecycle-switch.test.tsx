@@ -69,7 +69,7 @@ function healthSpelling(workspace: Workspace): Workspace {
   return { ...workspace, databasePath: `${workspace.databasePath}/beads.db` }
 }
 
-function mountLifecycle(options: { deferAfter?: number } = {}): Harness {
+function mountLifecycle(options: { deferAfter?: number; rejectStatuses?: boolean } = {}): Harness {
   let calls = 0
   let pendingResolve: (() => void) | null = null
 
@@ -92,8 +92,14 @@ function mountLifecycle(options: { deferAfter?: number } = {}): Harness {
       setActiveWorkspaceAction: mock(() => Promise.resolve()),
     },
     beads: {
-      getAvailableStatuses: mock(() => Promise.resolve(["open", "in_progress", "closed"])),
-      getCustomStatusList: mock(() => Promise.resolve([])),
+      getAvailableStatuses: mock(() =>
+        options.rejectStatuses
+          ? Promise.reject(new Error("Sidecar exited"))
+          : Promise.resolve(["open", "in_progress", "closed"]),
+      ),
+      getCustomStatusList: mock(() =>
+        options.rejectStatuses ? Promise.reject(new Error("Sidecar exited")) : Promise.resolve([]),
+      ),
     },
   } as unknown as RemoteApi)
 
@@ -143,6 +149,15 @@ afterEach(() => {
 })
 
 describe("useWorkspaceLifecycle workspace switching", () => {
+  test("status RPC failures do not block the workspace tree", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { seen } = mountLifecycle({ rejectStatuses: true })
+
+    await waitFor(() => {
+      expect(seen.current?.epics.map((e) => e.id)).toEqual(["alpha-1"])
+    })
+  })
+
   test("a cookie write switches the active workspace and loads its epics", async () => {
     setWorkspaceCookie(alpha.id)
     const { seen } = mountLifecycle()

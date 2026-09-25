@@ -17,7 +17,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { StartupGate } from "../components/startup-gate"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
@@ -212,6 +212,26 @@ describe("StartupGate mid-check workspace switch", () => {
     })
     await act(async () => {
       setWorkspaceCookie(beta.id)
+    })
+    expect(runStartupHealth).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("StartupGate transport failure", () => {
+  test("shows a retryable error when startup RPC rejects, then recovers", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { runStartupHealth } = installHealthRpc([alpha])
+    runStartupHealth.mockImplementationOnce(() => Promise.reject(new Error("Sidecar exited")))
+    mountGate()
+
+    await waitFor(() => {
+      expect(screen.getByText("Sidecar exited")).toBeTruthy()
+    })
+    expect(screen.queryByText("Starting up...")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await waitFor(() => {
+      expect(screen.getByTestId("gate-child")).toBeTruthy()
     })
     expect(runStartupHealth).toHaveBeenCalledTimes(2)
   })

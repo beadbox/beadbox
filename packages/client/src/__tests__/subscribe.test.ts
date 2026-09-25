@@ -173,6 +173,25 @@ describe("useChangeSubscription", () => {
     expect(listenMocks.attach).toHaveBeenCalledTimes(1)
   })
 
+  test("sidecar exit reconnects the subscription and requests a fresh view", async () => {
+    const events: SubscriptionEvent[] = []
+    const onEvent = (event: SubscriptionEvent) => events.push(event)
+    await act(async () => {
+      root.render(createElement(HookHost, { workspacePath: "/ws/a", onEvent }))
+    })
+    await flushMicrotasks()
+
+    await act(async () => {
+      window.dispatchEvent(new Event("beadbox:sidecar-exit"))
+    })
+    await flushMicrotasks()
+
+    expect(rpcMocks.start).toHaveBeenCalledTimes(2)
+    expect(listenMocks.attach).toHaveBeenCalledTimes(2)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ type: "change", trigger: "sidecar-reconnected" })
+  })
+
   test("matching SUBSCRIPTION line invalidates queries via onEvent", async () => {
     const events: SubscriptionEvent[] = []
     await act(async () => {
