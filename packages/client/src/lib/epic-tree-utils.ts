@@ -11,6 +11,7 @@ export const ERROR_CATEGORY_TITLES: Record<string, string> = {
   "schema-missing": "Workspace not initialized",
   "server-unreachable": "Dolt server unreachable",
   timeout: "Connection timed out",
+  "output-too-large": "Workspace too large to load",
   unknown: "Unable to load workspace",
 }
 

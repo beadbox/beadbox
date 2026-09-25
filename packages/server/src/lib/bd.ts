@@ -3,7 +3,13 @@ import { existsSync, readFileSync } from "fs"
 import { readFile } from "fs/promises"
 import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
-import { type BdLoadError, classifyBdError, toBdLoadError } from "./bd-error"
+import {
+  type BdLoadError,
+  classifyBdError,
+  MAXBUFFER_CODE,
+  outputTooLargeError,
+  toBdLoadError,
+} from "./bd-error"
 import { __resetBdPathCache, COMMON_BD_PATHS, resolveBdPath as getBdPath } from "./bd-paths"
 import { getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import {
@@ -555,6 +561,16 @@ export function parseBdJson<T>(stdout: string): T {
 // it removes ~10 LOC of duplication.
 const EXEC_OPTS_BASE = { maxBuffer: 10 * 1024 * 1024, timeout: 30_000 } as const
 
+// Stdout ceiling for the whole-workspace lists (the tree load and its peers),
+// beadbox-uk2. maxBuffer is also the memory bound, so it is a stated number,
+// never removed. Measured in Bun on bd-list JSON at ~2.7 KB per issue: 32 MiB
+// is about 12,500 issues and ~130 MiB of sidecar peak RSS (execFile buffer +
+// JSON.parse); the tree is then serialized over kkrpc and parsed again in the
+// WebView. It meets the 32 MiB floor the beadbox-6x2 benchmark ran with.
+// Beyond it the call fails as "output-too-large"; paging bd list is the
+// durable fix. Every other bd call keeps EXEC_OPTS_BASE's 10 MiB.
+export const LIST_MAX_BUFFER = 32 * 1024 * 1024
+
 interface ExecError {
   stdout?: string
   stderr?: string
@@ -574,19 +590,16 @@ async function execBdWithRetry(
   execArgs: string[],
   cwd: string | undefined,
   options: BdOptions,
+  maxBuffer: number,
 ): Promise<{ stdout: string; stderr: string }> {
-  const opts = { cwd, env: buildEnv(options), ...EXEC_OPTS_BASE }
+  const opts = { cwd, env: buildEnv(options), ...EXEC_OPTS_BASE, maxBuffer }
   try {
     return await execFileAsync(getBdPath(), execArgs, opts)
   } catch (err) {
     if ((err as ExecError).code !== "ENOENT") throw err
     console.warn("bd not found, re-resolving path...")
     __resetBdPathCache()
-    return await execFileAsync(getBdPath(), execArgs, {
-      cwd,
-      env: buildEnv(options),
-      ...EXEC_OPTS_BASE,
-    })
+    return await execFileAsync(getBdPath(), execArgs, opts)
   }
 }
 
@@ -597,9 +610,13 @@ function handleBdError(
   error: unknown,
   subcmd: string,
   elapsed: number,
-  opts: { rethrowOnContextCanceled: boolean; logExecArgs?: string[] },
+  opts: { rethrowOnContextCanceled: boolean; logExecArgs?: string[]; maxBuffer: number },
 ): never {
   const execError = error as ExecError
+  if (execError.code === MAXBUFFER_CODE) {
+    console.error(`[bd] ${subcmd} output exceeded ${opts.maxBuffer} bytes after ${elapsed}ms`)
+    throw outputTooLargeError(opts.maxBuffer, error)
+  }
   if (opts.rethrowOnContextCanceled && isContextCanceled(execError)) throw error
   const cleanedStderr = execError.stderr ? stripBdWarnings(execError.stderr) : null
   if (opts.logExecArgs) {
@@ -618,14 +635,18 @@ function handleBdError(
 }
 
 // Execute a bd command and return parsed JSON (serialized per db path).
-async function bdExec<T>(args: string[], options: BdOptions = {}): Promise<T> {
+async function bdExec<T>(
+  args: string[],
+  options: BdOptions = {},
+  maxBuffer: number = EXEC_OPTS_BASE.maxBuffer,
+): Promise<T> {
   const run = async () => {
     const execArgs = buildArgs(args, options, true)
     const cwd = options.cwd ?? (options.db ? projectRootFromDb(options.db) : undefined)
     const subcmd = args[0] ?? "unknown"
     const t0 = performance.now()
     try {
-      const { stdout, stderr } = await execBdWithRetry(execArgs, cwd, options)
+      const { stdout, stderr } = await execBdWithRetry(execArgs, cwd, options, maxBuffer)
       const elapsed = Math.round(performance.now() - t0)
       console.log(`[bd] ${subcmd} completed in ${elapsed}ms`)
       if (stderr) {
@@ -639,6 +660,7 @@ async function bdExec<T>(args: string[], options: BdOptions = {}): Promise<T> {
       handleBdError(error, subcmd, elapsed, {
         rethrowOnContextCanceled: true,
         logExecArgs: execArgs,
+        maxBuffer,
       })
     }
   }
@@ -654,7 +676,7 @@ async function bdExecRaw(args: string[], options: BdOptions = {}): Promise<strin
     const subcmd = args[0] ?? "unknown"
     const t0 = performance.now()
     try {
-      const { stdout } = await execBdWithRetry(execArgs, cwd, options)
+      const { stdout } = await execBdWithRetry(execArgs, cwd, options, EXEC_OPTS_BASE.maxBuffer)
       const elapsed = Math.round(performance.now() - t0)
       console.log(`[bd] ${subcmd} completed in ${elapsed}ms`)
       return stdout.trim()
@@ -662,6 +684,7 @@ async function bdExecRaw(args: string[], options: BdOptions = {}): Promise<strin
       const elapsed = Math.round(performance.now() - t0)
       handleBdError(error, subcmd, elapsed, {
         rethrowOnContextCanceled: false,
+        maxBuffer: EXEC_OPTS_BASE.maxBuffer,
       })
     }
   }
@@ -673,7 +696,7 @@ async function bdExecRaw(args: string[], options: BdOptions = {}): Promise<strin
 export async function listEpics(options: BdOptions = {}): Promise<BdBead[]> {
   const args = ["list", "--type", "epic", "--status", "all", "--limit", "0"]
   args.push("--flat")
-  return bdExec<BdBead[]>(args, options)
+  return bdExec<BdBead[]>(args, options, LIST_MAX_BUFFER)
 }
 
 // Get epic status counters (total_children, closed_children for each epic)
@@ -861,7 +884,7 @@ export async function deleteBead(id: string, options: BdOptions = {}): Promise<v
 // List all beads (not just epics)
 export async function listBeads(options: BdOptions = {}): Promise<BdBead[]> {
   const args = ["list", "--status", "all", "--limit", "0", "--flat"]
-  if (!options.includeSystem) return bdExec<BdBead[]>(args, options)
+  if (!options.includeSystem) return bdExec<BdBead[]>(args, options, LIST_MAX_BUFFER)
   return listBeadsIncludingSystem(args, options)
 }
 
@@ -875,7 +898,7 @@ const UNKNOWN_INCLUDE_FLAG = /unknown flag:\s*[\x22\x27]?(--include-(?:gates|inf
 
 async function listBeadsIncludingSystem(args: string[], options: BdOptions): Promise<BdBead[]> {
   try {
-    return await bdExec<BdBead[]>([...args, ...INCLUDE_SYSTEM_FLAGS], options)
+    return await bdExec<BdBead[]>([...args, ...INCLUDE_SYSTEM_FLAGS], options, LIST_MAX_BUFFER)
   } catch (error) {
     const unsupported = unsupportedIncludeFlag(error)
     if (!unsupported) throw error
@@ -1650,7 +1673,7 @@ export async function listMoleculesForFormula(
 ): Promise<MoleculeCard[]> {
   const args = ["list", "--type", "epic", "--status", "all", "--limit", "0"]
   args.push("--flat")
-  const epics = await bdExec<BdBead[]>(args, options)
+  const epics = await bdExec<BdBead[]>(args, options, LIST_MAX_BUFFER)
   return epics
     .filter((b) => b.id.startsWith("bb-mol-") && b.title.startsWith(formulaName))
     .map((b) => ({

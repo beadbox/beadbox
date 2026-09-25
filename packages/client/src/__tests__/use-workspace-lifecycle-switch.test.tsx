@@ -21,6 +21,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react"
 
 import type { AppHealth } from "../hooks/use-app-health"
 import { useWorkspaceLifecycle } from "../hooks/use-workspace-lifecycle"
+import { ERROR_CATEGORY_TITLES } from "../lib/epic-tree-utils"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import type { Epic, Workspace } from "../lib/types"
 import { clearWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
@@ -56,6 +57,8 @@ type LifecycleResult = ReturnType<typeof useWorkspaceLifecycle>
 interface Harness {
   seen: { current: LifecycleResult | null }
   getEpics: ReturnType<typeof mock>
+  /** Health transitions the hook requested, in order. */
+  health: Array<{ kind: "fatal" | "error"; message: string; autoRetry?: boolean }>
   /** Resolve the deferred getEpics call, if one is pending. */
   release: () => void
 }
@@ -74,6 +77,7 @@ function mountLifecycle(
     deferAfter?: number
     rejectStatuses?: boolean
     getAvailableTypes?: (dbPath?: string) => Promise<string[]>
+    getEpicsResult?: unknown
   } = {},
 ): Harness {
   let calls = 0
@@ -83,6 +87,7 @@ function mountLifecycle(
     calls += 1
     const key = (dbPath ?? "").replace(/\/beads\.db$/, "")
     const payload = { success: true as const, epics: EPICS_BY_DB[key] ?? [] }
+    if (options.getEpicsResult !== undefined) return Promise.resolve(options.getEpicsResult)
     if (options.deferAfter !== undefined && calls > options.deferAfter) {
       return new Promise<typeof payload>((resolve) => {
         pendingResolve = () => resolve(payload)
@@ -112,6 +117,7 @@ function mountLifecycle(
 
   const seen: { current: LifecycleResult | null } = { current: null }
   const healthy: AppHealth = { status: "healthy" }
+  const health: Harness["health"] = []
 
   function Probe() {
     seen.current = useWorkspaceLifecycle({
@@ -121,8 +127,12 @@ function mountLifecycle(
       appHealthRef: { current: healthy },
       setHealthy: () => {},
       setDegraded: () => {},
-      setHealthError: () => {},
-      setFatal: () => {},
+      setHealthError: (message, _error, autoRetry) => {
+        health.push({ kind: "error", message, autoRetry })
+      },
+      setFatal: (message) => {
+        health.push({ kind: "fatal", message })
+      },
     })
     return null
   }
@@ -145,7 +155,7 @@ function mountLifecycle(
   })
   render(<RouterProvider router={router as never} />)
 
-  return { seen, getEpics, release: () => pendingResolve?.() }
+  return { seen, health, getEpics, release: () => pendingResolve?.() }
 }
 
 afterEach(() => {
@@ -206,6 +216,33 @@ describe("useWorkspaceLifecycle workspace switching", () => {
     await act(async () => releaseAlpha?.())
     expect(seen.current?.availableTypes).toEqual(["beta-type"])
     expect(seen.current?.typeCatalogReady).toBe(true)
+  })
+
+  // beadbox-uk2: a workspace whose bd list output is past the sidecar's
+  // ceiling must read as a named failure, not an empty tree behind an
+  // auto-retry that returns the same output every time.
+  test("an output-too-large tree load is fatal, titled, and not auto-retried", async () => {
+    setWorkspaceCookie(alpha.id)
+    const message =
+      "bd returned more output than Beadbox will read (32 MiB limit). This workspace is too large to load in one call."
+    const { seen, health } = mountLifecycle({
+      getEpicsResult: {
+        success: false,
+        bdLoadError: {
+          category: "output-too-large",
+          severity: "fatal",
+          message,
+          stderr: null,
+          fixCommand: null,
+          fixDescription: null,
+        },
+      },
+    })
+    await waitFor(() => expect(health.some((h) => h.kind === "fatal")).toBe(true))
+    expect(health.find((h) => h.kind === "fatal")?.message).toContain("32 MiB")
+    expect(health.filter((h) => h.kind === "error")).toEqual([])
+    expect(seen.current?.autoRetryCountdown ?? null).toBeNull()
+    expect(ERROR_CATEGORY_TITLES["output-too-large"]).toBe("Workspace too large to load")
   })
 
   test("status RPC failures do not block the workspace tree", async () => {

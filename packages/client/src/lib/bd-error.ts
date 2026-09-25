@@ -56,6 +56,7 @@ export type BdErrorCategory =
   | "server-unreachable"
   | "timeout"
   | "unexpected-output"
+  | "output-too-large"
   | "unknown"
 
 export type BdErrorSeverity = "fatal" | "recoverable" | "transient"

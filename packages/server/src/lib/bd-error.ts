@@ -56,6 +56,7 @@ export type BdErrorCategory =
   | "server-unreachable"
   | "timeout"
   | "unexpected-output"
+  | "output-too-large"
   | "unknown"
 
 export type BdErrorSeverity = "fatal" | "recoverable" | "transient"
@@ -91,6 +92,19 @@ export class BdError extends Error {
   }
 }
 
+// execFile rejects with this code when a child writes more stdout than the
+// call's maxBuffer (beadbox-uk2). Retrying returns the same output, so the
+// error is fatal, and the message names the limit that was hit.
+export const MAXBUFFER_CODE = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+
+export function outputTooLargeError(limitBytes: number, cause: unknown): BdError {
+  const mib = Math.round(limitBytes / (1024 * 1024))
+  return new BdError(
+    `bd returned more output than Beadbox will read (${mib} MiB limit). This workspace is too large to load in one call.`,
+    { category: "output-too-large", severity: "fatal", cause },
+  )
+}
+
 // Serializable error shape for client consumption (cannot send class instances
 // across the server action boundary).
 export interface BdLoadError {
@@ -113,6 +127,15 @@ interface ErrorPattern {
 }
 
 const ERROR_PATTERNS: ErrorPattern[] = [
+  {
+    // Fallback for exec paths that bypass handleBdError, where the limit is
+    // not known; handleBdError names it (outputTooLargeError).
+    test: (t) => /maxBuffer length exceeded/i.test(t),
+    category: "output-too-large",
+    severity: "fatal",
+    fixCommand: null,
+    fixDescription: null,
+  },
   {
     // bd 1.0+ embedded mode uses flock for concurrency control
     test: (t) => /another process holds the exclusive lock/i.test(t) || /flock.*locked/i.test(t),
