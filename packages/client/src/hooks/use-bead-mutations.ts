@@ -15,6 +15,7 @@ const updateBeadDue = rpc.beads.updateBeadDue
 const updateBeadDefer = rpc.beads.updateBeadDefer
 const updateBeadEstimate = rpc.beads.updateBeadEstimate
 const updateBeadDesign = rpc.beads.updateBeadDesign
+const updateBeadTextField = rpc.beads.updateBeadTextField
 const deleteCommentAction = rpc.beads.deleteCommentAction
 const removeLabelAction = rpc.beads.removeLabelAction
 const removeDependencyAction = rpc.beads.removeDependencyAction
@@ -470,6 +471,30 @@ export function useBeadMutations({ bead, dbPath, onUpdate }: UseBeadMutationsOpt
     [bead, dbPath, onUpdate, setFieldSaving, setFieldSuccess, setFieldError, clearFieldError],
   )
 
+  const saveTextField = useCallback(
+    async (field: "description" | "acceptanceCriteria" | "notes", value: string): Promise<boolean> => {
+      if (!bead) return false
+      if (value === (bead[field] || "")) return true
+      setFieldSaving(field)
+      const result = await trackedAction("updateBeadTextField", () =>
+        updateBeadTextField(bead.id, field, value, dbPath),
+      )
+      if (result.success) {
+        setFieldSuccess(field)
+        if (field === "description") setDescription(value)
+        if (field === "acceptanceCriteria") setAcceptanceCriteria(value)
+        if (field === "notes") setNotes(value)
+        onUpdate({ ...bead, [field]: value, updatedAt: new Date() })
+        captureDetailPanelAction("edit_field", bead.type)
+        return true
+      }
+      setFieldError(field)
+      toastError(`Failed to save ${field}`, { description: result.error })
+      return false
+    },
+    [bead, dbPath, onUpdate, setFieldSaving, setFieldSuccess, setFieldError],
+  )
+
   // ---------------------------------------------------------------------------
   // Labels
   // ---------------------------------------------------------------------------
@@ -592,6 +617,7 @@ export function useBeadMutations({ bead, dbPath, onUpdate }: UseBeadMutationsOpt
     saveDefer,
     saveEstimate,
     saveDesign,
+    saveTextField,
     handleAddLabel,
     handleRemoveLabel,
     handleRemoveDependency,

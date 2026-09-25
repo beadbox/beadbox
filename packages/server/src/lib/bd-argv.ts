@@ -159,6 +159,12 @@ export function assertNumericId(value: string | number): string {
  * newly added field.
  */
 export function buildUpdateArgs(id: string, flag: string, value: string): string[] {
+  // bd reads `--description=-` from stdin, and a spawned bd inherits an open
+  // pipe, so the call would block until the exec timeout. Only that exact value
+  // on that flag: bd stores "-" literally everywhere else (beadbox-01f.10).
+  if (flag === "--description" && value === "-") {
+    throw new BdArgvError("Invalid value for --description: bd reads '-' from stdin")
+  }
   return ["update", assertSafeBeadId(id), flagArg(flag, value)]
 }
 

@@ -35,6 +35,7 @@ import {
   updateSpecId as bdUpdateSpecId,
   updateStatus as bdUpdateStatus,
   updateTitle as bdUpdateTitle,
+  updateTextField as bdUpdateTextField,
   updateType as bdUpdateType,
   unmapPriority,
 } from "../lib/bd"
@@ -465,6 +466,22 @@ export async function updateBeadDesign(
     return { success: true }
   } catch (error) {
     console.error("Failed to update design:", error)
+    return { success: false, error: String(error) }
+  }
+}
+
+export async function updateBeadTextField(
+  id: string,
+  field: "description" | "acceptanceCriteria" | "notes",
+  value: string,
+  dbPath?: string,
+): Promise<{ success: boolean; error?: string }> {
+  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  try {
+    await bdUpdateTextField(id, field, value, options)
+    return { success: true }
+  } catch (error) {
+    console.error(`Failed to update ${field}:`, error)
     return { success: false, error: String(error) }
   }
 }

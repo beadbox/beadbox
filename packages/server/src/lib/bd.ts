@@ -822,6 +822,20 @@ export async function updateDescription(
   await bdExecRaw(buildUpdateArgs(id, "--description", description), options)
 }
 
+export async function updateTextField(
+  id: string,
+  field: "description" | "acceptanceCriteria" | "notes",
+  value: string,
+  options: BdOptions = {},
+): Promise<void> {
+  const flags = {
+    description: "--description",
+    acceptanceCriteria: "--acceptance",
+    notes: "--notes",
+  } as const
+  await bdExecRaw(buildUpdateArgs(id, flags[field], value), options)
+}
+
 // Update bead type
 export async function updateType(
   id: string,

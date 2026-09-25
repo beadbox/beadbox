@@ -28,6 +28,7 @@ import { BeadExpandedViewModal } from "@/components/bead-expanded-view-modal"
 import { MetadataControls } from "@/components/bead-metadata-controls"
 import { SchedulingControls } from "@/components/bead-scheduling-controls"
 import { CopyableId } from "@/components/copyable-id"
+import { EditableMarkdownField } from "@/components/editable-markdown-field"
 import { ExpandedCommentModal } from "@/components/expanded-comment-modal"
 import { MoleculeDag } from "@/components/molecule-dag"
 import { SimpleMarkdown } from "@/components/simple-markdown"
@@ -556,17 +557,14 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
               <div className="py-4 flex gap-3">
                 <div className="flex-1 min-w-0 space-y-4">
                   {/* Description */}
-                  <div ref={descriptionRef} className="pt-4 border-t border-border/30">
-                    <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                      Description
-                    </h3>
-                    <div className="prose prose-sm prose-invert max-w-none text-foreground/90">
-                      {mutations.description ? (
-                        <SimpleMarkdown content={mutations.description} />
-                      ) : (
-                        <p className="text-muted-foreground/50 italic text-sm">No description</p>
-                      )}
-                    </div>
+                  <div ref={descriptionRef}>
+                    <EditableMarkdownField
+                      key={`${bead.id}:description`}
+                      label="Description"
+                      value={mutations.description}
+                      isSaving={mutations.fieldStates.description.isSaving}
+                      onSave={(value) => mutations.saveTextField("description", value)}
+                    />
                   </div>
 
                   {/* Design */}
@@ -578,13 +576,15 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                         </h3>
                         {!isEditingDesign && (
                           <button
+                            aria-label="Edit Design"
                             onClick={() => {
                               setEditDesignValue(mutations.design)
                               setIsEditingDesign(true)
                             }}
-                            className="text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                           >
                             <Pencil className="h-3 w-3" />
+                            <span>Edit</span>
                           </button>
                         )}
                         {mutations.fieldStates.design.isSaving && <Spinner className="h-3 w-3" />}
@@ -655,28 +655,22 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                   )}
 
                   {/* Acceptance Criteria */}
-                  {mutations.acceptanceCriteria && (
-                    <div className="pt-4 border-t border-border/30">
-                      <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                        Acceptance Criteria
-                      </h3>
-                      <div className="prose prose-sm prose-invert max-w-none text-foreground/90">
-                        <SimpleMarkdown content={mutations.acceptanceCriteria} />
-                      </div>
-                    </div>
-                  )}
+                  <EditableMarkdownField
+                    key={`${bead.id}:acceptanceCriteria`}
+                    label="Acceptance Criteria"
+                    value={mutations.acceptanceCriteria}
+                    isSaving={mutations.fieldStates.acceptanceCriteria.isSaving}
+                    onSave={(value) => mutations.saveTextField("acceptanceCriteria", value)}
+                  />
 
                   {/* Notes */}
-                  {mutations.notes && (
-                    <div className="pt-4 border-t border-border/30">
-                      <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                        Notes
-                      </h3>
-                      <div className="prose prose-sm prose-invert max-w-none text-foreground/90">
-                        <SimpleMarkdown content={mutations.notes} />
-                      </div>
-                    </div>
-                  )}
+                  <EditableMarkdownField
+                    key={`${bead.id}:notes`}
+                    label="Notes"
+                    value={mutations.notes}
+                    isSaving={mutations.fieldStates.notes.isSaving}
+                    onSave={(value) => mutations.saveTextField("notes", value)}
+                  />
 
                   {/* Custom Fields */}
                   {Object.keys(bead.metadata || {}).length > 0 && (

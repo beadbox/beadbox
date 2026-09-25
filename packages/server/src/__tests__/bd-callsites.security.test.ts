@@ -40,6 +40,25 @@ describe("buildUpdateArgs", () => {
   test("rejects a flag-shaped bead ID", () => {
     expect(() => buildUpdateArgs(HOSTILE_ID, "--title", "x")).toThrow(BdArgvError)
   })
+
+  // bd reads `--description=-` from stdin; spawned bd inherits an open pipe, so
+  // the call holds the workspace's db lock until the exec timeout (beadbox-01f.10).
+  test("rejects a description of exactly '-'", () => {
+    expect(() => buildUpdateArgs("bb-1", "--description", "-")).toThrow(BdArgvError)
+  })
+
+  test("accepts '-' wherever bd stores it literally", () => {
+    for (const flag of ["--notes", "--acceptance", "--design", "--title"]) {
+      expect(buildUpdateArgs("bb-1", flag, "-")).toEqual(["update", "bb-1", `${flag}=-`])
+    }
+    for (const value of [" -", "- ", "-\n", "--", "-h"]) {
+      expect(buildUpdateArgs("bb-1", "--description", value)).toEqual([
+        "update",
+        "bb-1",
+        `--description=${value}`,
+      ])
+    }
+  })
 })
 
 describe("buildCommentArgs", () => {
