@@ -246,6 +246,67 @@ describe("addWorkspaceByPath", () => {
     const reg = await readRegistry()
     expect(reg.workspaces).toHaveLength(1)
   })
+
+  test("imports the server port from dolt-server.port when metadata omits it", async () => {
+    const projectDir = join(sandboxDir, "remote-project")
+    const beadsDir = await makeBeadsDir("remote-project")
+    await writeFile(join(beadsDir, "metadata.json"), JSON.stringify({
+      dolt_mode: "server",
+      dolt_server_host: "10.7.0.251",
+      dolt_database: "gtp",
+    }))
+    await writeFile(join(beadsDir, "dolt-server.port"), "45522\n")
+
+    const result = await addWorkspaceByPath(projectDir)
+    expect(result.success).toBe(true)
+    const registry = await readRegistry()
+    expect(registry.workspaces[0].server).toMatchObject({
+      host: "10.7.0.251",
+      port: 45522,
+      database: "gtp",
+    })
+  })
+
+  test("prefers an explicit metadata port over dolt-server.port", async () => {
+    const projectDir = join(sandboxDir, "explicit-port")
+    const beadsDir = await makeBeadsDir("explicit-port")
+    await writeFile(join(beadsDir, "metadata.json"), JSON.stringify({
+      dolt_mode: "server",
+      dolt_server_host: "10.7.0.251",
+      dolt_server_port: 45523,
+      dolt_database: "gtp",
+    }))
+    await writeFile(join(beadsDir, "dolt-server.port"), "45522\n")
+
+    const result = await addWorkspaceByPath(projectDir)
+    expect(result.success).toBe(true)
+    const registry = await readRegistry()
+    expect(registry.workspaces[0].server?.port).toBe(45523)
+  })
+
+  // dolt-server.port is bd's file and its content is bd's to change, so a value
+  // that is not a plain in-range port must fall back rather than be coerced.
+  // "45522abc" is the case a parseInt-based reader would silently accept.
+  test.each([
+    ["trailing garbage", "45522abc\n"],
+    ["out of range", "70000\n"],
+    ["zero", "0\n"],
+    ["empty", ""],
+  ])("falls back to 3307 when dolt-server.port is malformed (%s)", async (_label, content) => {
+    const projectDir = join(sandboxDir, "bad-port")
+    const beadsDir = await makeBeadsDir("bad-port")
+    await writeFile(join(beadsDir, "metadata.json"), JSON.stringify({
+      dolt_mode: "server",
+      dolt_server_host: "10.7.0.251",
+      dolt_database: "gtp",
+    }))
+    await writeFile(join(beadsDir, "dolt-server.port"), content)
+
+    const result = await addWorkspaceByPath(projectDir)
+    expect(result.success).toBe(true)
+    const registry = await readRegistry()
+    expect(registry.workspaces[0].server?.port).toBe(3307)
+  })
 })
 
 describe("setActiveWorkspaceAction", () => {

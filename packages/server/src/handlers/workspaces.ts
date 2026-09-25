@@ -31,6 +31,7 @@ import {
   projectDirFromDatabasePath,
   type RegistryEntry,
   readRegistry,
+  readWorkspacePortFile,
   addWorkspace as registryAddWorkspace,
   replaceWorkspace as registryReplaceWorkspace,
   setActiveWorkspace as registrySetActiveWorkspace,
@@ -87,7 +88,9 @@ async function inlineReadWorkspaceMode(beadsDir: string): Promise<InlineWorkspac
       return {
         mode: "server",
         serverHost: typeof meta.dolt_server_host === "string" ? meta.dolt_server_host : "127.0.0.1",
-        serverPort: typeof meta.dolt_server_port === "number" ? meta.dolt_server_port : 3307,
+        serverPort: typeof meta.dolt_server_port === "number"
+          ? meta.dolt_server_port
+          : (await readWorkspacePortFile(beadsDir)) ?? 3307,
         serverDatabase: typeof meta.dolt_database === "string" ? meta.dolt_database : "beads",
         serverUser: typeof meta.dolt_server_user === "string" ? meta.dolt_server_user : "root",
         serverTls: meta.dolt_server_tls === true,

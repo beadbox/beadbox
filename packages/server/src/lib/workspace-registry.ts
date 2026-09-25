@@ -129,6 +129,17 @@ export interface WorkspaceMetadata {
   parseError?: string
 }
 
+export async function readWorkspacePortFile(beadsDir: string): Promise<number | null> {
+  try {
+    const value = (await readFile(join(beadsDir, "dolt-server.port"), "utf-8")).trim()
+    if (!/^\d+$/.test(value)) return null
+    const port = Number(value)
+    return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null
+  } catch {
+    return null
+  }
+}
+
 export async function readWorkspaceMetadata(beadsDir: string): Promise<WorkspaceMetadata> {
   try {
     const metaPath = join(beadsDir, "metadata.json")
@@ -138,7 +149,9 @@ export async function readWorkspaceMetadata(beadsDir: string): Promise<Workspace
       return {
         mode: "server",
         serverHost: typeof meta.dolt_server_host === "string" ? meta.dolt_server_host : "127.0.0.1",
-        serverPort: typeof meta.dolt_server_port === "number" ? meta.dolt_server_port : 3307,
+        serverPort: typeof meta.dolt_server_port === "number"
+          ? meta.dolt_server_port
+          : (await readWorkspacePortFile(beadsDir)) ?? 3307,
         serverDatabase: typeof meta.dolt_database === "string" ? meta.dolt_database : "beads",
         serverUser: typeof meta.dolt_server_user === "string" ? meta.dolt_server_user : "root",
         serverTls: meta.dolt_server_tls === true,
