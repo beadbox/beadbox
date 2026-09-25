@@ -1,4 +1,8 @@
 name: Install Smoke
+# beadbox-z3j: the run name carries the tag it smoke-tests. A workflow_run run
+# reports main's head_sha and head_branch, so this is how the release
+# workflow finds the smoke run of a given rc.
+run-name: Install Smoke ${{ github.event.inputs.tag || github.event.workflow_run.head_branch || 'latest' }}
 
 # Cross-platform install-and-smoke (P5.6 / bb-x6lg.6).
 #

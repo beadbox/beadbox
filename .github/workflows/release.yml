@@ -29,6 +29,14 @@ on:
         description: "Build Windows (requires installer signing credentials)"
         type: boolean
         default: false
+      rebuild_final:
+        description: "Escape hatch: BUILD a final tag from source instead of promoting its validated rc (beadbox-z3j)"
+        type: boolean
+        default: false
+      install_smoke_override:
+        description: "Release bead recording QAM + super's sanctioned override of a red rc Install Smoke (empty = enforce)"
+        type: string
+        default: ""
   # beadbox-5yv: build-main.yml calls this workflow in mode "build" on every
   # push to main, so a main build and a release build run the SAME build jobs.
   # Build mode makes signed, notarized artifacts only (an Actions artifact +
@@ -135,6 +143,11 @@ jobs:
           echo "build_tag=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
           echo "tag validated: $RAW_TAG (version $VERSION, final=$IS_FINAL)"
   build-frontend:
+    # beadbox-z3j: a final tag PROMOTES its validated rc's bytes; nothing is
+    # built or re-tested on that path (the shipped bytes are the rc's). Every
+    # build job needs build-frontend, so they skip with it. (Build mode is
+    # never final, so it is unaffected.)
+    if: needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final
     needs: [validate-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -194,6 +207,11 @@ jobs:
           cargo check --release --manifest-path src-tauri/Cargo.toml
 
   test:
+    # beadbox-z3j: a final tag PROMOTES its validated rc's bytes; nothing is
+    # built or re-tested on that path (the shipped bytes are the rc's). Every
+    # build job needs build-frontend, so they skip with it. (Build mode is
+    # never final, so it is unaffected.)
+    if: needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final
     needs: [validate-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -229,6 +247,11 @@ jobs:
         run: bun run test
 
   test-integration:
+    # beadbox-z3j: a final tag PROMOTES its validated rc's bytes; nothing is
+    # built or re-tested on that path (the shipped bytes are the rc's). Every
+    # build job needs build-frontend, so they skip with it. (Build mode is
+    # never final, so it is unaffected.)
+    if: needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final
     needs: [validate-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -353,6 +376,187 @@ jobs:
           MACOS_RUNNER: ${{ vars.MACOS_RUNNER }}
           GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
         run: bash scripts/ci-runner/pick-macos-runner.sh
+
+  # ── Promote a validated rc to the final (beadbox-z3j) ──
+  # A final tag vX.Y.Z does not build. It republishes the exact bytes of the
+  # rc that QA validated: the highest vX.Y.Z-rc.N on the SAME commit, whose
+  # Release run succeeded and whose Install Smoke succeeded. Every check fails
+  # closed; the only way to build a final instead is the explicit
+  # workflow_dispatch input rebuild_final.
+  resolve-promotion:
+    name: "Resolve the validated rc to promote"
+    needs: [validate-tag]
+    if: inputs.mode != 'build' && needs.validate-tag.outputs.is_final == 'true' && !inputs.rebuild_final
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      commit: ${{ steps.r.outputs.commit }}
+      rc_tag: ${{ steps.r.outputs.rc_tag }}
+    steps:
+      - id: r
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          SMOKE_OVERRIDE: ${{ inputs.install_smoke_override }}
+          # The first commit whose UI shows the plain version rather than the
+          # rc build tag (5yv part 1). rc bytes built before it would ship a
+          # final whose UI says "-rc.N", so they are never promoted.
+          UI_PLAIN_VERSION_COMMIT: 298eb94
+        run: |
+          set -euo pipefail
+          COMMIT=$(gh api "repos/$REPO/commits/$TAG" -q .sha)
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+
+          STATUS=$(gh api "repos/$REPO/compare/$UI_PLAIN_VERSION_COMMIT...$COMMIT" -q .status)
+          case "$STATUS" in
+            ahead|identical) ;;
+            *) echo "::error::$TAG ($COMMIT) does not contain $UI_PLAIN_VERSION_COMMIT (compare: $STATUS): its UI would show the rc build tag. Refusing to promote."; exit 1 ;;
+          esac
+
+          # Highest vX.Y.Z-rc.N whose tag points at exactly this commit.
+          CANDIDATES=()
+          for ref in $(gh api "repos/$REPO/git/matching-refs/tags/v$VERSION-rc." -q '.[].ref'); do
+            t="${ref#refs/tags/}"
+            if [ "$(gh api "repos/$REPO/commits/$t" -q .sha)" = "$COMMIT" ]; then CANDIDATES+=("$t"); fi
+          done
+          RC=""
+          if [ "${#CANDIDATES[@]}" -gt 0 ]; then RC=$(printf '%s\n' "${CANDIDATES[@]}" | sort -V | tail -1); fi
+          if [ -z "$RC" ]; then
+            echo "::error::No v$VERSION-rc.N tag on $COMMIT. A final is promoted from the rc QA validated, on the same commit. To build it instead, dispatch with rebuild_final."
+            exit 1
+          fi
+          echo "rc_tag=$RC" >> "$GITHUB_OUTPUT"
+
+          OK_RELEASE=$(gh api "repos/$REPO/actions/workflows/release.yml/runs?event=push&branch=$RC&per_page=20" \
+            -q "[.workflow_runs[] | select(.head_branch == \"$RC\" and .conclusion == \"success\")] | length")
+          if [ "$OK_RELEASE" -lt 1 ]; then
+            echo "::error::$RC has no successful Release run. Refusing to promote."; exit 1
+          fi
+
+          # A Release run can succeed with its publish step skipped (the
+          # packaged-smoke gate), leaving the rc an unpublished draft. Only a
+          # PUBLISHED rc is one QA validated. The tag endpoint serves published
+          # releases only, so a draft reads as missing here.
+          if ! RC_DRAFT=$(gh api "repos/$REPO/releases/tags/$RC" -q .draft 2>/dev/null); then RC_DRAFT=missing; fi
+          if [ "$RC_DRAFT" != "false" ]; then
+            echo "::error::$RC is not a published release (draft=$RC_DRAFT). Refusing to promote."; exit 1
+          fi
+
+          # Install Smoke runs on workflow_run with main's head_sha, so it is
+          # found by its run name (install-smoke.yml run-name carries the tag).
+          SMOKE=$(gh api "repos/$REPO/actions/workflows/install-smoke.yml/runs?per_page=100" \
+            -q "[.workflow_runs[] | select(.display_title == \"Install Smoke $RC\")] | sort_by(.created_at) | last | .conclusion // \"none\"")
+          if [ "$SMOKE" != "success" ]; then
+            if [ -n "$SMOKE_OVERRIDE" ]; then
+              echo "::warning::Install Smoke for $RC is '$SMOKE'; promoting under the sanctioned override recorded on $SMOKE_OVERRIDE."
+            else
+              echo "::error::Install Smoke for $RC is '$SMOKE', not success. Refusing to promote (a sanctioned override is recorded on the release bead and passed as install_smoke_override)."
+              exit 1
+            fi
+          fi
+          echo "promoting $RC -> $TAG (commit $COMMIT; release ok, smoke $SMOKE)"
+
+  promote-artifacts:
+    name: "Promote the validated rc's assets to the final"
+    needs: [validate-tag, create-draft, resolve-promotion]
+    if: >-
+      always() && !cancelled() && inputs.mode != 'build'
+      && needs.validate-tag.outputs.is_final == 'true' && !inputs.rebuild_final
+      && needs.create-draft.result == 'success'
+      && needs.resolve-promotion.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.validate-tag.outputs.tag }}
+          sparse-checkout: src-tauri/tauri.conf.json
+          sparse-checkout-cone-mode: false
+      - name: Install minisign (verifies the updater signatures)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+      - name: Copy, verify and read back the 6 assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          RC: ${{ needs.resolve-promotion.outputs.rc_tag }}
+        run: |
+          set -euo pipefail
+          WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+          REQUIRED=(
+            "Beadbox-$VERSION-macOS-arm64.dmg"
+            "beadbox_${VERSION}_Linux_amd64.deb"
+            "Beadbox_aarch64.app.tar.gz"
+            "Beadbox_aarch64.app.tar.gz.sig"
+            "Beadbox_x86_64.deb"
+            "Beadbox_x86_64.deb.sig"
+          )
+
+          # Exactly ONE release object for the final tag, resolved BY ID: a
+          # draft is not addressable by tag, and a second create mints a
+          # second object instead of failing.
+          gh api --paginate "repos/$REPO/releases?per_page=100" \
+            -q ".[] | select(.tag_name == \"$TAG\") | \"\(.id) draft=\(.draft)\"" > "$WORK/finals"
+          if [ "$(wc -l < "$WORK/finals")" -ne 1 ]; then
+            echo "::error::expected exactly 1 release object for $TAG, found $(wc -l < "$WORK/finals"):"; cat "$WORK/finals"; exit 1
+          fi
+          ID=$(cut -d' ' -f1 "$WORK/finals")
+
+          # The rc is a published prerelease, so reading it by tag is fine.
+          gh api "repos/$REPO/releases/tags/$RC" -q '.assets[] | "\(.name) \(.digest) \(.id)"' > "$WORK/rc"
+          for name in "${REQUIRED[@]}"; do
+            line=$(awk -v n="$name" '$1 == n' "$WORK/rc")
+            [ -n "$line" ] || { echo "::error::$RC lacks required asset $name"; exit 1; }
+            digest=$(echo "$line" | cut -d' ' -f2); asset=$(echo "$line" | cut -d' ' -f3)
+            gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$asset" > "$WORK/$name"
+            got="sha256:$(sha256sum "$WORK/$name" | cut -d' ' -f1)"
+            [ "$got" = "$digest" ] || { echo "::error::$name downloaded as $got, $RC publishes $digest"; exit 1; }
+          done
+
+          # The promoted updater bundles must still verify with the app's key.
+          jq -r '.plugins.updater.pubkey' src-tauri/tauri.conf.json | base64 -d > "$WORK/updater.pub"
+          for bundle in Beadbox_aarch64.app.tar.gz Beadbox_x86_64.deb; do
+            base64 -d < "$WORK/$bundle.sig" > "$WORK/$bundle.minisig"
+            minisign -Vm "$WORK/$bundle" -p "$WORK/updater.pub" -x "$WORK/$bundle.minisig"
+          done
+
+          # Upload BY ID. Idempotent on rerun: a same-named asset is replaced.
+          gh api --paginate "repos/$REPO/releases/$ID/assets?per_page=100" -q '.[] | "\(.name) \(.id)"' > "$WORK/existing"
+          for name in "${REQUIRED[@]}"; do
+            old=$(awk -v n="$name" '$1 == n {print $2}' "$WORK/existing")
+            [ -z "$old" ] || gh api -X DELETE "repos/$REPO/releases/assets/$old"
+            gh api -X POST -H "Content-Type: application/octet-stream" \
+              "https://uploads.github.com/repos/$REPO/releases/$ID/assets?name=$name" \
+              --input "$WORK/$name" > /dev/null
+          done
+
+          # Byte identity, read back BY ID: exactly the 6 named assets must
+          # carry the rc's digests. A hard count, never a loop over whatever
+          # happens to be there.
+          gh api --paginate "repos/$REPO/releases/$ID/assets?per_page=100" -q '.[] | "\(.name) \(.digest)"' > "$WORK/final"
+          compared=0
+          for name in "${REQUIRED[@]}"; do
+            want=$(awk -v n="$name" '$1 == n {print $2}' "$WORK/rc")
+            have=$(awk -v n="$name" '$1 == n {print $2}' "$WORK/final")
+            [ -n "$have" ] && [ "$have" = "$want" ] || { echo "::error::$name on $TAG is '$have', $RC has '$want'"; exit 1; }
+            compared=$((compared + 1))
+          done
+          echo "compared $compared of ${#REQUIRED[@]}"
+          [ "$compared" -eq 6 ] || { echo "::error::compared $compared of 6"; exit 1; }
+          {
+            echo "### $TAG promoted from $RC (compared $compared of 6)"
+            echo '```'
+            for name in "${REQUIRED[@]}"; do awk -v n="$name" '$1 == n' "$WORK/final"; done
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ── Platform builds (each builds frontend inline, uploads to draft release) ──
 
@@ -1558,16 +1762,28 @@ jobs:
     # build job, infers platform keys from filenames, builds the manifest,
     # uploads to the same release. Runs before promote so the .json lands
     # in the draft before the release goes public.
+    # beadbox-z3j M4: on the promote path the build needs are SKIPPED, which
+    # the failure check alone lets through, so a skipped or absent copy
+    # could publish an empty final. promote-artifacts must have succeeded.
     if: >-
       always() && !cancelled()
       && inputs.mode != 'build'
       && !contains(needs.*.result, 'failure')
-    needs: [create-arm64-dmg, build-linux, build-windows]
+      && (needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final
+          || needs.promote-artifacts.result == 'success')
+    needs: [validate-tag, create-arm64-dmg, build-linux, build-windows, promote-artifacts]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
     steps:
+      - name: Check out release notes (default branch; finals)
+        if: needs.validate-tag.outputs.is_final == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: release-notes
+          sparse-checkout-cone-mode: false
       - name: Generate latest.json + upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1658,13 +1874,31 @@ jobs:
             exit 1
           fi
 
-          # Release notes: use release body verbatim
-          NOTES=$(gh release view "$TAG" --json body --jq '.body' --repo "$REPO")
+          # Release notes: use release body verbatim.
+          # beadbox-z3j (S4): a final's body IS release-notes/<TAG>.md, set by
+          # release ID (a draft is not tag-addressable) and read back as a
+          # JSON blob, not through --jq. GitHub has stored such bodies both
+          # with and without the file's single trailing newline, so that one
+          # newline is the only difference tolerated.
+          NOTES_FILE="release-notes/$TAG.md"
+          if [ "${{ needs.validate-tag.outputs.is_final }}" = "true" ] && [ -f "$NOTES_FILE" ]; then
+            gh api --paginate "repos/$REPO/releases?per_page=100" -q ".[] | select(.tag_name == \"$TAG\") | .id" > "$WORK/ids"
+            [ "$(wc -l < "$WORK/ids")" -eq 1 ] || { echo "::error::expected 1 release object for $TAG, found $(wc -l < "$WORK/ids")"; exit 1; }
+            REL_ID=$(cat "$WORK/ids")
+            jq -n --rawfile body "$NOTES_FILE" '{body: $body}' > "$WORK/body.json"
+            gh api -X PATCH "repos/$REPO/releases/$REL_ID" --input "$WORK/body.json" > /dev/null
+            gh api "repos/$REPO/releases/$REL_ID" > "$WORK/release.json"
+            jq -e --rawfile body "$NOTES_FILE" '(.body | rtrimstr("\n")) == ($body | rtrimstr("\n"))' "$WORK/release.json" > /dev/null \
+              || { echo "::error::release body read back differs from $NOTES_FILE"; exit 1; }
+            cp "$NOTES_FILE" "$WORK/notes.txt"
+          else
+            gh release view "$TAG" --json body --repo "$REPO" | jq -j '.body' > "$WORK/notes.txt"
+          fi
           PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
           jq -n \
             --arg version "$VERSION" \
-            --arg notes "$NOTES" \
+            --rawfile notes "$WORK/notes.txt" \
             --arg pub_date "$PUB_DATE" \
             --argjson platforms "{${platforms_json}}" \
             '{version:$version, notes:$notes, pub_date:$pub_date, platforms:$platforms}' \
@@ -1758,15 +1992,19 @@ jobs:
     # Fail closed on the packaged smoke: a skipped job is not a failed one, so
     # "no failure" alone let a release with a macOS app publish when the smoke
     # never ran. When the draft has a macOS app, the smoke must have passed.
+    # beadbox-z3j M4: see publish-update-manifest. Never publish a final whose
+    # assets were not promoted.
     if: >-
       always() && !cancelled()
       && inputs.mode != 'build'
       && !contains(needs.*.result, 'failure')
       && (needs.stage-packaged-smoke.outputs.has_mac != 'true' || needs.packaged-smoke.result == 'success')
+      && (needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final
+          || needs.promote-artifacts.result == 'success')
     # stage-packaged-smoke is listed as well: when a job fails, the jobs that
     # need it are skipped, not failed, so a staging failure would otherwise
     # skip the smoke and let this promote anyway.
-    needs: [create-arm64-dmg, build-linux, build-windows, test, test-integration, publish-update-manifest, stage-packaged-smoke, packaged-smoke]
+    needs: [validate-tag, create-arm64-dmg, build-linux, build-windows, test, test-integration, publish-update-manifest, stage-packaged-smoke, packaged-smoke, promote-artifacts]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -1778,6 +2016,24 @@ jobs:
         run: |
           gh release edit "${RELEASE_TAG}" --draft=false \
             --repo "${{ github.repository }}"
+      - name: Verify the published updater manifest (promote path)
+        if: needs.validate-tag.outputs.is_final == 'true' && !inputs.rebuild_final
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.validate-tag.outputs.tag }}
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          # latest.json is the one regenerated file, so it is checked where
+          # users fetch it: version, both platforms, signatures, live URLs.
+          curl -fsSL "https://github.com/$REPO/releases/download/$TAG/latest.json" -o latest.json
+          jq -e --arg v "$VERSION" '.version == $v' latest.json > /dev/null || { echo "::error::latest.json version is not $VERSION"; exit 1; }
+          for plat in darwin-aarch64 linux-x86_64; do
+            jq -e --arg p "$plat" '.platforms[$p].signature | length > 0' latest.json > /dev/null || { echo "::error::$plat missing or unsigned"; exit 1; }
+            url=$(jq -r --arg p "$plat" '.platforms[$p].url' latest.json)
+            curl -fsIL "$url" -o /dev/null || { echo "::error::$plat url does not resolve: $url"; exit 1; }
+            echo "$plat ok: $url"
+          done
 
   # ── Post-publish: the two steps that were the retired workflow's only reason
   #    to exist. Folded here (beadbox-8z0) because release.yml is the workflow
