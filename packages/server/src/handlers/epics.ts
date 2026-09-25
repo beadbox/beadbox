@@ -28,7 +28,7 @@ import {
 import type { BdLoadError } from "../lib/bd-error"
 import { toBdLoadError } from "../lib/bd-error"
 import { readMetadataMode } from "../lib/dolt-metadata"
-import { tryServe } from "../lib/serve-reads"
+import { assertDependencyDataComplete, tryServe } from "../lib/serve-reads"
 import {
   getBeadDetailCacheStats,
   getCachedBeadDetail,
@@ -110,7 +110,15 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
   // Step 1: Get ALL beads in one call (includes parent field). Opted-in
   // workspaces may read the plain list through bd serve (beadbox-6x2); its
   // rows equal the CLI's. The system-inclusive list stays on the CLI.
-  const viaServe = options.includeSystem ? null : await tryServe(options.db, (c) => c.listIssues())
+  // Blocked-by is derived from these rows, so a serve list with incomplete
+  // dependency data reads through the CLI instead (never "no blockers").
+  const viaServe = options.includeSystem
+    ? null
+    : await tryServe(options.db, async (c) => {
+        const rows = await c.listIssues()
+        assertDependencyDataComplete(rows)
+        return rows
+      })
   const allBeads = viaServe ? (viaServe.value as unknown as BdBead[]) : await listBeads(readOptions)
 
   const hierarchicalTypes = new Set(["epic", "milestone", "convoy", "molecule"])

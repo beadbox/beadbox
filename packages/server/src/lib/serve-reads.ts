@@ -19,7 +19,7 @@
 import { basename, dirname } from "node:path"
 import { resolveBdPath } from "./bd-paths"
 import { serveReadEligibility } from "./serve-eligibility"
-import { classifyServeFailure, ServeClient } from "./serve-http"
+import { classifyServeFailure, type Issue, ServeClient, ServeHttpError } from "./serve-http"
 import { ServeManager, sweepStaleServeDirs, sweepStaleServeProxies } from "./serve-manager"
 import { probeBdVersion } from "./workspace-health"
 import { findWorkspaceByDbPath, type RegistryEntry, readRegistry } from "./workspace-registry"
@@ -125,6 +125,31 @@ export async function tryServe<T>(dbPath: string | undefined, read: ServeRead<T>
   } catch (error) {
     onFailure(entry.id, state, error)
     return null
+  }
+}
+
+/**
+ * The tree's blocked-by is derived from the list's dependency edges
+ * (blocks-map.ts). A serve list may feed the tree only if every row carries
+ * that data completely, or a missing edge would render an issue as UNBLOCKED
+ * (sec's B1, beadbox-6x2). bd's own contract, the same from the CLI and from
+ * serve (measured on bd 1.3.0): a row's dependency_count equals its number of
+ * `blocks` edges, and a row with no edges may omit `dependencies`. Anything
+ * short of that makes this tree load read through the CLI.
+ */
+export function assertDependencyDataComplete(rows: Issue[]): void {
+  for (const row of rows) {
+    const r = row as Record<string, unknown>
+    if (typeof r.dependency_count !== "number") {
+      throw new ServeHttpError("incomplete", `bd serve: dependency_count missing for ${row.id}`)
+    }
+    const deps = r.dependencies ?? []
+    if (!Array.isArray(deps)) throw new ServeHttpError("incomplete", `bd serve: dependencies malformed for ${row.id}`)
+    const blocks = deps.filter((e) => (e as Record<string, unknown>)?.type === "blocks")
+    const targeted = blocks.every((e) => typeof (e as Record<string, unknown>).depends_on_id === "string")
+    if (blocks.length !== r.dependency_count || !targeted) {
+      throw new ServeHttpError("incomplete", `bd serve: blocking edges incomplete for ${row.id}`)
+    }
   }
 }
 

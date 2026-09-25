@@ -3,7 +3,7 @@
 // from the workspace directory. It serves rows titled "from-serve" so a test
 // can tell which path answered, writes its pid to ./fake-serve.pid, and reads
 // ./fake-serve-mode on EVERY request so a test can change its behaviour:
-//   normal | slow-start (read at startup) | garbage | identity | 503 | incomplete
+//   normal | slow-start (read at startup) | garbage | identity | 503 | incomplete | deps-stripped
 // Unknown or missing mode = normal.
 
 import { readFileSync, realpathSync, writeFileSync } from "node:fs"
@@ -49,7 +49,12 @@ const server = Bun.serve({
     }
     if (m === "garbage") return json("not json at all")
     if (m === "503") return json({}, 503, { "Retry-After": "0" })
-    if (url.pathname === "/v0/beads/issues") return json({ items: [row("w-1"), row("w-2")], has_more: false })
+    if (url.pathname === "/v0/beads/issues") {
+      // bd's contract: dependency_count == number of `blocks` edges; no edges -> key omitted.
+      const blocked = { ...row("w-2"), dependency_count: 1, dependencies: [{ issue_id: "w-2", depends_on_id: "w-1", type: "blocks" }] }
+      const stripped = { ...row("w-2"), dependency_count: 1 } // count says blocked, edges missing
+      return json({ items: [{ ...row("w-1"), dependency_count: 0 }, m === "deps-stripped" ? stripped : blocked], has_more: false })
+    }
     if (url.pathname.startsWith("/v0/beads/issues/")) {
       const id = decodeURIComponent(url.pathname.split("/").pop() ?? "")
       const base = { ...row(id), comments: [{ id: "c1", issue_id: id, author: "a", text: "serve comment", created_at: "2026-01-01T00:00:00Z" }], dependencies: null, dependents: null }

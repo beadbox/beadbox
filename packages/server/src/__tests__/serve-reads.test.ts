@@ -12,7 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { __resetBdPathCache } from "../lib/bd"
 import { getCustomStatusList } from "../handlers/beads"
-import { getBeadDetail, getEpics } from "../handlers/epics"
+import { getBeadDetail, getBlocksDependencies, getEpics } from "../handlers/epics"
 import { __resetServeReads, __serveReadsState, __settleServeStarts } from "../lib/serve-reads"
 import { invalidateEpicCache } from "../lib/epic-cache"
 
@@ -26,7 +26,8 @@ let log: string
 
 function fakeBd(): string {
   const path = join(root, "bd")
-  const cliRow = (id: string) => `{"id":"${id}","title":"from-cli ${id}","status":"open","priority":2,"issue_type":"task"}`
+  const cliRow = (id: string, count = 0, blocker = "") =>
+    `{"id":"${id}","title":"from-cli ${id}","status":"open","priority":2,"issue_type":"task","dependency_count":${count}${blocker ? `,"dependencies":[{"issue_id":"${id}","depends_on_id":"${blocker}","type":"blocks"}]` : ""}}`
   writeFileSync(
     path,
     `#!/bin/sh
@@ -36,7 +37,7 @@ case "$1" in
   --version) echo "bd version 1.3.0 (fake)" ;;
   serve) exec '${process.execPath}' '${FAKE_SERVE}' "$@" ;;
   sql) echo '[{"h":"x","i":"2026-01-01","c":0}]' ;;
-  list) echo '[${cliRow("w-1")},${cliRow("w-2")}]' ;;
+  list) echo '[${cliRow("w-1", 0)},${cliRow("w-2", 1, "w-1")}]' ;;
   show) echo '[${cliRow("w-1")}]' ;;
   comments) echo '[{"id":"c9","issue_id":"w-1","author":"a","text":"cli comment","created_at":"2026-01-01T00:00:00Z"}]' ;;
   dep) echo '[]' ;;
@@ -204,4 +205,24 @@ test("the tree: the plain list may come from serve; the system-inclusive list ne
   invalidateEpicCache()
   const withSystem = await getEpics(beadsDir, true)
   expect(JSON.stringify(withSystem)).not.toContain("from-serve")
+})
+
+describe("sec B1: blocked-by through serve never becomes 'no blockers'", () => {
+  test("serve rows with complete dependency data: the tree and blocked-by come from serve", async () => {
+    registry(true)
+    await warm()
+    const tree = await getEpics(beadsDir)
+    expect(JSON.stringify(tree)).toContain("from-serve")
+    expect((await getBlocksDependencies(beadsDir)).blockedBy).toEqual({ "w-2": ["w-1"] })
+  })
+
+  test("serve rows with the blocking edges stripped: the tree load reads through the CLI, blocked-by intact", async () => {
+    registry(true)
+    await warm()
+    mode("deps-stripped")
+    invalidateEpicCache()
+    const tree = await getEpics(beadsDir)
+    expect((await getBlocksDependencies(beadsDir)).blockedBy).toEqual({ "w-2": ["w-1"] }) // never {}
+    expect(JSON.stringify(tree)).not.toContain("from-serve") // the incomplete serve list was not used
+  })
 })

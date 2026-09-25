@@ -39,8 +39,6 @@ import { captureShutdownSource } from "./lib/shutdown-source"
 // No-op when started as a daemon (process.ppid === 1) or when Tauri
 // reaps us cleanly via SIGTERM before the next 5s poll.
 const stopWatcher = startParentDeathWatcherViaShell()
-// bd serve token dirs a previous sidecar could not remove (beadbox-6x2).
-sweepServeDirsAtStartup()
 
 // Boot diagnostic on stderr — proves "did the binary even start?" when smoke
 // tests fail. stdout is reserved for kkrpc frames, so this can't go there.
@@ -126,6 +124,11 @@ function shutdown(signal: NodeJS.Signals): void {
 }
 process.on("SIGTERM", shutdown)
 process.on("SIGINT", shutdown)
+
+// bd serve token dirs and recorded proxies a previous sidecar could not clean
+// up (beadbox-6x2). After the signal handlers, so a signal during the sweep
+// still gets the shutdown stamp; the proxy half is not awaited.
+sweepServeDirsAtStartup()
 
 // Uncaught failures must never silently kill the sidecar without leaving a
 // trace. Write to stderr (Tauri host relays it as a `js-process-stderr`

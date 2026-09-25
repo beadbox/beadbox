@@ -12,7 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCustomStatusList } from "../handlers/beads"
-import { getBeadDetail, getEpics } from "../handlers/epics"
+import { getBeadDetail, getBlocksDependencies, getEpics } from "../handlers/epics"
 import { __resetBdPathCache } from "../lib/bd"
 import { invalidateEpicCache } from "../lib/epic-cache"
 import { __resetServeReads, __serveReadsState, __settleServeStarts } from "../lib/serve-reads"
@@ -49,7 +49,10 @@ async function readAll() {
     invalidateEpicCache()
     details.push(await getBeadDetail(id, beadsDir))
   }
-  return { tree, details, statuses: await getCustomStatusList(beadsDir) }
+  // Blocked-by is derived from the same list as the tree (answered from the
+  // tree just built), so it is compared too (sec's B2).
+  const blockedBy = (await getBlocksDependencies(beadsDir)).blockedBy
+  return { tree, blockedBy, details, statuses: await getCustomStatusList(beadsDir) }
 }
 
 beforeAll(async () => {
@@ -107,6 +110,8 @@ describe.skipIf(SKIP)("routed reads against a real bd serve", () => {
     expect(viaServe).toEqual(viaCli)
     expect(viaCli.details.every((d) => d !== null)).toBe(true)
     expect(viaCli.statuses).toEqual(["review", "qa"])
+    // The blocking edge (task b blocked by task a) shows through serve, not only 'equal to the CLI'.
+    expect(viaServe.blockedBy[ids[2]]).toEqual([ids[1]])
   })
 
   test("a read through serve right after a CLI write sees the write", async () => {
