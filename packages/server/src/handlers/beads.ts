@@ -20,6 +20,7 @@ import {
   deleteBead as bdDeleteBead,
   deleteComment as bdDeleteComment,
   getCustomStatuses as bdGetCustomStatuses,
+  getAvailableTypes as bdGetAvailableTypes,
   removeDependency as bdRemoveDependency,
   removeLabel as bdRemoveLabel,
   setCustomStatuses as bdSetCustomStatuses,
@@ -74,6 +75,26 @@ export async function getAvailableStatuses(dbPath?: string): Promise<string[]> {
     return [...coreStatuses, ...customStatuses]
   } catch {
     return coreStatuses
+  }
+}
+
+// `bd types` reflects the selected workspace's types.custom configuration.
+// An older bd cannot provide an accurate list of valid edit targets.
+export async function getAvailableTypes(dbPath?: string): Promise<string[]> {
+  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  if (dbPath && (await readMetadataMode(dbPath)) === "server") {
+    // bd types only reads the catalog. Server-mode reads can run alongside
+    // detail requests instead of waiting behind their per-db CLI queue.
+    options.parallel = true
+  }
+  try {
+    return await bdGetAvailableTypes(options)
+  } catch (error) {
+    const message = `${(error as { stderr?: string }).stderr ?? ""} ${String(error)}`
+    if (/unknown command\s+["']?types["']?/i.test(message)) {
+      throw new Error("The installed bd does not support `bd types`; upgrade bd to edit issue types", { cause: error })
+    }
+    throw error
   }
 }
 

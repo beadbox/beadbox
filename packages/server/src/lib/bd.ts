@@ -22,7 +22,6 @@ import { recordFlockContention } from "./flock-contention-tracker"
 import type {
   BeadPriority,
   BeadStatus,
-  BeadType,
   CookedFormula,
   FormulaDetail,
   FormulaSummary,
@@ -181,6 +180,7 @@ export interface BdOptions {
   cwd?: string // Working directory
   env?: Record<string, string> // Extra environment variables
   parallel?: boolean // Bypass per-db lock (safe for read-only calls in server mode)
+  includeSystem?: boolean // Include gates, infrastructure, and template issues in lists
 }
 
 export interface BdBead {
@@ -190,21 +190,7 @@ export interface BdBead {
   design?: string
   status: "open" | "in_progress" | "ready_for_qa" | "ready_to_ship" | "closed" | "tombstone"
   priority: number // 0-4 (0=critical, 4=low)
-  issue_type:
-    | "bug"
-    | "feature"
-    | "task"
-    | "epic"
-    | "chore"
-    | "message"
-    | "gate"
-    | "merge-request"
-    | "molecule"
-    | "agent"
-    | "role"
-    | "rig"
-    | "convoy"
-    | "event"
+  issue_type: string
   assignee?: string
   owner?: string
   created_by?: string
@@ -847,9 +833,52 @@ export async function deleteBead(id: string, options: BdOptions = {}): Promise<v
 
 // List all beads (not just epics)
 export async function listBeads(options: BdOptions = {}): Promise<BdBead[]> {
-  const args = ["list", "--status", "all", "--limit", "0"]
-  args.push("--flat")
-  return bdExec<BdBead[]>(args, options)
+  const args = ["list", "--status", "all", "--limit", "0", "--flat"]
+  if (!options.includeSystem) return bdExec<BdBead[]>(args, options)
+  return listBeadsIncludingSystem(args, options)
+}
+
+// Full view must not silently omit a category on older bd releases, so an
+// unsupported --include-* flag is an error naming the flag, never a fallback.
+const INCLUDE_SYSTEM_FLAGS = ["--include-gates", "--include-infra", "--include-templates"]
+// Quotes are written as \x22 / \x27 so the pattern holds no bare quote
+// character: lizard (the CCN gate) lexes a bare ' or " inside a regex literal
+// as a string opener and silently skips the functions that follow.
+const UNKNOWN_INCLUDE_FLAG = /unknown flag:\s*[\x22\x27]?(--include-(?:gates|infra|templates))/i
+
+async function listBeadsIncludingSystem(args: string[], options: BdOptions): Promise<BdBead[]> {
+  try {
+    return await bdExec<BdBead[]>([...args, ...INCLUDE_SYSTEM_FLAGS], options)
+  } catch (error) {
+    const unsupported = unsupportedIncludeFlag(error)
+    if (!unsupported) throw error
+    throw new Error(
+      `The installed bd does not support ${unsupported}; upgrade bd to use All issues view`,
+      { cause: error },
+    )
+  }
+}
+
+function unsupportedIncludeFlag(error: unknown): string | undefined {
+  const message = `${(error as { stderr?: string }).stderr ?? ""} ${String(error)}`
+  return message.match(UNKNOWN_INCLUDE_FLAG)?.[1]
+}
+
+interface BdTypesResult {
+  core_types?: Array<string | { name?: string }>
+  custom_types?: Array<string | { name?: string }>
+}
+
+export function parseAvailableTypes(value: BdTypesResult): string[] {
+  const names = [...(value.core_types ?? []), ...(value.custom_types ?? [])]
+    .map((entry) => (typeof entry === "string" ? entry : entry?.name))
+    .filter((name): name is string => typeof name === "string" && name.length > 0)
+  return [...new Set(names)]
+}
+
+export async function getAvailableTypes(options: BdOptions = {}): Promise<string[]> {
+  const result = await bdExec<BdTypesResult>(["types"], options)
+  return parseAvailableTypes(result)
 }
 
 // Map bd priority number to our priority type.
@@ -919,31 +948,12 @@ export async function updateParent(
   await bdExecRaw(args, options)
 }
 
-// Map bd issue_type to our BeadType.
-//
-// bb-fe03.4: lookup table replaces a 13-case switch (CCN 16 → 2). The
-// keys are the lowercased bd type names; case-insensitive lookup happens
-// via .toLowerCase() at call time. Unknown types default to "task".
-const BEAD_TYPE_BY_NAME: Readonly<Record<string, import("./types").BeadType>> = Object.freeze({
-  bug: "bug",
-  feature: "feature",
-  epic: "epic",
-  chore: "chore",
-  message: "message",
-  gate: "gate",
-  "merge-request": "merge-request",
-  molecule: "molecule",
-  agent: "agent",
-  role: "role",
-  rig: "rig",
-  convoy: "convoy",
-  event: "event",
-  task: "task",
-})
-
+// bd's issue_type is data: its exact spelling is preserved. A missing or blank
+// value degrades that one row to "unknown" rather than failing the whole tree
+// (beadbox-01f.13).
 export function mapType(type?: string): import("./types").BeadType {
-  if (!type) return "task"
-  return BEAD_TYPE_BY_NAME[type.toLowerCase()] ?? "task"
+  if (!type?.trim()) return "unknown"
+  return type
 }
 
 // Dependency types returned by bd dep list
@@ -1542,7 +1552,7 @@ export async function getMoleculeStructure(
       id: nid,
       title: b?.title ?? nid,
       status: (b?.status ?? "open") as BeadStatus,
-      type: mapType(b?.issue_type) as BeadType,
+      type: b ? mapType(b.issue_type) : "unknown",
       gateType: b?.issue_type === "gate" ? (b.metadata?.gate_type ?? "human") : undefined,
     }
   })

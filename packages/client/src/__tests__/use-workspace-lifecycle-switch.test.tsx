@@ -69,7 +69,13 @@ function healthSpelling(workspace: Workspace): Workspace {
   return { ...workspace, databasePath: `${workspace.databasePath}/beads.db` }
 }
 
-function mountLifecycle(options: { deferAfter?: number; rejectStatuses?: boolean } = {}): Harness {
+function mountLifecycle(
+  options: {
+    deferAfter?: number
+    rejectStatuses?: boolean
+    getAvailableTypes?: (dbPath?: string) => Promise<string[]>
+  } = {},
+): Harness {
   let calls = 0
   let pendingResolve: (() => void) | null = null
 
@@ -92,6 +98,7 @@ function mountLifecycle(options: { deferAfter?: number; rejectStatuses?: boolean
       setActiveWorkspaceAction: mock(() => Promise.resolve()),
     },
     beads: {
+      getAvailableTypes: mock(options.getAvailableTypes ?? (() => Promise.resolve(["task"]))),
       getAvailableStatuses: mock(() =>
         options.rejectStatuses
           ? Promise.reject(new Error("Sidecar exited"))
@@ -149,6 +156,58 @@ afterEach(() => {
 })
 
 describe("useWorkspaceLifecycle workspace switching", () => {
+  test("retry keeps type edits disabled until the current catalog succeeds", async () => {
+    setWorkspaceCookie(alpha.id)
+    let releaseRetry: (() => void) | undefined
+    let calls = 0
+    const { seen } = mountLifecycle({
+      getAvailableTypes: () => {
+        calls++
+        if (calls === 1) return Promise.reject(new Error("catalog timed out"))
+        return new Promise<string[]>((resolve) => {
+          releaseRetry = () => resolve(["task", "decision"])
+        })
+      },
+    })
+    await waitFor(() => expect(seen.current?.typeCatalogError).toBe("catalog timed out"))
+    expect(seen.current?.typeCatalogReady).toBe(false)
+
+    act(() => seen.current?.retryAvailableTypes())
+    expect(seen.current?.typeCatalogRetrying).toBe(true)
+    expect(seen.current?.typeCatalogReady).toBe(false)
+    expect(seen.current?.typeCatalogError).toBe("catalog timed out")
+
+    await act(async () => releaseRetry?.())
+    await waitFor(() => expect(seen.current?.typeCatalogReady).toBe(true))
+    expect(seen.current?.availableTypes).toEqual(["task", "decision"])
+    expect(seen.current?.typeCatalogError).toBeNull()
+  })
+
+  test("late retry response from the previous workspace cannot replace current types", async () => {
+    setWorkspaceCookie(alpha.id)
+    let releaseAlpha: (() => void) | undefined
+    let alphaCalls = 0
+    const { seen } = mountLifecycle({
+      getAvailableTypes: (dbPath) => {
+        if (dbPath?.includes("beta")) return Promise.resolve(["beta-type"])
+        alphaCalls++
+        if (alphaCalls === 1) return Promise.reject(new Error("catalog timed out"))
+        return new Promise<string[]>((resolve) => {
+          releaseAlpha = () => resolve(["alpha-type"])
+        })
+      },
+    })
+    await waitFor(() => expect(seen.current?.typeCatalogError).toBe("catalog timed out"))
+    act(() => seen.current?.retryAvailableTypes())
+    await act(async () => setWorkspaceCookie(beta.id))
+    await waitFor(() => expect(seen.current?.currentWorkspace?.id).toBe(beta.id))
+    await waitFor(() => expect(seen.current?.availableTypes).toEqual(["beta-type"]))
+
+    await act(async () => releaseAlpha?.())
+    expect(seen.current?.availableTypes).toEqual(["beta-type"])
+    expect(seen.current?.typeCatalogReady).toBe(true)
+  })
+
   test("status RPC failures do not block the workspace tree", async () => {
     setWorkspaceCookie(alpha.id)
     const { seen } = mountLifecycle({ rejectStatuses: true })

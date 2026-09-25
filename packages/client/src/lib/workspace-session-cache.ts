@@ -84,7 +84,8 @@ export const sessionPipeline = createWorkspaceSessionCache<PipelineSnapshot>()
 
 /** Drop every cached view for a workspace (e.g. after it is unregistered). */
 export function clearWorkspaceSession(workspaceId: string | undefined): void {
-  sessionEpics.clear(workspaceId)
+  sessionEpics.clear(workspaceId ? `${workspaceId}:normal` : undefined)
+  sessionEpics.clear(workspaceId ? `${workspaceId}:all` : undefined)
   sessionActivityEvents.clear(workspaceId)
   sessionPipeline.clear(workspaceId)
 }

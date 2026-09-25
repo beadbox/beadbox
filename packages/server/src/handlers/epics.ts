@@ -30,6 +30,7 @@ import {
   getBeadDetailCacheStats,
   getCachedBeadDetail,
   getCachedDbPath,
+  getCachedIncludeSystem,
   getCachedEpics,
   getCachedFingerprintParts,
   hasCachedResult,
@@ -39,7 +40,7 @@ import {
 } from "../lib/epic-cache"
 import { consumeEpicPrefetch, startEpicPrefetch } from "../lib/epic-prefetch"
 import { matchRig, parseRoutes } from "../lib/routes"
-import type { Bead, BeadPriority, BeadStatus, BeadType, Comment, Epic } from "../lib/types"
+import type { Bead, BeadPriority, BeadStatus, Comment, Epic } from "../lib/types"
 
 // Convert bd ISO date string to Date
 function toDate(isoString?: string): Date | undefined {
@@ -61,9 +62,7 @@ function convertComment(bdComment: BdComment): Comment {
 function convertBead(bdBead: BdBead, comments: Comment[] = []): Bead {
   return {
     id: bdBead.id,
-    type: (bdBead.id.includes("-mol-") && bdBead.issue_type === "epic"
-      ? "molecule"
-      : mapType(bdBead.issue_type)) as BeadType,
+    type: mapType(bdBead.issue_type),
     title: bdBead.title,
     description: bdBead.description || "",
     design: bdBead.design,
@@ -92,7 +91,7 @@ function convertBead(bdBead: BdBead, comments: Comment[] = []): Bead {
 async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
   const dbKey = options.db ?? ""
   const currentFingerprint = await getDataFingerprint({ ...options, parallel: true })
-  const cached = getCachedEpics(currentFingerprint, dbKey)
+  const cached = getCachedEpics(currentFingerprint, dbKey, options.includeSystem)
   if (cached) return cached
 
   // Detect server mode for parallel read optimization
@@ -107,7 +106,7 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
   // Step 1: Get ALL beads in one call (includes parent field)
   const allBeads = await listBeads(readOptions)
 
-  const hierarchicalTypes = new Set(["epic", "convoy"])
+  const hierarchicalTypes = new Set(["epic", "convoy", "molecule"])
   const epicBeads = allBeads.filter((b) => hierarchicalTypes.has(b.issue_type))
   const nonEpicBeads = allBeads.filter((b) => !hierarchicalTypes.has(b.issue_type))
 
@@ -163,7 +162,11 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
 
     return {
       ...baseBead,
-      children: children.map((child) => buildBeadWithChildren(child, depth + 1)),
+      children: children.map((child) =>
+        hierarchicalTypes.has(child.issue_type)
+          ? (epicMap.get(child.id) ?? convertBead(child))
+          : buildBeadWithChildren(child, depth + 1),
+      ),
     }
   }
 
@@ -173,16 +176,19 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
   for (const bdEpic of epicsWithDependents) {
     const epic: Epic = {
       ...convertBead(bdEpic),
-      type:
-        bdEpic.issue_type === "convoy"
-          ? "convoy"
-          : bdEpic.id.includes("-mol-") && bdEpic.issue_type === "epic"
-            ? "molecule"
-            : "epic",
       children: [],
       childEpics: [],
     }
     epicMap.set(bdEpic.id, epic)
+  }
+
+  // A hierarchy root under a non-epic parent is rendered among that parent's
+  // children. It must not also appear as an independent top-level epic.
+  for (const bdEpic of epicBeads) {
+    const parent = bdEpic.parent ? beadById.get(bdEpic.parent) : undefined
+    if (parent && !hierarchicalTypes.has(parent.issue_type)) {
+      childEpicIds.add(bdEpic.id)
+    }
   }
 
   for (const bdEpic of epicsWithDependents) {
@@ -261,6 +267,23 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
     topLevelEpics.push(orphanEpic)
   }
 
+  // Generic Bead consumers traverse `children`, while top-level Epic consumers
+  // traverse `childEpics`. Once an epic is nested below a non-epic issue, keep
+  // the entire descendant branch on `children` so both tree views can reach it.
+  function normalizeNestedEpics(bead: Bead, belowNonEpic = false): void {
+    if (belowNonEpic && "childEpics" in bead) {
+      const epic = bead as Epic
+      epic.children.push(...(epic.childEpics ?? []))
+      epic.childEpics = []
+    }
+    const childBelowNonEpic = belowNonEpic || !hierarchicalTypes.has(bead.type)
+    bead.children?.forEach((child) => normalizeNestedEpics(child, childBelowNonEpic))
+    if ("childEpics" in bead) {
+      (bead as Epic).childEpics?.forEach((child) => normalizeNestedEpics(child, childBelowNonEpic))
+    }
+  }
+  topLevelEpics.forEach((epic) => normalizeNestedEpics(epic))
+
   // Attach rigName from routes.jsonl (Gastown multi-rig workspaces)
   const dbPath = options.db || process.cwd()
   const beadsDir = basename(resolve(dbPath)) === ".beads" ? dbPath : dirname(dbPath)
@@ -269,17 +292,13 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
     function attachRigNames(bead: Bead) {
       bead.rigName = matchRig(bead.id, routes)
       bead.children?.forEach(attachRigNames)
+      if ("childEpics" in bead) (bead as Epic).childEpics?.forEach(attachRigNames)
     }
-    function attachRigNamesToEpic(epic: Epic) {
-      attachRigNames(epic)
-      epic.children?.forEach(attachRigNames)
-      epic.childEpics?.forEach(attachRigNamesToEpic)
-    }
-    topLevelEpics.forEach(attachRigNamesToEpic)
+    topLevelEpics.forEach(attachRigNames)
   }
 
   if (currentFingerprint) {
-    setCachedEpics(currentFingerprint, dbKey, topLevelEpics)
+    setCachedEpics(currentFingerprint, dbKey, topLevelEpics, options.includeSystem)
   }
 
   return topLevelEpics
@@ -292,8 +311,8 @@ export type EpicResult =
   | { success: true; epics: Epic[] }
   | { success: false; bdLoadError: BdLoadError }
 
-async function getEpicsCore(dbPath?: string): Promise<EpicResult> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
+async function getEpicsCore(dbPath?: string, includeSystem = false): Promise<EpicResult> {
+  const options: BdOptions = { ...(dbPath ? { db: dbPath } : {}), includeSystem }
   try {
     const epics = await buildEpicHierarchy(options)
     // beadbox-jk7 / cascade-9 diagnostic. Sidecar-side proof of what the
@@ -329,13 +348,13 @@ async function getEpicsCore(dbPath?: string): Promise<EpicResult> {
 
 // Get all epics with their hierarchy.
 // Checks for a prefetched result first (started during health check).
-export async function getEpics(dbPath?: string): Promise<EpicResult> {
-  const prefetched = consumeEpicPrefetch(dbPath)
+export async function getEpics(dbPath?: string, includeSystem = false): Promise<EpicResult> {
+  const prefetched = includeSystem ? null : consumeEpicPrefetch(dbPath)
   if (prefetched) {
     console.error("[epics] using prefetched epic data")
     return prefetched
   }
-  return getEpicsCore(dbPath)
+  return getEpicsCore(dbPath, includeSystem)
 }
 
 // Start prefetching epic data.
@@ -363,19 +382,19 @@ async function fullRebuild(options: BdOptions): Promise<EpicResult> {
 }
 
 // Incremental refresh: detect change scope and take the fastest path.
-export async function incrementalRefresh(dbPath?: string): Promise<EpicResult> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
+export async function incrementalRefresh(dbPath?: string, includeSystem = false): Promise<EpicResult> {
+  const options: BdOptions = { ...(dbPath ? { db: dbPath } : {}), includeSystem }
   const dbKey = dbPath ?? ""
 
   try {
-    if (!hasCachedResult() || getCachedDbPath() !== dbKey) return fullRebuild(options)
+    if (!hasCachedResult() || getCachedDbPath() !== dbKey || getCachedIncludeSystem() !== includeSystem) return fullRebuild(options)
 
     const cachedParts = getCachedFingerprintParts()
     if (!cachedParts) return fullRebuild(options)
 
     const newFingerprint = await getDataFingerprint({ ...options, parallel: true })
 
-    const cached = getCachedEpics(newFingerprint, dbKey)
+    const cached = getCachedEpics(newFingerprint, dbKey, includeSystem)
     if (cached) {
       console.error("[epics] incremental refresh: fingerprint cache hit (no change)")
       return { success: true, epics: cached }

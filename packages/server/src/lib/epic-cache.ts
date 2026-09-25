@@ -8,6 +8,7 @@ export interface FingerprintParts {
 
 let cachedFingerprint: string | null = null
 let cachedDbPath: string | null = null
+let cachedIncludeSystem = false
 let cachedResult: Epic[] | null = null
 let cachedParts: FingerprintParts | null = null
 
@@ -28,16 +29,17 @@ export function parseFingerprint(fingerprint: string): FingerprintParts | null {
   }
 }
 
-export function getCachedEpics(fingerprint: string, dbPath: string): Epic[] | null {
-  if (fingerprint === cachedFingerprint && dbPath === cachedDbPath && cachedResult) {
+export function getCachedEpics(fingerprint: string, dbPath: string, includeSystem = false): Epic[] | null {
+  if (fingerprint === cachedFingerprint && dbPath === cachedDbPath && includeSystem === cachedIncludeSystem && cachedResult) {
     return cachedResult
   }
   return null
 }
 
-export function setCachedEpics(fingerprint: string, dbPath: string, epics: Epic[]): void {
+export function setCachedEpics(fingerprint: string, dbPath: string, epics: Epic[], includeSystem = false): void {
   cachedFingerprint = fingerprint
   cachedDbPath = dbPath
+  cachedIncludeSystem = includeSystem
   cachedResult = epics
   cachedParts = parseFingerprint(fingerprint)
 }
@@ -48,6 +50,10 @@ export function getCachedFingerprintParts(): FingerprintParts | null {
 
 export function getCachedDbPath(): string | null {
   return cachedDbPath
+}
+
+export function getCachedIncludeSystem(): boolean {
+  return cachedIncludeSystem
 }
 
 export function hasCachedResult(): boolean {
@@ -148,6 +154,7 @@ export function clearBeadDetailCache(): void {
 export function invalidateEpicCache(): void {
   cachedFingerprint = null
   cachedDbPath = null
+  cachedIncludeSystem = false
   cachedResult = null
   cachedParts = null
   beadDetailCache.clear()

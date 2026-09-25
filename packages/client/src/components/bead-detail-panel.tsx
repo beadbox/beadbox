@@ -44,11 +44,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useBeadMutations } from "@/hooks/use-bead-mutations"
+import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import { useCommentNavigation } from "@/hooks/use-comment-navigation"
 import { useViewport } from "@/hooks/use-viewport"
 import type { CommentSortOrder } from "@/lib/local-storage"
 import { getAnalyticsEnabled, getCommentSortOrder, setCommentSortOrder } from "@/lib/local-storage"
-import type { Bead, BeadType, Comment } from "@/lib/types"
+import type { Bead, Comment } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface BeadDetailPanelProps {
@@ -62,6 +63,8 @@ interface BeadDetailPanelProps {
   dbPath?: string
   assignees?: string[]
   availableStatuses?: string[]
+  availableTypes?: string[]
+  typeCatalogReady?: boolean
   // beadbox-3qo: ordered status.custom chain for the workflow advancement
   // button (pm/spec §4.3). Empty array → button hidden.
   customStatusChain?: string[]
@@ -88,6 +91,8 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
       dbPath,
       assignees = [],
       availableStatuses = ["open", "in_progress", "closed"],
+      availableTypes = [],
+      typeCatalogReady = false,
       customStatusChain = [],
       isLoadingBead = false,
       isFocused = false,
@@ -129,7 +134,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
     // Molecule DAG view state
     const [moleculeViewEnabled, setMoleculeViewEnabled] = useState(false)
     const [activeDetailTab, setActiveDetailTab] = useState<"details" | "molecule">("details")
-    const isMolecule = bead ? bead.id.includes("-mol-") : false
+    const isMolecule = bead ? isMoleculePresentation(bead) : false
 
     useEffect(() => {
       const check = () => {
@@ -284,34 +289,19 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                     <button
                       className={cn(
                         "px-2 py-1 text-xs font-medium rounded border capitalize cursor-pointer hover:opacity-80 transition-opacity shrink-0 flex items-center gap-1.5",
-                        typeColors[mutations.type],
+                        typeColors[mutations.type] ??
+                          "bg-slate-500/20 text-slate-400 border-slate-500/30",
                         mutations.fieldStates.type.hasError && "ring-2 ring-destructive",
                         isMobile && "min-h-[44px] min-w-[44px]",
                       )}
-                      disabled={mutations.fieldStates.type.isSaving}
+                      disabled={mutations.fieldStates.type.isSaving || !typeCatalogReady}
                     >
                       {mutations.fieldStates.type.isSaving ? <Spinner className="h-3 w-3" /> : null}
                       {mutations.type}
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
-                    {(
-                      [
-                        "bug",
-                        "task",
-                        "feature",
-                        "chore",
-                        "epic",
-                        "message",
-                        "gate",
-                        "merge-request",
-                        "agent",
-                        "role",
-                        "rig",
-                        "convoy",
-                        "event",
-                      ] as BeadType[]
-                    ).map((t) => (
+                    {[...new Set([mutations.type, ...availableTypes])].map((t) => (
                       <DropdownMenuItem
                         key={t}
                         onClick={() => mutations.handleTypeChange(t)}

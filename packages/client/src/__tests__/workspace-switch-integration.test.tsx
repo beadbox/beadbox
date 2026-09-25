@@ -69,11 +69,15 @@ function healthSpelling(workspace: Workspace): Workspace {
   return { ...workspace, databasePath: `${workspace.databasePath}/beads.db` }
 }
 
-function installRpc(registry: Workspace[] = [alpha, beta]) {
-  const getEpics = mock((dbPath?: string) => {
+function installRpc(registry: Workspace[] = [alpha, beta], failTypesFor: string[] = []) {
+  const getEpics = mock((dbPath?: string, includeSystem?: boolean) => {
     // bd is happy with either spelling; normalize so the fixture answers both.
     const key = (dbPath ?? "").replace(/\/beads\.db$/, "")
-    return Promise.resolve({ success: true as const, epics: EPICS_BY_DB[key] ?? [] })
+    const regular = EPICS_BY_DB[key] ?? []
+    return Promise.resolve({
+      success: true as const,
+      epics: includeSystem ? [...regular, epic("system-gate")] : regular,
+    })
   })
   const runStartupHealth = mock((cookieId?: string) => {
     const target = registry.find((w) => w.id === cookieId) ?? registry[0]
@@ -97,6 +101,11 @@ function installRpc(registry: Workspace[] = [alpha, beta]) {
     beads: {
       getAvailableStatuses: mock(() => Promise.resolve(["open", "in_progress", "closed"])),
       getCustomStatusList: mock(() => Promise.resolve([])),
+      getAvailableTypes: mock((dbPath?: string) =>
+        failTypesFor.some((path) => dbPath?.includes(path))
+          ? Promise.reject(new Error("bd types failed"))
+          : Promise.resolve(["task", "decision"]),
+      ),
     },
   } as unknown as RemoteApi)
   return { getEpics, runStartupHealth }
@@ -118,11 +127,19 @@ function Probe() {
   // Exactly home-page's skeleton condition.
   const skeleton = lifecycle.isLoading && !lifecycle.hasExistingDataRef.current
   return (
-    <span data-testid="probe">
-      {`${lifecycle.currentWorkspace?.name ?? "none"}|${skeleton ? "skeleton" : "tree"}|${lifecycle.epics
-        .map((e) => e.id)
-        .join(",")}`}
-    </span>
+    <>
+      <span data-testid="probe">
+        {`${lifecycle.currentWorkspace?.name ?? "none"}|${skeleton ? "skeleton" : "tree"}|${lifecycle.epics
+          .map((e) => e.id)
+          .join(",")}`}
+      </span>
+      <span data-testid="catalog">
+        {lifecycle.typeCatalogError ?? (lifecycle.typeCatalogReady ? "ready" : "loading")}
+      </span>
+      <button type="button" onClick={() => lifecycle.setIncludeSystem(!lifecycle.includeSystem)}>
+        Toggle system issues
+      </button>
+    </>
   )
 }
 
@@ -168,9 +185,38 @@ afterEach(() => {
   _resetRpc()
   _resetWorkspaceSessions()
   clearWorkspaceCookie()
+  localStorage.removeItem(`beadbox:system-issues:${alpha.id}`)
+  localStorage.removeItem(`beadbox:system-issues:${beta.id}`)
 })
 
 describe("workspace switching (gate + lifecycle)", () => {
+  test("type catalog failure is visible and clears on workspace switch", async () => {
+    setWorkspaceCookie(alpha.id)
+    installRpc([alpha, beta], ["demo-alpha"])
+    mountApp()
+    await waitFor(() => expect(screen.getByTestId("catalog").textContent).toBe("bd types failed"))
+    await clickTab(beta)
+    await waitFor(() => expect(screen.getByTestId("catalog").textContent).toBe("ready"))
+  })
+
+  test("system mode is scoped to workspace and does not reuse the normal tree", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { getEpics } = installRpc()
+    mountApp()
+    await waitFor(() => expect(view()).toBe("demo-alpha|tree|alpha-1"))
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Toggle system issues" }).click()
+    })
+    await waitFor(() => expect(view()).toBe("demo-alpha|tree|alpha-1,system-gate"))
+    expect(getEpics.mock.calls.some((call) => call[1] === true)).toBe(true)
+
+    await clickTab(beta)
+    await waitFor(() => expect(view()).toBe("demo-beta|tree|beta-1"))
+    await clickTab(alpha)
+    await waitFor(() => expect(view()).toBe("demo-alpha|tree|alpha-1,system-gate"))
+  })
+
   test("a workspace visited earlier in the session never shows the skeleton again", async () => {
     setWorkspaceCookie(alpha.id)
     installRpc()

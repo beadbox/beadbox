@@ -46,6 +46,11 @@ interface FilterBarProps {
   assignees: string[]
   rigNames?: string[]
   availableStatuses?: string[]
+  availableTypes?: string[]
+  selectedType?: string
+  onTypeChange?: (type: string) => void
+  includeSystem?: boolean
+  onIncludeSystemChange?: (enabled: boolean) => void
   sort: SortOption
   onSortChange: (sort: SortOption) => void
 }
@@ -93,6 +98,11 @@ export function FilterBar({
   assignees,
   rigNames,
   availableStatuses,
+  availableTypes = [],
+  selectedType = "all",
+  onTypeChange,
+  includeSystem = false,
+  onIncludeSystemChange,
   sort,
   onSortChange,
 }: FilterBarProps) {
@@ -177,13 +187,7 @@ export function FilterBar({
               className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
             >
               <Checkbox
-                checked={
-                  allSelected
-                    ? true
-                    : filters.status.length === 0
-                      ? false
-                      : "indeterminate"
-                }
+                checked={allSelected ? true : filters.status.length === 0 ? false : "indeterminate"}
                 className="pointer-events-none"
                 aria-label="All Status"
               />
@@ -224,6 +228,44 @@ export function FilterBar({
           </div>
         </PopoverContent>
       </Popover>
+
+      {/* Issue Type Filter */}
+      {onTypeChange && (
+        <Select value={selectedType} onValueChange={onTypeChange}>
+          <SelectTrigger
+            className={
+              isDesktop
+                ? "w-[140px] h-9 bg-transparent border-0 rounded-none"
+                : "w-full min-h-[44px] bg-transparent border-border/50"
+            }
+            aria-label="Issue type"
+          >
+            <SelectValue placeholder="Issue type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All types</SelectItem>
+            {[...new Set([selectedType, ...availableTypes])]
+              .filter((type) => type !== "all")
+              .map((type) => (
+                <SelectItem key={type} value={type}>
+                  {type}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      {/* System Issues Toggle */}
+      {onIncludeSystemChange && (
+        <label className="flex items-center gap-2 px-3 text-sm cursor-pointer">
+          <Checkbox
+            checked={includeSystem}
+            onCheckedChange={(checked) => onIncludeSystemChange(checked === true)}
+            aria-label="Show system issues"
+          />
+          <span>System issues</span>
+        </label>
+      )}
 
       {/* Priority Filter */}
       <Select

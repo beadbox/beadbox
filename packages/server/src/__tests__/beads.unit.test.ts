@@ -7,7 +7,7 @@
 
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import * as beads from "../handlers/beads"
-import { createBdWorkspace, type Workspace } from "./fixtures/bd-workspace"
+import { createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
 
 setDefaultTimeout(30_000)
 
@@ -128,7 +128,10 @@ describe("handlers/beads (mutator return shape)", () => {
   })
 
   test("closeBead closes single bead", async () => {
-    const r = await beads.closeBead(ws.seedIds.test1, ws.dbPath)
+    const unassigned = JSON.parse(await runBdInWorkspace(
+      ["create", "Unassigned close target", "--type", "task", "--json"], ws.root,
+    )) as { id: string }
+    const r = await beads.closeBead(unassigned.id, ws.dbPath)
     expect(r.success).toBe(true)
   })
 
@@ -147,6 +150,18 @@ describe("handlers/beads (read-only return shape)", () => {
     expect(statuses).toContain("open")
     expect(statuses).toContain("in_progress")
     expect(statuses).toContain("closed")
+  })
+
+  test("getAvailableTypes reads the current workspace's bd types", async () => {
+    const types = await beads.getAvailableTypes(ws.dbPath)
+    expect(types).toContain("task")
+    expect(types).toContain("decision")
+    expect(types).toContain("milestone")
+  })
+
+  test("getAvailableTypes propagates unavailable workspace errors", async () => {
+    await expect(beads.getAvailableTypes("/nonexistent/path/.beads/dolt"))
+      .rejects.toThrow(/ENOENT|no such file/)
   })
 
   test("checkBeadExists returns boolean", async () => {

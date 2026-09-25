@@ -19,6 +19,7 @@ import { MoleculePhaseView } from "@/components/molecule-phase-view"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useViewport } from "@/hooks/use-viewport"
 import { getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
+import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import type { Bead, Epic, ReadState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -1242,7 +1243,7 @@ function EpicRow({
               <TooltipContent>Convoy</TooltipContent>
             </Tooltip>
           )}
-          {!isStandalone && epic.type === "molecule" && (
+          {!isStandalone && isMoleculePresentation(epic) && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Hexagon className="h-3.5 w-3.5 text-pink-400 shrink-0" />
@@ -1250,7 +1251,7 @@ function EpicRow({
               <TooltipContent>Molecule</TooltipContent>
             </Tooltip>
           )}
-          {!isStandalone && epic.type !== "convoy" && epic.type !== "molecule" && (
+          {!isStandalone && epic.type !== "convoy" && !isMoleculePresentation(epic) && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Layers className="h-3.5 w-3.5 text-amber-400/60 shrink-0" />
@@ -1463,7 +1464,7 @@ function EpicRow({
           {/* Render child beads */}
           {hasChildBeads && (
             <div className={cn(hasChildEpics && "border-t border-border/30")}>
-              {epic.type === "molecule" ? (
+              {isMoleculePresentation(epic) ? (
                 <MoleculePhaseView
                   beads={epic.children ?? []}
                   epicId={epic.id}

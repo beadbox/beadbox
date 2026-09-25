@@ -104,6 +104,9 @@ function installRpc() {
       {
         getAvailableStatuses: mock(() => Promise.resolve(["open", "in_progress", "closed"])),
         getCustomStatusList: mock(() => Promise.resolve([])),
+        // The workspace type catalog (bd types) is a list; the catch-all
+        // below would answer with an object (beadbox-01f.13).
+        getAvailableTypes: mock(() => Promise.resolve(["task", "epic"])),
       },
       {
         get: (t, k) =>

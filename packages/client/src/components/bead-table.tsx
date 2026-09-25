@@ -34,7 +34,7 @@ import { useViewport } from "@/hooks/use-viewport"
 import { type BadgeConfig, getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
 import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
-import type { Bead, BeadPriority, BeadType, ReadState } from "@/lib/types"
+import type { Bead, BeadPriority, ReadState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface BeadTableProps {
@@ -273,7 +273,15 @@ function BeadRow({
           <CopyableId id={bead.id} />
         </div>
         <div className="bead-row-type shrink-0">
-          <PillBadge config={typeConfig[bead.type]} />
+          <PillBadge
+            config={
+              typeConfig[bead.type] ?? {
+                label: bead.type,
+                className: "bg-slate-500/20 text-slate-400 border-slate-500/40",
+                icon: <Hexagon className="h-3 w-3" />,
+              }
+            }
+          />
         </div>
         {bead.specId && (
           <Tooltip>
@@ -497,7 +505,7 @@ function BeadRow({
   )
 }
 
-const typeConfig: Record<BeadType, BadgeConfig> = {
+const typeConfig: Record<string, BadgeConfig> = {
   bug: {
     label: "Bug",
     className: "bg-red-500/20 text-red-400 border-red-500/40",

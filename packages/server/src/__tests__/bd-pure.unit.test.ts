@@ -6,18 +6,20 @@
 // versions confused the parser into summing CCN across adjacent code).
 
 import { describe, expect, it } from "bun:test"
-import { durationToISODate, getChangedBeadIds, getDataFingerprint, mapType } from "../lib/bd"
+import { durationToISODate, getChangedBeadIds, getDataFingerprint, mapType, parseAvailableTypes } from "../lib/bd"
 
 describe("mapType", () => {
-  it("returns 'task' for undefined input", () => {
-    expect(mapType(undefined)).toBe("task")
+  // One malformed row must not fail the whole tree: it renders as "unknown".
+  it("labels a missing issue type 'unknown'", () => {
+    expect(mapType(undefined)).toBe("unknown")
   })
 
-  it("returns 'task' for empty string", () => {
-    expect(mapType("")).toBe("task")
+  it("labels an empty issue type 'unknown'", () => {
+    expect(mapType("")).toBe("unknown")
+    expect(mapType("  ")).toBe("unknown")
   })
 
-  // Each known BeadType maps to itself (case-insensitive).
+  // The value supplied by bd is data, including its original spelling.
   const knownTypes = [
     "bug",
     "feature",
@@ -41,15 +43,24 @@ describe("mapType", () => {
     })
   }
 
-  it("is case-insensitive (BUG → bug)", () => {
-    expect(mapType("BUG")).toBe("bug")
-    expect(mapType("Epic")).toBe("epic")
-    expect(mapType("MERGE-REQUEST")).toBe("merge-request")
+  it("retains the exact spelling", () => {
+    expect(mapType("BUG")).toBe("BUG")
+    expect(mapType("Epic")).toBe("Epic")
+    expect(mapType("MERGE-REQUEST")).toBe("MERGE-REQUEST")
   })
 
-  it("falls back to 'task' for unknown types", () => {
-    expect(mapType("unicorn")).toBe("task")
-    expect(mapType("xyz")).toBe("task")
+  it("preserves custom types", () => {
+    expect(mapType("unicorn")).toBe("unicorn")
+    expect(mapType("xyz")).toBe("xyz")
+  })
+})
+
+describe("parseAvailableTypes", () => {
+  it("reads core objects and custom strings without duplicates", () => {
+    expect(parseAvailableTypes({
+      core_types: [{ name: "bug" }, { name: "task" }],
+      custom_types: ["task", "convoy", "spec"],
+    })).toEqual(["bug", "task", "convoy", "spec"])
   })
 })
 
