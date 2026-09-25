@@ -69,6 +69,10 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
     count: 1,
     why: "/bin/sh poll loop: the db path and bd path are quoted positionals ($2, $3), never spliced into the script (change-detector-shell-argv.security.test.ts). It runs in its own process group and dies with the sidecar on any exit path via stdin EOF (beadbox-db6, poll-child-lifetime.test.ts)",
   },
+  "lib/serve-manager.ts::spawnServeChild::spawn": {
+    count: 1,
+    why: "/bin/sh wrapper for bd serve (beadbox-6x2 L2): a constant script; the resolved bd path and our own mkdtemp token dir are quoted positionals ($1, $2), never spliced (serve-shell-argv.security.test.ts). bd argv is fixed: serve --addr 127.0.0.1:0 --auth-token-file <dir>/token. Minimal env (serveChildEnv). Dies with the sidecar via stdin EOF, which also removes the token dir (serve-lifetime.test.ts)",
+  },
   "lib/workspace-health.ts::probeBdVersion::execFileAsync": {
     count: 1,
     why: "fixed argv: bd --version; no input",
