@@ -31,7 +31,7 @@ export function FormulaPourModal({ open, onOpenChange, formula, dbPath }: Formul
   useEffect(() => {
     if (!open) return
     const initial: Record<string, string> = {}
-    for (const [name, v] of Object.entries(formula.vars)) {
+    for (const [name, v] of Object.entries(formula.vars ?? {})) {
       if (v.default) initial[name] = v.default
     }
     setVars(initial)
@@ -50,7 +50,7 @@ export function FormulaPourModal({ open, onOpenChange, formula, dbPath }: Formul
 
   const validate = useCallback((): boolean => {
     const errors = new Set<string>()
-    for (const [name, v] of Object.entries(formula.vars)) {
+    for (const [name, v] of Object.entries(formula.vars ?? {})) {
       if (v.required && !vars[name]?.trim()) {
         errors.add(name)
       }
@@ -81,7 +81,9 @@ export function FormulaPourModal({ open, onOpenChange, formula, dbPath }: Formul
     }
   }, [formula.formula, vars, assignee, dbPath, validate, onOpenChange])
 
-  const hasVars = Object.keys(formula.vars).length > 0
+  // bd omits `vars` for a formula without variables (beadbox-vco).
+  const formulaVars = formula.vars ?? {}
+  const hasVars = Object.keys(formulaVars).length > 0
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -100,7 +102,7 @@ export function FormulaPourModal({ open, onOpenChange, formula, dbPath }: Formul
               <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">
                 Variables
               </div>
-              {Object.entries(formula.vars).map(([name, v]) => (
+              {Object.entries(formulaVars).map(([name, v]) => (
                 <Tooltip key={name}>
                   <TooltipTrigger asChild>
                     <div>

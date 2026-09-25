@@ -199,7 +199,9 @@ export interface FormulaDetail {
   description: string
   version: number
   type: string
-  vars: Record<string, FormulaVariable>
+  // Absent, not {}, when the formula declares no variables: bd omits the key
+  // for a missing or empty [vars] table (beadbox-vco).
+  vars?: Record<string, FormulaVariable>
   steps: FormulaStep[]
   source?: string
 }

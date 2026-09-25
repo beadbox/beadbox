@@ -631,13 +631,14 @@ export function FormulasView() {
                       </p>
                     )}
                   </div>
-                  {Object.keys(detail.vars).length > 0 && (
+                  {/* bd omits `vars` for a formula without variables (beadbox-vco). */}
+                  {Object.keys(detail.vars ?? {}).length > 0 && (
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">
                         Variables
                       </div>
                       <div className="space-y-1.5">
-                        {Object.entries(detail.vars).map(([name, v]) => (
+                        {Object.entries(detail.vars ?? {}).map(([name, v]) => (
                           <div key={name} className="flex items-center gap-2 text-sm">
                             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
                             <span className="font-mono text-foreground">{name}</span>

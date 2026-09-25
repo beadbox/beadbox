@@ -28,7 +28,7 @@ export function FormulaPreviewModal({
   useEffect(() => {
     if (!open) return
     const initial: Record<string, string> = {}
-    for (const [name, v] of Object.entries(formula.vars)) {
+    for (const [name, v] of Object.entries(formula.vars ?? {})) {
       if (v.default) initial[name] = v.default
     }
     setVars(initial)
@@ -62,7 +62,9 @@ export function FormulaPreviewModal({
     setVars((prev) => ({ ...prev, [name]: value }))
   }
 
-  const hasVars = Object.keys(formula.vars).length > 0
+  // bd omits `vars` for a formula without variables (beadbox-vco).
+  const formulaVars = formula.vars ?? {}
+  const hasVars = Object.keys(formulaVars).length > 0
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -86,7 +88,7 @@ export function FormulaPreviewModal({
             </label>
             {runtimeMode && (
               <div className="grid grid-cols-2 gap-2 mt-2">
-                {Object.entries(formula.vars).map(([name, v]) => (
+                {Object.entries(formulaVars).map(([name, v]) => (
                   <Tooltip key={name}>
                     <TooltipTrigger asChild>
                       <div>
