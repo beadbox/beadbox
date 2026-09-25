@@ -50,6 +50,7 @@
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
+import type { DoltMode } from "./types"
 
 /**
  * Resolve a workspace's `.beads` directory from any path under it.
@@ -81,11 +82,22 @@ export function getDoltDir(dbPath: string): string {
  * Dolt root. The CONTENTS of these files are the write-marker; callers
  * are expected to read + hash them, not stat them.
  *
- * Empty array means the workspace is uninitialized OR Dolt's on-disk
- * layout has changed (in which case the caller should fall back to a
- * cold-path / never-cached behavior).
+ * Empty array means the workspace is uninitialized, Dolt's on-disk layout
+ * has changed, or there is no valid marker for the mode (in which case the
+ * caller should fall back to a cold-path / never-cached behavior).
+ *
+ * beadbox-01f.3: server mode has no valid manifest marker. A Dolt server
+ * rewrites journal files per commit, not the manifest (which changes only
+ * when the server starts), and an embeddeddolt/ next to a server store is a
+ * stale leftover nobody writes. Hashing either gives one first-run tick and
+ * then silence, so server mode returns [] and leaves detection to the poll
+ * child rather than pretending to be live.
  */
-export async function getWorkspaceWriteMarkerPaths(dbPath: string): Promise<string[]> {
+export async function getWorkspaceWriteMarkerPaths(
+  dbPath: string,
+  mode: DoltMode,
+): Promise<string[]> {
+  if (mode === "server") return []
   const doltDir = getDoltDir(dbPath)
   if (!existsSync(doltDir)) return []
   let entries: string[]

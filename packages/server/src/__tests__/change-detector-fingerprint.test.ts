@@ -19,6 +19,11 @@
 //      (<beads-dir>/embeddeddolt/<db>/...) layouts
 //   7. Handles multiple databases under one dolt root (union of manifests)
 //   8. Does NOT depend on .beads/last-touched (bd 1.0.x read-marker noise)
+//
+// Every call here passes mode "embedded": these cases test manifest hashing
+// itself. The dolt/<db> "server" LAYOUT is also where pre-0.63 bd kept
+// EMBEDDED databases. Server MODE selects no markers at all (beadbox-01f.3,
+// dolt-write-marker-mode.test.ts).
 
 import { rmSync, utimesSync, writeFileSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
@@ -64,54 +69,54 @@ beforeEach(() => {
 describe("getChangeFingerprint (beadbox-v7l)", () => {
   test("returns null when doltDir does not exist", async () => {
     await mkdir(join(tmpRoot, ".beads"), { recursive: true })
-    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fp).toBeNull()
   })
 
   test("returns null when doltDir exists but contains no manifest", async () => {
     await mkdir(join(tmpRoot, ".beads", "dolt", "bb"), { recursive: true })
-    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fp).toBeNull()
   })
 
   test("returns a manifest-derived fingerprint (server layout)", async () => {
     await setupServerLayout(tmpRoot, "bb")
-    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fp).not.toBeNull()
     expect(fp).toContain("manifest")
   })
 
   test("returns a manifest-derived fingerprint (embedded layout)", async () => {
     await setupEmbeddedLayout(tmpRoot, "cla")
-    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fp).not.toBeNull()
     expect(fp).toContain("manifest")
   })
 
   test("fingerprint stays stable when manifest content is unchanged", async () => {
     await setupServerLayout(tmpRoot, "bb")
-    const fp1 = await getChangeFingerprint(join(tmpRoot, ".beads"))
-    const fp2 = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp1 = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
+    const fp2 = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fp1).toBe(fp2)
   })
 
   test("fingerprint flips when manifest content changes (real bd-create pattern)", async () => {
     const manifest = await setupServerLayout(tmpRoot, "bb")
-    const fpBefore = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fpBefore = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     // Real bd commits rewrite the manifest with a new root-hash payload.
     writeFileSync(manifest, "5:__DOLT__:f8oprniddg50up7sbmifm9u49lbvpvmi:NEW-root-hash-after-commit")
-    const fpAfter = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fpAfter = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fpAfter).not.toBe(fpBefore)
   })
 
   test("fingerprint does NOT flip on mtime-only updates (bd 1.0.2 GC pattern)", async () => {
     const manifest = await setupServerLayout(tmpRoot, "bb")
-    const fpBefore = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fpBefore = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     // Dolt's background compaction bumps manifest mtime without changing
     // content. The beadbox-e9b hot loop came from this exact pattern.
     const future = new Date(Date.now() + 2000)
     utimesSync(manifest, future, future)
-    const fpAfter = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fpAfter = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fpAfter).toBe(fpBefore)
   })
 
@@ -122,14 +127,14 @@ describe("getChangeFingerprint (beadbox-v7l)", () => {
     const vvvv = join(noms, "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv")
     await writeFile(journal, "initial-journal-content")
     await writeFile(vvvv, "initial-data-content")
-    const fpBefore = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fpBefore = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     // Simulate Dolt's compaction: journal.idx size flaps, vvv...v rewrites.
     writeFileSync(journal, "compacted-journal-different-bytes-and-length")
     writeFileSync(vvvv, "compacted-data-different-content")
     const future = new Date(Date.now() + 2000)
     utimesSync(journal, future, future)
     utimesSync(vvvv, future, future)
-    const fpAfter = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fpAfter = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fpAfter).toBe(fpBefore)
   })
 
@@ -146,7 +151,7 @@ describe("getChangeFingerprint (beadbox-v7l)", () => {
     )
     await mkdir(join(tmpRoot, ".beads", "dolt", "secondary", ".dolt", "noms"), { recursive: true })
     await writeFile(secondManifest, "5:__DOLT__:secondary-db-initial-hash")
-    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fp).not.toBeNull()
     expect(fp).toContain("bb")
     expect(fp).toContain("secondary")
@@ -156,9 +161,9 @@ describe("getChangeFingerprint (beadbox-v7l)", () => {
     await setupServerLayout(tmpRoot, "bb")
     const lastTouched = join(tmpRoot, ".beads", "last-touched")
     await writeFile(lastTouched, "initial-bead-id")
-    const fp1 = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp1 = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     await writeFile(lastTouched, "different-bead-id-from-bd-show")
-    const fp2 = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp2 = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fp1).toBe(fp2)
   })
 
@@ -170,9 +175,9 @@ describe("getChangeFingerprint (beadbox-v7l)", () => {
     await mkdir(trainDir, { recursive: true })
     const train = join(trainDir, "demo.beadtrain")
     await writeFile(train, '[train]\nname = "before"\n')
-    const fp1 = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp1 = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     await writeFile(train, '[train]\nname = "after"\n')
-    const fp2 = await getChangeFingerprint(join(tmpRoot, ".beads"))
+    const fp2 = await getChangeFingerprint(join(tmpRoot, ".beads"), "embedded")
     expect(fp2).toBe(fp1)
     expect(fp1).not.toContain("beadtrain")
   })

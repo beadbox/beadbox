@@ -394,7 +394,7 @@ export function isEmbeddedMode(dbPath: string): boolean {
 // change-detector.ts:getChangeFingerprint export).
 export async function getEmbeddedFingerprint(dbPath: string): Promise<string> {
   try {
-    const markerPaths = await getWorkspaceWriteMarkerPaths(dbPath)
+    const markerPaths = await getWorkspaceWriteMarkerPaths(dbPath, "embedded")
     if (markerPaths.length === 0) {
       return JSON.stringify([{ h: `embedded:${Date.now()}` }])
     }

@@ -162,9 +162,12 @@ export async function readMetadataMode(dbPath: string): Promise<DoltMode> {
 // what counts as fresh state. The manifest file is ~150 bytes; hashing
 // it on every check is sub-millisecond.
 
-export async function getChangeFingerprint(dbPath: string): Promise<string | null> {
+export async function getChangeFingerprint(
+  dbPath: string,
+  mode: DoltMode,
+): Promise<string | null> {
   try {
-    const markerPaths = await getWorkspaceWriteMarkerPaths(dbPath)
+    const markerPaths = await getWorkspaceWriteMarkerPaths(dbPath, mode)
 
     if (markerPaths.length === 0) return null
 
@@ -373,7 +376,7 @@ async function emitIfChanged(
   state: DetectorState,
   msg: SubscriptionEvent & { type: "change" },
 ): Promise<boolean> {
-  const fp = await getChangeFingerprint(state.dbPath)
+  const fp = await getChangeFingerprint(state.dbPath, state.mode)
   if (fp === null) return false
   if (fp === state.lastFingerprint) return false
   state.lastFingerprint = fp
