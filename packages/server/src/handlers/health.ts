@@ -22,6 +22,7 @@ import {
   resolveBdDbPath,
 } from "../lib/workspace-registry"
 import { prefetchEpicData } from "./epics"
+import { registeredPaths, stopWorkspaceSubscriptions } from "./subscribe-internals"
 
 // ---------------------------------------------------------------------------
 // checkBdHealth - used by workspaces page, mid-session checks
@@ -162,6 +163,8 @@ export async function removeActiveWorkspace(
   const entry = registry.workspaces.find((w) => w.id === workspaceId)
   const credentialKey = entry?.credentialKey
   const removed = await removeWorkspaceFromRegistry(workspaceId)
+  // beadbox-wja: a removed workspace keeps no change detection running.
+  if (removed && entry) await stopWorkspaceSubscriptions(registeredPaths(entry))
   return { removed, credentialKey }
 }
 

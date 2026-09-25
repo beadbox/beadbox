@@ -53,7 +53,8 @@ export function transition(state: MachineState, event: MachineEvent): MachineSta
       if (event.type === "HEALTH_OK")
         return { ...state, phase: "healthy", workspaces: event.workspaces, error: null }
       if (event.type === "HEALTH_FAIL") return { ...state, phase: "error", error: event.error }
-      if (event.type === "NO_WORKSPACES") return { ...state, phase: "no_registry" }
+      // beadbox-wja: an empty registry means no workspaces, not the old list.
+      if (event.type === "NO_WORKSPACES") return { ...state, phase: "no_registry", workspaces: [] }
       return state
     case "error":
       if (event.type === "RETRY") return { ...state, phase: "checking", error: null }

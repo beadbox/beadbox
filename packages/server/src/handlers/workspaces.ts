@@ -25,7 +25,11 @@ import { scanPorts } from "../lib/port-scan"
 import { getPostHogNode } from "../lib/posthog-node"
 import { drainPool } from "../lib/dolt-pool"
 import { ensureExternalScaffold } from "../lib/external-scaffold"
-import { restartWorkspaceSubscriptions } from "./subscribe-internals"
+import {
+  registeredPaths,
+  restartWorkspaceSubscriptions,
+  stopWorkspaceSubscriptions,
+} from "./subscribe-internals"
 import type { ScanResult, ServerDatabase, Workspace, WorkspaceCard } from "../lib/types"
 import {
   addServerWorkspaceEntry,
@@ -810,6 +814,8 @@ export async function removeWorkspace(
   if (!removed) {
     return { success: false, error: "Workspace not found in registry." }
   }
+  // beadbox-wja: a removed workspace keeps no change detection running.
+  await stopWorkspaceSubscriptions(registeredPaths(entry, databasePath))
   return { success: true, credentialKey }
 }
 

@@ -11,6 +11,7 @@
 import { createChangeDetector, type ChangeDetector } from "../lib/change-detector"
 import { formatLine, type SubscriptionEvent } from "../subscribe-protocol"
 import { beadsDirFromDatabasePath } from "../lib/beadtrain-fs"
+import { type RegistryEntry, resolveBdDbPath } from "../lib/workspace-registry"
 
 const defaultWriter = (line: string): void => {
   process.stderr.write(line)
@@ -57,6 +58,37 @@ export async function restartWorkspaceSubscriptions(workspacePath: string): Prom
     }
   }
   if (failures.length > 0) throw failures[0]
+}
+
+/**
+ * Stop every subscription watching a workspace that is being removed
+ * (beadbox-wja). The client moves its subscription off a removed workspace;
+ * this is the sidecar-side guarantee, so a server-mode poll loop can never
+ * outlive its workspace's registration. Accepts every spelling the entry can
+ * take (the .beads dir, a file inside it, a server:// URI).
+ */
+/** Every path a registry entry can be subscribed under, plus any the caller used. */
+export function registeredPaths(entry: RegistryEntry, ...also: string[]): string[] {
+  const paths = [...also]
+  if (entry.local) paths.push(entry.local.path)
+  try {
+    paths.push(resolveBdDbPath(entry))
+  } catch {
+    /* an entry with neither a local path nor a server has no other spelling */
+  }
+  return paths
+}
+
+export async function stopWorkspaceSubscriptions(workspacePaths: string[]): Promise<void> {
+  const targets = new Set(workspacePaths.map((p) => beadsDirFromDatabasePath(p) ?? p))
+  // Snapshot: stop() mutates state while this loop awaits.
+  for (const [id, path] of [...state.paths]) {
+    if (!targets.has(beadsDirFromDatabasePath(path) ?? path)) continue
+    state.paths.delete(id)
+    const detector = state.detectors.get(id)
+    state.detectors.delete(id)
+    await detector?.stop().catch(() => {})
+  }
 }
 
 export function _setWriter(fn: (line: string) => void): void {

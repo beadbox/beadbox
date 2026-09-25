@@ -372,7 +372,12 @@ export function useChangeSubscription(
   }, [])
 
   useEffect(() => {
-    if (!workspacePath || !runtimeCheck()) return
+    // beadbox-wja: no workspace, no subscription, so nothing can be paused.
+    if (!workspacePath) {
+      if (liveUpdatesPaused) setLiveUpdatesPaused(false, null)
+      return
+    }
+    if (!runtimeCheck()) return
 
     // beadbox-01f.2: a pause belongs to one workspace.
     if (liveUpdatesPaused && pausedWorkspace !== workspacePath) setLiveUpdatesPaused(false, null)

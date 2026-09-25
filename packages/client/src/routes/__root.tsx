@@ -105,16 +105,18 @@ function RootLayout() {
 // clearWorkspaceCookie on a module-scoped EventTarget (workspace-cookie.ts).
 export function ChangeSubscriptionMount() {
   const { workspaces } = useWorkspaceGate()
-  // Persist last-resolved active workspace path so a transient empty
-  // workspaces array (e.g. mid-refresh) doesn't cause the subscription
-  // to flap.
+  // The active workspace's path; null when there is no workspace.
   const [activePath, setActivePath] = useState<string | null>(null)
   useEffect(() => {
     const resolve = () => {
       const cookieId = getWorkspaceCookie()
       const cookieMatch = cookieId ? workspaces.find((w) => w.id === cookieId) : undefined
       const next = cookieMatch?.databasePath ?? workspaces[0]?.databasePath ?? null
-      if (next) setActivePath(next)
+      // beadbox-wja: follow a null too. Holding the last path after its
+      // workspace was removed kept that workspace's subscription (and its
+      // server-mode poll loop) alive. The gate's list is only ever replaced
+      // wholesale, never transiently emptied, so there is no flap to guard.
+      setActivePath(next)
     }
     resolve()
     return subscribeWorkspaceCookie(resolve)
