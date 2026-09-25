@@ -1304,9 +1304,9 @@ export async function getChangedBeadIds(since: string, options: BdOptions = {}):
 //
 // bd renamed the target column: bd 1.0.x stores it as depends_on_id, bd 1.2.x as
 // depends_on_issue_id (alongside depends_on_wisp_id / depends_on_external for
-// targets that are not issues). Beadbox supports both ends of that range
-// (MIN_BD_VERSION), so the query is tried against the current schema first and
-// the legacy one second. A query can only succeed against the schema that has
+// targets that are not issues). The query is tried against the current schema
+// first and the legacy one second. bd 1.0.x is now below MIN_BD_VERSION and is
+// refused at startup, so the legacy fallback only matters until it is retired. A query can only succeed against the schema that has
 // its column, so "the first one that works" needs no error-text parsing -- which
 // matters, because a failed `bd sql` reports the Dolt message on stdout, and that
 // text does not survive into the thrown error.

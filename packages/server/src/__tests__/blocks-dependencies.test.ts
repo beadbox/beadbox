@@ -43,7 +43,7 @@ const BD_1_2 = `case "$*" in
   *) printf '{"error":"column \\\\"depends_on_id\\\\" could not be found"}\\n'; exit 1 ;;
 esac`
 
-// bd 1.0.x (MIN_BD_VERSION): only depends_on_id exists.
+// bd 1.0.x (below MIN_BD_VERSION since beadbox-piv): only depends_on_id exists.
 const BD_1_0 = `case "$*" in
   *depends_on_issue_id*) printf '{"error":"column \\\\"depends_on_issue_id\\\\" could not be found"}\\n'; exit 1 ;;
   *depends_on_id*) printf '[{"issue_id":"task-a","depends_on_id":"task-b"}]\\n' ;;
@@ -59,7 +59,7 @@ test("server mode returns a task's blockers from the Beads dependency schema", a
 
 // The case the original fix missed: querying only the new column broke every
 // workspace on bd 1.0.x, silently, because failure used to read as "no blockers".
-test("bd 1.0.x (MIN_BD_VERSION) still resolves blockers via the legacy column", async () => {
+test("bd 1.0.x (legacy schema) still resolves blockers via the legacy column", async () => {
   const { beadsDir } = await workspace(BD_1_0)
   const result = await getAllBlocksDependencies({ db: beadsDir })
   expect(result.status).toBe("ok")

@@ -463,6 +463,7 @@ function ErrorScreen({ error, platform, onRetry, onRemoveWorkspace }: ErrorScree
   const [retrying, setRetrying] = useState(false)
   const [removing, setRemoving] = useState(false)
   const retryRef = useRef<HTMLButtonElement>(null)
+  const isMac = platform === "darwin"
   const isWindows = platform === "win32"
   const isLinux = platform === "linux"
 
@@ -523,6 +524,7 @@ function ErrorScreen({ error, platform, onRetry, onRemoveWorkspace }: ErrorScree
 
         <ErrorGuidance
           error={error}
+          isMac={isMac}
           isWindows={isWindows}
           isLinux={isLinux}
           onRetry={handleRetry}
@@ -630,70 +632,51 @@ function ErrorScreen({ error, platform, onRetry, onRemoveWorkspace }: ErrorScree
 // ---------------------------------------------------------------------------
 
 interface PlatformFlags {
+  isMac: boolean
   isWindows: boolean
   isLinux: boolean
 }
 
-function BdInstallInstructions({ isWindows, isLinux }: PlatformFlags) {
-  if (isWindows) {
-    return (
-      <div className="flex justify-center mb-2">
-        <a
-          href="https://github.com/steveyegge/beads/releases/latest"
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-medium",
-            "bg-muted/50 border border-border text-foreground hover:bg-accent",
-            "transition-colors",
-          )}
-        >
-          Download bd for Windows
-          <ExternalLink className="h-3.5 w-3.5" />
-        </a>
-      </div>
-    )
-  }
-  if (isLinux) {
-    return (
-      <CopyableCommand
-        command="go install github.com/steveyegge/beads/cmd/bd@latest"
-        className="mb-3"
-      />
-    )
-  }
-  return <CopyableCommand command="brew install beads" className="mb-3" />
+// beads' documented embedded-capable go install (docs/getting-started/installation.md):
+// the module path is still github.com/steveyegge/beads, and gms_pure_go avoids ICU.
+const BD_GO_INSTALL =
+  "CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest"
+
+// brew is macOS-only: it renders solely inside an explicit isMac branch, never
+// as the fall-through. Windows and any unrecognised platform get the releases
+// page. (This component has regressed four times by defaulting to brew.)
+function BdReleasesLink({ label }: { label: string }) {
+  return (
+    <div className="flex justify-center mb-2">
+      <a
+        href="https://github.com/steveyegge/beads/releases/latest"
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(
+          "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-medium",
+          "bg-muted/50 border border-border text-foreground hover:bg-accent",
+          "transition-colors",
+        )}
+      >
+        {label}
+        <ExternalLink className="h-3.5 w-3.5" />
+      </a>
+    </div>
+  )
 }
 
-function BdUpgradeInstructions({ isWindows, isLinux }: PlatformFlags) {
-  if (isWindows) {
-    return (
-      <div className="flex justify-center mb-2">
-        <a
-          href="https://github.com/steveyegge/beads/releases/latest"
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-medium",
-            "bg-muted/50 border border-border text-foreground hover:bg-accent",
-            "transition-colors",
-          )}
-        >
-          Download latest bd for Windows
-          <ExternalLink className="h-3.5 w-3.5" />
-        </a>
-      </div>
-    )
-  }
-  if (isLinux) {
-    return (
-      <CopyableCommand
-        command="go install github.com/steveyegge/beads/cmd/bd@latest"
-        className="mb-3"
-      />
-    )
-  }
-  return <CopyableCommand command="brew upgrade beads" className="mb-3" />
+function BdInstallInstructions({ isMac, isWindows, isLinux }: PlatformFlags) {
+  if (isMac) return <CopyableCommand command="brew install beads" className="mb-3" />
+  if (isLinux) return <CopyableCommand command={BD_GO_INSTALL} className="mb-3" />
+  return <BdReleasesLink label={isWindows ? "Download bd for Windows" : "Download bd"} />
+}
+
+function BdUpgradeInstructions({ isMac, isWindows, isLinux }: PlatformFlags) {
+  if (isMac) return <CopyableCommand command="brew upgrade beads" className="mb-3" />
+  if (isLinux) return <CopyableCommand command={BD_GO_INSTALL} className="mb-3" />
+  return (
+    <BdReleasesLink label={isWindows ? "Download latest bd for Windows" : "Download latest bd"} />
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -838,16 +821,18 @@ function SchemaMigrationGuidance({
 
 function ErrorGuidance({
   error,
+  isMac,
   isWindows,
   isLinux,
   onRetry,
 }: {
   error: HealthError
+  isMac: boolean
   isWindows: boolean
   isLinux: boolean
   onRetry: () => void
 }) {
-  const platformFlags: PlatformFlags = { isWindows, isLinux }
+  const platformFlags: PlatformFlags = { isMac, isWindows, isLinux }
 
   switch (error.kind) {
     case "bd_missing":

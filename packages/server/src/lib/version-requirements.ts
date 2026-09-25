@@ -4,7 +4,7 @@
 // Version requirements for Beadbox compatibility checks.
 // Used by the Settings System section, incompatibility banner, and diagnostics.
 
-export const MIN_BD_VERSION = "1.0.1"
+export const MIN_BD_VERSION = "1.1.0"
 export const MIN_DOLT_VERSION = "1.0.0"
 export const RECOMMENDED_DOLT_VERSION = "1.82.0"
 
@@ -157,7 +157,7 @@ function getUpgradeCommand(tool: "bd" | "dolt", platform: string): string {
   }
   if (platform === "linux") {
     return tool === "bd"
-      ? "go install github.com/beadbox/beads/cmd/bd@latest"
+      ? "CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest"
       : "go install github.com/dolthub/dolt/go/cmd/dolt@latest"
   }
   // win32 and anything else
