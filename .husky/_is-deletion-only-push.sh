@@ -19,11 +19,18 @@
 # the top of the hook body" anchor.
 ALL_DELETIONS=true
 ANY_SPECS=false
+# "<remote sha> <local sha>" per pushed ref, for scripts/prepush-tests.sh,
+# which picks the related tests from what the push adds (beadbox-gxr).
+# stdin can only be read once, so it is recorded here.
+PUSH_SPECS=""
 while IFS=' ' read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
   ANY_SPECS=true
+  PUSH_SPECS="${PUSH_SPECS}${REMOTE_SHA} ${LOCAL_SHA}
+"
   if [ "$LOCAL_SHA" != "0000000000000000000000000000000000000000" ]; then
     ALL_DELETIONS=false
   fi
 done
 export ALL_DELETIONS
 export ANY_SPECS
+export PUSH_SPECS

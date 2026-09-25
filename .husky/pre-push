@@ -41,6 +41,11 @@ bun run lint
 bun --cwd=packages/server run typecheck
 bun --cwd=packages/client run typecheck
 
-# 3. Existing bb-y0me side-effect lint + the test suite
+# 3. Existing bb-y0me side-effect lint
 python3 src-tauri/scripts/lint-test-side-effects.py
-bun run test
+
+# 4. Tests related to what this push adds, not the full suite (beadbox-gxr):
+#    bun test --changed=<remote sha>, sharded, plus the security suite; the
+#    FULL suite whenever the related set can't be trusted. CI Quality Gates
+#    runs the full suite on every push. Details in the script.
+bash scripts/prepush-tests.sh
