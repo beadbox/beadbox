@@ -31,13 +31,33 @@ export type RemoteApi = typeof serverHandlers
 const SIDECAR_NAME = "beadbox-sidecar"
 
 /**
+ * What the manager did about a missed deadline (beadbox-hia):
+ * - `restarting`: nothing answered, so the sidecar is being restarted (x3y);
+ * - `alive`: the sidecar answered other calls meanwhile, so only this call fails;
+ * - `budget`: too many deadline restarts recently, so it is not restarted again;
+ * - `counted`: below maxConsecutiveMisses, or the sidecar was already replaced.
+ */
+export type RpcDeadlineOutcome = "restarting" | "alive" | "budget" | "counted"
+
+/**
  * The sidecar did not answer within the client deadline. The process may be
- * alive but not reading its stdin, so the manager restarts it (beadbox-x3y).
+ * alive but not reading its stdin, so the manager may restart it (beadbox-x3y).
  */
 export class RpcDeadlineError extends Error {
-  constructor(deadlineMs: number) {
-    super(`The Beadbox sidecar did not respond within ${Math.round(deadlineMs / 1000)}s and is being restarted`)
+  readonly method: string
+  readonly outcome: RpcDeadlineOutcome
+  constructor(deadlineMs: number, method = "call", outcome: RpcDeadlineOutcome = "counted") {
+    const within = `rpc.${method}: the Beadbox sidecar did not respond within ${Math.round(deadlineMs / 1000)}s`
+    const why = {
+      restarting: " and is being restarted",
+      alive: "; it is answering other calls, so it is not being restarted",
+      budget: "; it has been restarted too often recently, so it is not being restarted again",
+      counted: "",
+    }[outcome]
+    super(within + why)
     this.name = "RpcDeadlineError"
+    this.method = method
+    this.outcome = outcome
   }
 }
 
@@ -128,6 +148,14 @@ interface SidecarManagerOptions {
   callDeadlineMs?: number
   /** Consecutive deadline misses that trigger a restart. */
   maxConsecutiveMisses?: number
+  /**
+   * Deadline restarts allowed inside `restartWindowMs`; past that, a miss
+   * fails its call without killing anything (beadbox-hia). The window must be
+   * much longer than the deadline, or misses spaced one deadline apart never
+   * fill it.
+   */
+  maxDeadlineRestarts?: number
+  restartWindowMs?: number
 }
 
 // Keep the exit listener alive across reconnects. Destroying kkrpc rejects
@@ -159,6 +187,8 @@ export function createSidecarManager(
     onConnectTimeoutMs = 5_000,
     callDeadlineMs = 45_000,
     maxConsecutiveMisses = 1,
+    maxDeadlineRestarts = 3,
+    restartWindowMs = 10 * 60_000,
   } = options
   let channelPromise: Promise<RemoteApi> | null = null
   let session: SidecarSession | null = null
@@ -167,6 +197,10 @@ export function createSidecarManager(
   let recentExits: number[] = []
   let resubscribeOnConnect = false
   let consecutiveMisses = 0
+  let deadlineRestarts: number[] = []
+  // Replies received on the current generation: a call that misses its
+  // deadline while this moved was not stuck behind a wedged process.
+  let replies = 0
   // A restart's kill must finish before the next spawn: the plugin refuses a
   // second process under a name that is still registered.
   let pendingKill: Promise<unknown> | null = null
@@ -187,6 +221,7 @@ export function createSidecarManager(
       .onExit(() => {
         generation++
         consecutiveMisses = 0
+        replies = 0
         const oldSession = session
         session = null
         channelPromise = null
@@ -254,6 +289,7 @@ export function createSidecarManager(
     if (generation !== expectedGeneration) return // already restarted or exited
     generation++
     consecutiveMisses = 0
+    replies = 0
     const oldSession = session
     session = null
     channelPromise = null
@@ -272,26 +308,66 @@ export function createSidecarManager(
     }
   }
 
+  // Decide what a missed deadline does. A miss counts only against the
+  // sidecar the call was sent to; a late miss from before a restart must not
+  // restart the new one. One slow RPC on a sidecar that answered other calls
+  // meanwhile is not a wedge, and past the budget a restart only feeds the
+  // loop it is meant to break (beadbox-hia).
+  function onDeadlineMiss(callGeneration: number, repliesAtStart: number): RpcDeadlineOutcome {
+    if (generation !== callGeneration) return "counted"
+    if (replies > repliesAtStart) return "alive"
+    consecutiveMisses++
+    if (consecutiveMisses < maxConsecutiveMisses) return "counted"
+    const at = now()
+    deadlineRestarts = deadlineRestarts.filter((t) => at - t < restartWindowMs)
+    if (deadlineRestarts.length >= maxDeadlineRestarts) return "budget"
+    deadlineRestarts.push(at)
+    restart(callGeneration)
+    return "restarting"
+  }
+
   // Run one call against the sidecar with a deadline covering the connect as
   // well, since a wedged process can also hang the channel handshake.
-  async function call<T>(invoke: (api: RemoteApi) => Promise<T>): Promise<T> {
+  async function call<T>(invoke: (api: RemoteApi) => Promise<T>, method = "call"): Promise<T> {
     const callGeneration = generation
+    const repliesAtStart = replies
+    const startedAt = Date.now()
+    // Any settled reply, error replies included, proves the sidecar reads
+    // its stdin. A destroyed session bumps the generation first, so its
+    // rejections are not counted.
+    const heard = () => {
+      if (generation === callGeneration) replies++
+    }
+    const missed = Symbol("deadline")
     let timer: ReturnType<typeof setTimeout> | undefined
-    const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new RpcDeadlineError(callDeadlineMs)), callDeadlineMs)
+    const deadline = new Promise<typeof missed>((resolve) => {
+      timer = setTimeout(() => resolve(missed), callDeadlineMs)
     })
     try {
-      const result = await Promise.race([getRemoteApi().then(invoke), deadline])
+      const answer = getRemoteApi().then((api) =>
+        invoke(api).then(
+          (result) => {
+            heard()
+            return result
+          },
+          (error: unknown) => {
+            heard()
+            throw error
+          },
+        ),
+      )
+      const result = await Promise.race([answer, deadline])
+      if (result === missed) {
+        answer.catch(() => {}) // settles later or with the destroyed session
+        const outcome = onDeadlineMiss(callGeneration, repliesAtStart)
+        const error = new RpcDeadlineError(callDeadlineMs, method, outcome)
+        console.warn(
+          `[rpc] deadline: ${method} after ${Date.now() - startedAt}ms (${outcome}): ${error.message}`,
+        )
+        throw error
+      }
       if (generation === callGeneration) consecutiveMisses = 0
       return result
-    } catch (error) {
-      // A miss counts only against the sidecar the call was sent to; a late
-      // miss from before a restart must not restart the new one.
-      if (error instanceof RpcDeadlineError && generation === callGeneration) {
-        consecutiveMisses++
-        if (consecutiveMisses >= maxConsecutiveMisses) restart(callGeneration)
-      }
-      throw error
     } finally {
       clearTimeout(timer)
     }
@@ -354,7 +430,6 @@ const sidecarManager = createSidecarManager(
   SIDECAR_MANAGER_OPTIONS,
 )
 
-
 /**
  * Build a Proxy that routes `rpc.<namespace>.<method>(...args)` to the
  * lazy-resolved kkrpc remote API. The Proxy is what gives us namespace.method
@@ -381,7 +456,7 @@ function buildTauriRpc(): RemoteApi {
                 const fn = namespace[prop]
                 if (typeof fn !== "function") throw new RpcUnavailableError(`${ns}.${prop}`)
                 return fn(...args)
-              })
+              }, `${ns}.${prop}`)
               // bb-ck7j: emit Commands-tab entry with source="app". Skip the
               // "console" namespace — handleExecuteCommand emits richer
               // entries (with stdout + source="console") for typed commands.

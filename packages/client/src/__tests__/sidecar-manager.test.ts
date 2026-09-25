@@ -221,6 +221,8 @@ function aliveRuntime() {
               if (mode === "slow") return new Promise((r) => setTimeout(() => r(`slow pong from ${session}`), 20))
               return new Promise((_, reject) => pendingRejects.add(reject))
             },
+            // One RPC that never answers while the rest of the API does.
+            stuck: () => new Promise((_, reject) => pendingRejects.add(reject)),
           },
         } as unknown as RemoteApi,
         destroy: () => {
@@ -352,4 +354,67 @@ test("restart() on demand tears down the session and the next call reconnects", 
   expect(sidecar.counts()).toEqual({ spawns: 1, kills: 1, destroyed: 1 })
   expect(resubscribes).toBe(1)
   expect(await manager.call(ping)).toBe("pong from sidecar 2")
+})
+
+// ── Deadline restarts must be bounded (beadbox-hia) ─────────────────────────
+
+const stuck = (api: RemoteApi) => (api as unknown as { health: { stuck: () => Promise<string> } }).health.stuck()
+
+test("a call that misses the deadline every ~50s stops restarting at the budget", async () => {
+  const sidecar = aliveRuntime()
+  let clock = 0
+  const manager = createSidecarManager(sidecar.runtime, () => {}, { callDeadlineMs: 20, now: () => clock })
+  sidecar.mode = "wedged"
+  for (let i = 0; i < 10; i++) {
+    await expect(manager.call(ping, "health.ping")).rejects.toBeInstanceOf(RpcDeadlineError)
+    clock += 50_000
+  }
+  // 3/60s could never fill at this spacing, and the budget gated nothing.
+  expect(sidecar.counts().kills).toBe(3)
+})
+
+test("the deadline budget slides: a sidecar wedged later is still recovered", async () => {
+  const sidecar = aliveRuntime()
+  let clock = 0
+  const manager = createSidecarManager(sidecar.runtime, () => {}, { callDeadlineMs: 20, now: () => clock })
+  sidecar.mode = "wedged"
+  for (let i = 0; i < 4; i++) await expect(manager.call(ping)).rejects.toBeInstanceOf(RpcDeadlineError)
+  expect(sidecar.counts().kills).toBe(3)
+  clock += 10 * 60_000 + 1
+  await expect(manager.call(ping)).rejects.toBeInstanceOf(RpcDeadlineError)
+  expect(sidecar.counts().kills).toBe(4)
+  sidecar.mode = "answer"
+  expect(await manager.call(ping)).toBe("pong from sidecar 5")
+})
+
+test("one slow RPC does not restart a sidecar that is answering other calls", async () => {
+  const sidecar = aliveRuntime()
+  let resubscribes = 0
+  const manager = createSidecarManager(sidecar.runtime, () => resubscribes++, { callDeadlineMs: 80 })
+  await manager.call(ping)
+  const slow = manager.call(stuck, "health.stuck")
+  await new Promise((r) => setTimeout(r, 10))
+  expect(await manager.call(ping)).toBe("pong from sidecar 1")
+  await expect(slow).rejects.toBeInstanceOf(RpcDeadlineError)
+  expect(sidecar.counts()).toEqual({ spawns: 1, kills: 0, destroyed: 0 })
+  expect(resubscribes).toBe(0)
+  expect(await manager.call(ping)).toBe("pong from sidecar 1")
+})
+
+test("the deadline error and its warning name the RPC that missed it", async () => {
+  const sidecar = aliveRuntime()
+  const manager = createSidecarManager(sidecar.runtime, () => {}, { callDeadlineMs: 20 })
+  sidecar.mode = "wedged"
+  const warnings: string[] = []
+  const original = console.warn
+  console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "))
+  try {
+    const error = await manager.call(ping, "beads.list").catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(RpcDeadlineError)
+    expect((error as RpcDeadlineError).method).toBe("beads.list")
+    expect((error as Error).message).toContain("rpc.beads.list")
+  } finally {
+    console.warn = original
+  }
+  expect(warnings.some((w) => w.includes("beads.list") && w.includes("restarting"))).toBe(true)
 })
