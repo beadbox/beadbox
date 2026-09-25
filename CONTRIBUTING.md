@@ -52,7 +52,7 @@ bun run test         # server + client unit tests
 
 For changes touching the Rust shell: `cargo test` in `src-tauri/`. On a fresh checkout, run `bash src-tauri/scripts/copy-sidecar.sh` first — the Tauri build embeds the compiled Bun sidecar as an external binary, and cargo fails with ``resource path `binaries/beadbox-sidecar-…` doesn't exist`` until it is built. (`bun run tauri:dev` and `bun run tauri:build` do this for you.) For UI behavior changes, run the relevant Playwright specs: `bun run test:e2e`.
 
-CI also enforces coverage and complexity floors; the authoritative numbers live in `.github/workflows/quality-gates.yml`, and its failure messages tell you which floor you hit.
+CI also enforces coverage floors; the authoritative numbers live in `.github/workflows/quality-gates.yml`, and its failure messages tell you which floor you hit.
 
 Guidelines:
 

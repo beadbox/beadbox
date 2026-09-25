@@ -4,27 +4,23 @@ name: Install Smoke
 #
 # Downloads the signed release artifact for each platform, installs it on
 # that platform's GitHub-hosted runner, launches the bundled app, and runs
-# the 4 GUI gates from src-tauri/scripts/p4-verification-rubric.md (the
-# durable rubric codified by bb-un5c.5 / P4.5):
+# the GUI gates from src-tauri/scripts/p4-verification-rubric.md (the
+# durable rubric codified by bb-un5c.5 / P4.5). Gate numbers follow the
+# rubric:
 #
 #   Gate 1 — capability-error-zero (parse Tauri log file for permission/
 #            capability errors; assert count = 0)
-#   Gate 2 — WKWebView CSS visual diff vs reference Chromium screenshot
-#            (macOS only; Linux/Windows have no WKWebView)
 #   Gate 3 — 1000-event subscription burst (bd create loop; assert all
 #            events arrive in order within 30s)
 #   Gate 4 — clean process exit within 500ms (SIGTERM / WM_CLOSE; ps grep
 #            shows no orphans)
 #
-# Per the bead AC + bead's "iterate" license: this is the workflow's
-# initial commit. First runs will surface CI environment issues; follow-up
-# commits land small fix-ups. v0.25.0-rc.final cuts when this workflow is
-# green AND has run successfully twice in a row.
-#
-# Reference screenshot for Gate 2 (src-tauri/scripts/reference-screenshots/
-# chromium-home.png) is generated on a maintainer's workstation per the
-# README; until it lands, Gate 2 skips with a warning rather than failing
-# hard, so Gates 1+3+4 still gate the bead on every run.
+# Platforms: macOS ARM64 runs on every release. Windows is present but
+# disabled (`if: false`, pending bb-m4h2). There is no Linux job: it was
+# opt-in only and never wired to launch the .deb, so it was deleted
+# (beadbox-clu, from beadbox-3vx). Gate 2 (a WKWebView-vs-Chromium visual
+# diff) was deleted with it: its reference screenshot never landed, so it
+# skipped on every run and never checked anything.
 #
 # Security note: every shell `run:` block reads tag-derived data via the
 # job-level env: block (TAG=$SMOKE_TAG / $env:TAG) — never via direct
@@ -45,10 +41,6 @@ on:
         default: true
       smoke_macos_x64:
         description: "Smoke macOS x64 (disabled: no runners; mirrors release.yml convention)"
-        type: boolean
-        default: false
-      smoke_linux:
-        description: "Smoke Linux (disabled in v0.25: AppImage dropped per bb-ak1x; deb-launch path not yet wired — restore in v0.26)"
         type: boolean
         default: false
       smoke_windows:
@@ -125,8 +117,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   # ─────────────────────────────────────────────────────────────────────
-  # macOS ARM64 — capability log, WKWebView CSS diff, 1000-event burst,
-  # clean exit.
+  # macOS ARM64 — capability log, 1000-event burst, clean exit.
   # ─────────────────────────────────────────────────────────────────────
   smoke-macos-arm64:
     needs: resolve-tag
@@ -221,23 +212,6 @@ jobs:
             exit 1
           fi
 
-      - name: "Gate 2 — WKWebView CSS visual diff vs Chromium reference"
-        run: |
-          set -euo pipefail
-          REF="src-tauri/scripts/reference-screenshots/chromium-home.png"
-          if [ ! -f "$REF" ]; then
-            echo "::warning::Gate 2 SKIPPED — reference screenshot $REF not present yet. See src-tauri/scripts/reference-screenshots/README.md for generation instructions."
-            exit 0
-          fi
-          OUT_DIR="_smoke/wkwebview-screenshots"
-          mkdir -p "$OUT_DIR"
-          bash src-tauri/scripts/install-smoke-helpers/safari-attach.sh "$OUT_DIR/wkwebview-home.png"
-          bash src-tauri/scripts/install-smoke-helpers/pixel-diff.sh "$REF" "$OUT_DIR/wkwebview-home.png" "$OUT_DIR/diff.png" > "$OUT_DIR/diff-percent.txt"
-          DIFF_PCT=$(cat "$OUT_DIR/diff-percent.txt")
-          echo "Pixel diff: $DIFF_PCT %"
-          # Threshold: 1% per bead AC.
-          awk -v p="$DIFF_PCT" 'BEGIN { exit (p+0 < 1.0) ? 0 : 1 }' || { echo "::error::Gate 2 failed — pixel diff $DIFF_PCT% exceeds 1% threshold"; exit 1; }
-
       - name: "Gate 3 — 1000-event subscription burst"
         run: |
           set -euo pipefail
@@ -273,145 +247,11 @@ jobs:
           name: smoke-macos-arm64-logs
           path: |
             ~/Library/Logs/Beadbox/
-            _smoke/wkwebview-screenshots/
           if-no-files-found: warn
           retention-days: 14
-
-  # ─────────────────────────────────────────────────────────────────────
-  # Linux x86_64 — capability log, 1000-event burst, clean exit.
-  # No Gate 2 (no WKWebView on Linux).
-  # ─────────────────────────────────────────────────────────────────────
-  smoke-linux:
-    needs: resolve-tag
-    # bb-ak1x: disabled in v0.25 (AppImage dropped; deb-launch path not yet
-    # wired). Opt-in only via workflow_dispatch with smoke_linux=true. Restore
-    # default-on when AppImage support is restored or deb-launch is wired.
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.smoke_linux == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    env:
-      TAG: ${{ needs.resolve-tag.outputs.tag }}
-    steps:
-      - name: Sparse checkout (helpers only)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          sparse-checkout: |
-            src-tauri/scripts
-          sparse-checkout-cone-mode: false
-
-      - name: Install bd CLI
-        # Hosted runners have no bd. There is no apt package, so take the
-        # release tarball. Version pinned deliberately (public-repo supply-chain
-        # hygiene) — bump BD_VERSION to move it.
-        env:
-          BD_VERSION: "1.2.2"
-        run: |
-          set -euo pipefail
-          curl -fsSL --proto '=https' --tlsv1.2 \
-            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_amd64.tar.gz" \
-            -o /tmp/beads.tar.gz
-          tar xzf /tmp/beads.tar.gz -C /tmp
-          sudo install -m 0755 "$(find /tmp -maxdepth 2 -name bd -type f | head -1)" /usr/local/bin/bd
-          bd version
-
-      - name: Install xvfb (headless launch)
-        # The app is a GUI binary; ubuntu-latest has no X server.
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb
-          command -v xvfb-run
-
-      - name: Download release .AppImage
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p _smoke
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.AppImage' --dir _smoke
-          chmod +x _smoke/*.AppImage
-          ls -la _smoke
-
-      - name: Launch app (headless via xvfb)
-        run: |
-          set -euo pipefail
-          LOG_DIR="$HOME/.local/share/Beadbox/logs"
-          rm -rf "$HOME/.local/share/Beadbox"
-          mkdir -p "$LOG_DIR"
-          # xvfb-run gives the AppImage a virtual display; launch in
-          # background so subsequent steps can interact.
-          nohup xvfb-run -a "$(ls _smoke/*.AppImage | head -1)" >_smoke/app.stdout.log 2>_smoke/app.stderr.log &
-          echo $! > _smoke/app.pid
-          sleep 6
-          # Sanity: process must be alive.
-          if ! kill -0 "$(cat _smoke/app.pid)" 2>/dev/null; then
-            echo "::error::Beadbox process exited during boot"
-            cat _smoke/app.stderr.log || true
-            exit 1
-          fi
-
-      - name: "Gate 1 — capability-error-zero"
-        run: |
-          set -euo pipefail
-          LOG_DIR="$HOME/.local/share/Beadbox/logs"
-          # Tauri may also write to stderr; check both.
-          ALL_LOGS="$LOG_DIR _smoke/app.stderr.log _smoke/app.stdout.log"
-          # See the macOS Gate 1 note: the `|| true` belongs inside the pipeline,
-          # or grep's no-match exit trips pipefail and the fallback appends a
-          # second line rather than replacing the value.
-          MATCHES=$( { grep -riE 'permission denied|not allowed|capability|permission' $ALL_LOGS 2>/dev/null || true; } | wc -l | tr -d ' ' )
-          echo "Capability error matches: $MATCHES"
-          if [ "$MATCHES" != "0" ]; then
-            echo "::error::Gate 1 failed — $MATCHES capability/permission log lines (expected 0)"
-            grep -riE 'permission denied|not allowed|capability|permission' $ALL_LOGS || true
-            exit 1
-          fi
-
-      - name: "Gate 2 — WKWebView CSS diff (skipped, no WKWebView on Linux)"
-        run: echo "::notice::Gate 2 not applicable on Linux (uses webkit2gtk; not WKWebView). Per addendum 5, the WKWebView diff is macOS-only."
-
-      - name: "Gate 3 — 1000-event subscription burst"
-        run: |
-          set -euo pipefail
-          bash src-tauri/scripts/install-smoke-helpers/burst-bd-create.sh
-
-      - name: "Gate 4 — clean process exit within 500ms"
-        run: |
-          set -euo pipefail
-          PID="$(cat _smoke/app.pid 2>/dev/null || echo)"
-          [ -n "$PID" ] && kill -TERM "$PID" 2>/dev/null || true
-          pkill -TERM -f "beadbox-sidecar" 2>/dev/null || true
-          sleep 0.5
-          # Same pipefail defect as Gate 1, and here the CLEAN case is the one that
-          # broke: pgrep exits 1 when nothing matches — i.e. when there are no
-          # orphaned processes, which is exactly what this gate wants to see.
-          STRAGGLERS=$( { pgrep -f "Beadbox|beadbox-sidecar" || true; } | wc -l | tr -d ' ' )
-          if [ "$STRAGGLERS" != "0" ]; then
-            echo "::error::Gate 4 failed — $STRAGGLERS process(es) still running after 500ms"
-            ps aux | grep -E "Beadbox|beadbox-sidecar" | grep -v grep || true
-            pkill -KILL -f "Beadbox" 2>/dev/null || true
-            pkill -KILL -f "beadbox-sidecar" 2>/dev/null || true
-            exit 1
-          fi
-
-      - name: Upload logs (always)
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: smoke-linux-logs
-          path: |
-            ~/.local/share/Beadbox/logs/
-            _smoke/app.stdout.log
-            _smoke/app.stderr.log
-          if-no-files-found: warn
-          retention-days: 14
-
 
   # ─────────────────────────────────────────────────────────────────────
   # Windows x86_64 — capability log, 1000-event burst, clean exit.
-  # No Gate 2 (no WKWebView on Windows; uses WebView2/Chromium).
   # ─────────────────────────────────────────────────────────────────────
   smoke-windows:
     needs: resolve-tag
@@ -494,10 +334,6 @@ jobs:
             exit 1
           }
 
-      - name: "Gate 2 — WKWebView CSS diff (skipped, no WKWebView on Windows)"
-        shell: pwsh
-        run: Write-Host "::notice::Gate 2 not applicable on Windows (uses WebView2/Chromium-based). Per addendum 5, the WKWebView diff is macOS-only."
-
       - name: "Gate 3 — 1000-event subscription burst"
         shell: bash
         run: |
@@ -536,7 +372,7 @@ jobs:
   # acceptance criterion: green here on two runs in a row = bb-x6lg.6 done.
   # ─────────────────────────────────────────────────────────────────────
   install-smoke:
-    needs: [resolve-tag, smoke-macos-arm64, smoke-linux, smoke-windows]
+    needs: [resolve-tag, smoke-macos-arm64, smoke-windows]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -545,7 +381,6 @@ jobs:
         env:
           RESOLVE: ${{ needs.resolve-tag.result }}
           MACOS: ${{ needs.smoke-macos-arm64.result }}
-          LINUX: ${{ needs.smoke-linux.result }}
           WINDOWS: ${{ needs.smoke-windows.result }}
           EVENT: ${{ github.event_name }}
           INPUT_MACOS: ${{ github.event.inputs.smoke_macos_arm64 }}
@@ -553,7 +388,6 @@ jobs:
           set -euo pipefail
           echo "resolve-tag: $RESOLVE"
           echo "macos-arm64: $MACOS"
-          echo "linux:       $LINUX"
           echo "windows:     $WINDOWS"
           echo "event:       $EVENT"
 
@@ -592,10 +426,9 @@ jobs:
               ;;
           esac
 
-          # Linux and Windows may legitimately skip: smoke_linux defaults off
-          # and smoke-windows is `if: false` pending bb-m4h2. A FAILURE in
-          # either is still fatal.
-          for name in LINUX WINDOWS; do
+          # Windows may legitimately skip: smoke-windows is `if: false` pending
+          # bb-m4h2. A FAILURE is still fatal.
+          for name in WINDOWS; do
             eval "r=\${$name}"
             case "$r" in
               success|skipped) ;;

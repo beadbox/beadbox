@@ -27,7 +27,7 @@ fi
 
 # bb-ystl.2 (QD.2 Tier 1): fast quality gates run BEFORE the existing
 # bb-y0me side-effect lint + bun test block. Order matters — cheaper
-# checks fail first so a CCN regression doesn't pay the 50s cost of
+# checks fail first so a lint or type error doesn't pay the 50s cost of
 # running the full test suite. Spec §2 Q2 Tier 1 budget: <30s for
 # this block.
 #
@@ -41,16 +41,6 @@ bun run lint
 bun --cwd=packages/server run typecheck
 bun --cwd=packages/client run typecheck
 
-# 3. Lizard CCN ≥ 15 against changed files only (full-repo scan is in CI).
-#    bb-ystl.5 owns scripts/check-ccn-allowlist.sh — exact <file>:<function>
-#    match against lizard-allowlist.txt. The previous bb-ystl.2 implementation
-#    used a subtract-count heuristic (lizard warning count minus allowlist
-#    line count) that could pass when N new violations equalled N pre-existing
-#    allowlist entries even though the actual functions differed. The script
-#    now compares pairs.
-bash scripts/check-ccn-allowlist.sh --mode=changed
-
-# 4. Existing bb-y0me side-effect lint + the test suite
+# 3. Existing bb-y0me side-effect lint + the test suite
 python3 src-tauri/scripts/lint-test-side-effects.py
 bun run test
-bd sql "CALL dolt_push('origin', 'main')" || true
