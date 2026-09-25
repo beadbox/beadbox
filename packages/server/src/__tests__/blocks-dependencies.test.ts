@@ -1,8 +1,20 @@
+// Blocked-by for the epic tree comes from `bd list --json` (beadbox-01f.5).
+//
+// It used to be raw SQL against the dependencies table, which broke twice:
+// bd 1.2 renamed depends_on_id to depends_on_issue_id, and bd refuses `bd sql`
+// in embedded mode (the `bd init` default), so most workspaces never saw a
+// blocker. `bd list --json` carries each issue's dependencies with bd's own
+// normalized `depends_on_id` in both modes (checked at bd 1.1.0 and 1.2.2).
+// The schema-probing tests contributed with the first fix (PR #43, Sergey
+// Belov) covered that SQL path and went with it; the cases they guarded
+// (failure is an error, malformed output is an error, targetless edges are
+// skipped) carry over below.
+
 import { afterEach, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { __resetBdPathCache, __resetBlocksSchemaCache, getAllBlocksDependencies } from "../lib/bd"
+import { __resetBdPathCache, getAllBlocksDependencies } from "../lib/bd"
 
 const originalBdPath = process.env.BD_PATH
 let root: string | undefined
@@ -11,17 +23,15 @@ afterEach(async () => {
   if (originalBdPath === undefined) delete process.env.BD_PATH
   else process.env.BD_PATH = originalBdPath
   __resetBdPathCache()
-  __resetBlocksSchemaCache()
   if (root) await rm(root, { recursive: true, force: true })
   root = undefined
 })
 
 /**
- * A server-mode workspace whose `bd` is a shell script standing in for a
- * specific bd version's SQL surface. Every invocation's args are appended to
- * calls.log so tests can count how many queries were actually issued.
+ * A workspace whose `bd` is a shell script. Every invocation's args are
+ * appended to calls.log so a test can see which bd commands actually ran.
  */
-async function workspace(body: string, mode = "server"): Promise<{ beadsDir: string; calls: () => Promise<string[]> }> {
+async function workspace(body: string, mode: "server" | "embedded"): Promise<{ beadsDir: string; calls: () => Promise<string[]> }> {
   root = await mkdtemp(join(tmpdir(), "beadbox-blocks-"))
   const beadsDir = join(root, ".beads")
   await mkdir(beadsDir)
@@ -37,72 +47,91 @@ async function workspace(body: string, mode = "server"): Promise<{ beadsDir: str
   }
 }
 
-// bd >= 1.2: the column is depends_on_issue_id; the old name is rejected.
-const BD_1_2 = `case "$*" in
-  *depends_on_issue_id*) printf '[{"issue_id":"task-a","depends_on_id":"task-b"}]\\n' ;;
-  *) printf '{"error":"column \\\\"depends_on_id\\\\" could not be found"}\\n'; exit 1 ;;
-esac`
+// `bd list --status all --limit 0 --flat --json`, captured from bd 1.2.2 on a
+// synthetic workspace: A (a child of epic E) is blocked by B and by C, and C is
+// closed. A's parent-child link is a dependency row too. D has no dependencies,
+// so bd omits the key.
+const BD_1_2_2_LIST = [
+  { id: "d122-cw8", title: "D", status: "open", issue_type: "task" },
+  { id: "d122-m7l", title: "C", status: "closed", issue_type: "task" },
+  { id: "d122-7k4", title: "B", status: "open", issue_type: "task" },
+  {
+    id: "d122-udr.1",
+    title: "A",
+    status: "open",
+    issue_type: "task",
+    parent: "d122-udr",
+    dependencies: [
+      { issue_id: "d122-udr.1", depends_on_id: "d122-udr", type: "parent-child", created_at: "2026-09-25T13:47:37Z", metadata: "{}" },
+      { issue_id: "d122-udr.1", depends_on_id: "d122-7k4", type: "blocks", created_at: "2026-09-25T13:47:42Z", metadata: "{}" },
+      { issue_id: "d122-udr.1", depends_on_id: "d122-m7l", type: "blocks", created_at: "2026-09-25T13:47:43Z", metadata: "{}" },
+    ],
+  },
+  { id: "d122-udr", title: "Epic E", status: "open", issue_type: "epic" },
+]
 
-// bd 1.0.x (below MIN_BD_VERSION since beadbox-piv): only depends_on_id exists.
-const BD_1_0 = `case "$*" in
-  *depends_on_issue_id*) printf '{"error":"column \\\\"depends_on_issue_id\\\\" could not be found"}\\n'; exit 1 ;;
-  *depends_on_id*) printf '[{"issue_id":"task-a","depends_on_id":"task-b"}]\\n' ;;
+function listing(issues: unknown): string {
+  // bd's global flags (--db ...) come before the subcommand.
+  return `case " $* " in
+  *" list "*) printf '%s\\n' '${JSON.stringify(issues)}' ;;
+  *) echo "unexpected: $*" >&2; exit 64 ;;
 esac`
+}
 
-// Contributed with the original fix (PR #43, Sergey Belov): the current schema.
-test("server mode returns a task's blockers from the Beads dependency schema", async () => {
-  const { beadsDir } = await workspace(BD_1_2)
+for (const mode of ["embedded", "server"] as const) {
+  test(`${mode} mode: blockers come from bd list, closed blockers included, parent-child excluded`, async () => {
+    const { beadsDir, calls } = await workspace(listing(BD_1_2_2_LIST), mode)
+    const result = await getAllBlocksDependencies({ db: beadsDir })
+    expect(result.status).toBe("ok")
+    if (result.status !== "ok") return
+    // Same set `bd show d122-udr.1` lists as blocks dependencies.
+    expect(result.map.get("d122-udr.1")).toEqual(["d122-7k4", "d122-m7l"])
+    expect([...result.map.keys()]).toEqual(["d122-udr.1"])
+    // One bd list call and no SQL: nothing here depends on table or column names.
+    const issued = await calls()
+    expect(issued).toHaveLength(1)
+    expect(` ${issued[0]} `).toContain(" list ")
+    expect(issued.some((c) => ` ${c} `.includes(" sql "))).toBe(false)
+  })
+}
+
+test("a workspace with no blocks dependencies is an ok empty map", async () => {
+  const { beadsDir } = await workspace(listing([{ id: "x-1", title: "X", status: "open", issue_type: "task" }]), "embedded")
   const result = await getAllBlocksDependencies({ db: beadsDir })
   expect(result.status).toBe("ok")
-  if (result.status === "ok") expect(result.map.get("task-a")).toEqual(["task-b"])
+  expect(result.status === "ok" && result.map.size).toBe(0)
 })
 
-// The case the original fix missed: querying only the new column broke every
-// workspace on bd 1.0.x, silently, because failure used to read as "no blockers".
-test("bd 1.0.x (legacy schema) still resolves blockers via the legacy column", async () => {
-  const { beadsDir } = await workspace(BD_1_0)
-  const result = await getAllBlocksDependencies({ db: beadsDir })
-  expect(result.status).toBe("ok")
-  if (result.status === "ok") expect(result.map.get("task-a")).toEqual(["task-b"])
-})
-
-// Without the cache, every load on 1.0.x would issue one failing query first and
-// put an error in the Dolt server log each time -- the symptom that found this bug.
-test("the working schema is remembered: a second load on bd 1.0.x issues one query, not two", async () => {
-  const { beadsDir, calls } = await workspace(BD_1_0)
-  await getAllBlocksDependencies({ db: beadsDir })
-  const afterFirst = (await calls()).length
-  await getAllBlocksDependencies({ db: beadsDir })
-  expect(afterFirst).toBe(2) // detection: new column fails, legacy succeeds
-  expect((await calls()).length - afterFirst).toBe(1)
-})
-
-// THE REGRESSION TEST FOR THE SWALLOW: a failed query must not look like "no blockers".
-test("a query that fails on every schema is an error, not an empty map", async () => {
-  const { beadsDir } = await workspace(`printf '{"error":"dolt is down"}\\n'; exit 1`)
+test("a failing bd list is an error, not an empty map", async () => {
+  const { beadsDir } = await workspace(`echo "Error: failed to open database" >&2; exit 1`, "embedded")
   const result = await getAllBlocksDependencies({ db: beadsDir })
   expect(result.status).toBe("error")
 })
 
 test("a non-array result is reported as an error rather than iterated", async () => {
-  const { beadsDir } = await workspace(`printf '{"unexpected":true}\\n'`)
+  const { beadsDir } = await workspace(listing({ error: "unexpected shape" }), "server")
   const result = await getAllBlocksDependencies({ db: beadsDir })
   expect(result.status).toBe("error")
 })
 
-test("embedded mode is 'unsupported', not an empty success", async () => {
-  const { beadsDir, calls } = await workspace(BD_1_2, "embedded")
-  const result = await getAllBlocksDependencies({ db: beadsDir })
-  expect(result.status).toBe("unsupported")
-  expect(await calls()).toEqual([]) // bd sql is never attempted there
-})
-
-// A blocks row whose target is a wisp or external ref has no issue id to show.
-test("rows without an issue target are skipped, not rendered as null", async () => {
+test("edges without a target are skipped, not rendered as a blank blocker", async () => {
   const { beadsDir } = await workspace(
-    `printf '[{"issue_id":"task-a","depends_on_id":"task-b"},{"issue_id":"task-a","depends_on_id":null}]\\n'`,
+    listing([
+      {
+        id: "y-1",
+        title: "Y",
+        status: "open",
+        issue_type: "task",
+        dependencies: [
+          { issue_id: "y-1", depends_on_id: "", type: "blocks" },
+          { issue_id: "y-1", type: "blocks" },
+          { issue_id: "y-1", depends_on_id: "y-2", type: "blocks" },
+        ],
+      },
+    ]),
+    "embedded",
   )
   const result = await getAllBlocksDependencies({ db: beadsDir })
   expect(result.status).toBe("ok")
-  if (result.status === "ok") expect(result.map.get("task-a")).toEqual(["task-b"])
+  expect(result.status === "ok" && result.map.get("y-1")).toEqual(["y-2"])
 })

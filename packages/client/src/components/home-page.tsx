@@ -501,6 +501,10 @@ function BeadsEpicsViewer() {
   // after the tree is replaced (the fresh tree from incrementalRefresh lacks
   // blockedBy).
   const blocksLoadIdRef = useRef(0)
+  // Set when the server could not compute blocked-by for this workspace, so the
+  // tree says so instead of reading as "nothing is blocked" (beadbox-01f.5).
+  const [blocksDegraded, setBlocksDegraded] = useState<{ dbPath: string; message: string } | null>(null)
+  const [blocksRetry, setBlocksRetry] = useState(0)
   const [epicEpoch, setEpicEpoch] = useState(0)
 
   useEffect(() => {
@@ -517,11 +521,14 @@ function BeadsEpicsViewer() {
 
     getBlocksDependencies(dbPath).then(({ blockedBy: blocksMap, degraded }) => {
       if (blocksLoadIdRef.current !== loadId) return // stale
-      // beadbox-01f.6: the server now says when blockedBy could not be computed
-      // (embedded mode, or a failed query) instead of returning an empty map that
-      // reads as "nothing is blocked". Surfacing it in the UI is a follow-up;
-      // until then it is at least visible in the devtools console.
-      if (degraded) console.warn(`[blocks] blocked-by unavailable (${degraded.reason}): ${degraded.message}`)
+      // The server says when blockedBy could not be computed instead of
+      // returning an empty map that reads as "nothing is blocked" (beadbox-01f.6).
+      if (degraded) {
+        console.warn(`[blocks] blocked-by unavailable (${degraded.reason}): ${degraded.message}`)
+        setBlocksDegraded({ dbPath, message: degraded.message })
+        return
+      }
+      setBlocksDegraded(null)
       if (Object.keys(blocksMap).length === 0) return
 
       setEpics((prev) => {
@@ -574,9 +581,14 @@ function BeadsEpicsViewer() {
         const patched = prev.map(patchEpic)
         return patched.some((e, i) => e !== prev[i]) ? patched : prev
       })
+    }).catch((error: unknown) => {
+      if (blocksLoadIdRef.current !== loadId) return // stale
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[blocks] blocked-by unavailable: ${message}`)
+      setBlocksDegraded({ dbPath, message })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- setEpics is a stable setState, epics.length tracks structural changes
-  }, [isLoading, currentWorkspace?.databasePath, epics.length, epicEpoch])
+  }, [isLoading, currentWorkspace?.databasePath, epics.length, epicEpoch, blocksRetry])
 
   // bb-pgb0.1: deleted ~130 lines of dead WebSocket-shim plumbing
   // (handleSSEChange + bdCmdHandlerRef + lifecycleHandlerRef +
@@ -878,6 +890,18 @@ function BeadsEpicsViewer() {
               className="shrink-0 rounded px-2 py-1 font-medium hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-60"
             >
               {typeCatalogRetrying ? "Retrying…" : "Retry"}
+            </button>
+          </div>
+        )}
+        {blocksDegraded && blocksDegraded.dbPath === currentWorkspace?.databasePath && (
+          <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+            <span>Blocked-by markers are unavailable: {blocksDegraded.message}. The tree does not show what is blocked.</span>
+            <button
+              type="button"
+              onClick={() => setBlocksRetry((n) => n + 1)}
+              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-amber-500/20"
+            >
+              Retry
             </button>
           </div>
         )}

@@ -39,13 +39,16 @@ describe("handlers/epics", () => {
     expect(cached.success).toBe(true)
   })
 
-  test("getBlocksDependencies returns blockedBy, and says so when it could not compute it", async () => {
+  // The fixture is a default `bd init` workspace, i.e. EMBEDDED mode, where bd
+  // refuses `bd sql`. Blocked-by comes from `bd list --json` now, so it must be
+  // computed here too, not reported as unsupported (beadbox-01f.5).
+  test("getBlocksDependencies returns the real blocks edges in a default (embedded) workspace", async () => {
+    await runBdInWorkspace(["dep", "add", ws.seedIds.test2, ws.seedIds.test3], ws.root)
     const r = await epics.getBlocksDependencies(ws.dbPath)
-    expect(typeof r.blockedBy).toBe("object")
-    expect(r.blockedBy).not.toBeNull()
-    // Either computed (no degraded marker) or explicitly degraded with a reason --
-    // never an empty map standing in for a failure (beadbox-01f.6).
-    if (r.degraded) expect(["unsupported", "error"]).toContain(r.degraded.reason)
+    expect(r.degraded).toBeUndefined()
+    expect(r.blockedBy[ws.seedIds.test2]).toEqual([ws.seedIds.test3])
+    // test1's parent-child link to epic1 is a dependency row too; it is not a blocker.
+    expect(r.blockedBy[ws.seedIds.test1]).toBeUndefined()
   })
 
   test("getBeadDetail returns Bead | null", async () => {

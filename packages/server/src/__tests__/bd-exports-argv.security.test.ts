@@ -46,7 +46,6 @@ const BD_SOURCE = join(dirname(import.meta.dir), "lib", "bd.ts")
 const NO_BD: Record<string, string> = {
   __resetBdVersionCache: "cache reset",
   __resetDbLocks: "cache reset",
-  __resetBlocksSchemaCache: "cache reset",
   __resetBdPathCache: "cache reset",
   getBdPath: "resolves a path; spawns nothing",
   stripBdWarnings: "string filter over bd's stderr",
@@ -275,7 +274,6 @@ async function runSlot(fn: ExportedFn, slot: string): Promise<RunResult> {
   bd.__resetBdPathCache()
   bd.__resetBdVersionCache()
   bd.__resetDbLocks()
-  bd.__resetBlocksSchemaCache()
 
   const args = fn.params.map((p) => build(p.shape, p.name, slot, db))
   const target = (bd as Record<string, unknown>)[fn.name] as (...a: unknown[]) => unknown

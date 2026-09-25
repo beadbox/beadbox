@@ -5,7 +5,6 @@ import { join } from "node:path"
 import {
   __resetBdPathCache,
   deleteComment,
-  getAllBlocksDependencies,
   getChangedBeadIds,
   getDataFingerprint,
 } from "../lib/bd"
@@ -41,7 +40,6 @@ case " $* " in *" --readonly "*) ;; *) exit 12 ;; esac
 case "$*" in
   *"HASHOF"*) echo '[{"h":"head-a","i":"2026-01-01","c":0}]' ;;
   *"updated_at >"*) echo '[{"id":"task-a"}]' ;;
-  *"FROM dependencies"*) echo '[{"issue_id":"task-a","depends_on_id":"task-b"}]' ;;
   *) exit 13 ;;
 esac
 `,
@@ -52,9 +50,8 @@ esac
 
   expect(await getDataFingerprint({ db: beadsDir })).toContain("head-a")
   expect(await getChangedBeadIds("2026-01-01T00:00:00Z", { db: beadsDir })).toEqual(["task-a"])
-  const blocks = await getAllBlocksDependencies({ db: beadsDir })
-  expect(blocks.status).toBe("ok")
-  expect(blocks.status === "ok" && blocks.map.get("task-a")).toEqual(["task-b"])
+  // Blocked-by no longer runs SQL at all: it reads `bd list --json` (beadbox-01f.5,
+  // covered in blocks-dependencies.test.ts).
   // Comment ids are UUIDs on every supported bd (beadbox-vav).
   await expect(
     deleteComment("01a0d997-40fa-7a12-807e-c472c48e3efd", { db: beadsDir }),

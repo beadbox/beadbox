@@ -216,6 +216,10 @@ export interface BdBead {
   // Dependency fields (when this bead is a dependent of another)
   dependency_type?: "parent-child" | "blocks" | "related"
   // List output fields
+  // One row per dependency of THIS issue, as `bd list --json` reports it: bd
+  // normalizes the target to depends_on_id on every supported version, and
+  // omits the key when the issue has none.
+  dependencies?: BdDependencyEdge[]
   dependency_count?: number
   dependent_count?: number
   comment_count?: number
@@ -231,6 +235,12 @@ export interface BdBead {
   // versions). beadbox-a9l. This field stays on BdBead only for the rare
   // bd response that does carry it; production code does not rely on it.
   comments?: BdComment[]
+}
+
+export interface BdDependencyEdge {
+  issue_id: string
+  depends_on_id?: string
+  type: string // "blocks", "parent-child", "related", ...
 }
 
 export interface BdComment {
@@ -1375,94 +1385,46 @@ export async function getChangedBeadIds(since: string, options: BdOptions = {}):
   return rows.map((r) => r.id)
 }
 
-// ── "blocks" dependencies, in one bulk query ───────────────────────────────
+// ── "blocks" dependencies ──────────────────────────────────────────────────
 //
-// bd renamed the target column: bd 1.0.x stores it as depends_on_id, bd 1.2.x as
-// depends_on_issue_id (alongside depends_on_wisp_id / depends_on_external for
-// targets that are not issues). The query is tried against the current schema
-// first and the legacy one second. bd 1.0.x is now below MIN_BD_VERSION and is
-// refused at startup, so the legacy fallback only matters until it is retired. A query can only succeed against the schema that has
-// its column, so "the first one that works" needs no error-text parsing -- which
-// matters, because a failed `bd sql` reports the Dolt message on stdout, and that
-// text does not survive into the thrown error.
+// Blocked-by comes from bd's own JSON: `bd list --json` carries each issue's
+// dependencies with a normalized depends_on_id, in embedded and server mode
+// alike (checked at bd 1.1.0 and 1.2.2). It replaced raw SQL against the
+// dependencies table, which broke on bd 1.2's column rename and never worked
+// in embedded mode -- the `bd init` default -- where bd refuses `bd sql`
+// (beadbox-01f.5).
 //
-// The working schema is cached per database so a 1.0.x workspace does not fire
-// one failing query per load (each would land in the Dolt server log). A cached
-// choice that later fails is dropped and re-detected, e.g. after a bd upgrade.
-//
-// FAILURE IS NOT EMPTINESS. This used to catch everything and return an empty
-// map, so "the query failed" and "nothing here is blocked" were the same value.
-// That is how the column rename shipped to every bd >= 1.2 user with no
-// blockers shown and no error anywhere. Callers now get a result they can tell
-// apart: ok (possibly empty), unsupported (embedded mode), or error.
+// FAILURE IS NOT EMPTINESS. An empty map means "nothing is blocked"; a failed
+// or malformed list is an error the caller shows, never an empty map.
 export type BlocksDependenciesResult =
   | { status: "ok"; map: Map<string, string[]> }
-  | { status: "unsupported"; reason: string }
   | { status: "error"; error: BdLoadError }
-
-type BlocksSchema = "issue" | "legacy"
-const BLOCKS_SQL: Record<BlocksSchema, string> = {
-  // NULL depends_on_issue_id means the blocker is a wisp or an external ref,
-  // not an issue in this workspace, so there is nothing to show it as.
-  issue: `SELECT issue_id, depends_on_issue_id AS depends_on_id FROM dependencies WHERE type = 'blocks' AND depends_on_issue_id IS NOT NULL`,
-  legacy: `SELECT issue_id, depends_on_id FROM dependencies WHERE type = 'blocks'`,
-}
-const blocksSchemaByDb = new Map<string, BlocksSchema>()
-
-/** Test hook: forget detected schemas. */
-export function __resetBlocksSchemaCache(): void {
-  blocksSchemaByDb.clear()
-}
-
-type BlocksRow = { issue_id: string; depends_on_id: string | null }
-
-async function runBlocksQuery(schema: BlocksSchema, options: BdOptions & { db: string }): Promise<BlocksRow[]> {
-  const sql = BLOCKS_SQL[schema]
-  const rows = isServerOnlyWithoutScaffold(options.db)
-    ? await serverSqlQuery<BlocksRow>(sql, options)
-    : await bdExec<BlocksRow[]>(["sql", sql, "--readonly"], options)
-  // The old code reached its catch only via a TypeError from iterating a
-  // non-array. Say what actually happened instead.
-  if (!Array.isArray(rows)) throw new Error(`bd sql returned ${rows === null ? "null" : typeof rows}, not rows`)
-  return rows
-}
 
 // Returns a map: beadId -> IDs of the issues that block it.
 export async function getAllBlocksDependencies(options: BdOptions = {}): Promise<BlocksDependenciesResult> {
   if (!options.db) return { status: "ok", map: new Map() }
-  if (isEmbeddedMode(options.db)) {
-    // Not "no blockers": bd refuses `bd sql` in embedded mode (bd 1.2.2:
-    // "'bd sql' is not yet supported in embedded mode").
-    return { status: "unsupported", reason: "bd sql is not supported in embedded mode" }
-  }
-  const db = options.db
-  const cached = blocksSchemaByDb.get(db)
-  const order: BlocksSchema[] = cached ? [cached, cached === "issue" ? "legacy" : "issue"] : ["issue", "legacy"]
-
-  const failures: Array<{ schema: BlocksSchema; error: unknown }> = []
-  for (const schema of order) {
-    try {
-      const rows = await runBlocksQuery(schema, { ...options, db })
-      blocksSchemaByDb.set(db, schema)
-      const map = new Map<string, string[]>()
-      for (const row of rows) {
-        if (!row.depends_on_id) continue
-        const existing = map.get(row.issue_id)
-        if (existing) existing.push(row.depends_on_id)
-        else map.set(row.issue_id, [row.depends_on_id])
-      }
-      return { status: "ok", map }
-    } catch (error) {
-      failures.push({ schema, error })
-      if (cached === schema) blocksSchemaByDb.delete(db)
+  try {
+    const issues = await listBeads(options)
+    if (!Array.isArray(issues)) {
+      throw new Error(`bd list returned ${issues === null ? "null" : typeof issues}, not a list`)
     }
+    const map = new Map<string, string[]>()
+    for (const issue of issues) {
+      for (const edge of issue.dependencies ?? []) {
+        // Parent-child and related links are dependency rows too; only
+        // blocks is a blocker. An edge with no target has nothing to show.
+        if (edge.type !== "blocks" || !edge.depends_on_id) continue
+        const existing = map.get(issue.id)
+        if (existing) existing.push(edge.depends_on_id)
+        else map.set(issue.id, [edge.depends_on_id])
+      }
+    }
+    return { status: "ok", map }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(`[bd] blocks dependencies unavailable (${options.db}): ${message}`)
+    return { status: "error", error: toBdLoadError(error) }
   }
-
-  const detail = failures
-    .map((f) => `${f.schema}: ${f.error instanceof Error ? f.error.message : String(f.error)}`)
-    .join(" | ")
-  console.error(`[bd] blocks dependencies query failed for every known schema (${db}): ${detail}`)
-  return { status: "error", error: toBdLoadError(failures[0]?.error ?? new Error(detail)) }
 }
 
 // Validate that a configured workspace directory points to a database with the beads schema.
