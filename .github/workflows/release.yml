@@ -530,7 +530,15 @@ jobs:
     # environment to read them, and a fork PR's head ref matches neither, so a
     # fork-triggered run cannot reach these secrets even if it reaches this job.
     environment: release
-    if: github.event_name == 'push' || inputs.build_macos_arm64
+    # beadbox-5yv: explicit results, not the implicit success(). In build mode
+    # create-draft is skipped upstream, and a skipped ancestor would otherwise
+    # skip this job (and with it assemble-build) while the run still reports
+    # success.
+    if: >-
+      !cancelled()
+      && needs.validate-tag.result == 'success'
+      && needs.build-macos-arm64.result == 'success'
+      && (github.event_name == 'push' || inputs.build_macos_arm64)
     needs: [validate-tag, build-macos-arm64]
     runs-on: macos-14
     timeout-minutes: 15
