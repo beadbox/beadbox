@@ -25,7 +25,7 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { chmodSync, lstatSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
 export const SERVE_DIR_PREFIX = "beadbox-serve-"
 const LISTENING = /^bd serve: listening on (http:\/\/127\.0\.0\.1:(\d{1,5}))$/
@@ -99,7 +99,9 @@ export function serveChildEnv(target: ServeTarget, parent: NodeJS.ProcessEnv = p
 
 /** C2: a fresh token in a new private dir. The caller owns removal (the shell wrapper does it). */
 export function createTokenDir(root: string = tmpdir()): { dir: string; token: string } {
-  const dir = mkdtempSync(join(root, SERVE_DIR_PREFIX))
+  // The creating sidecar's pid is in the name, so a sweep by ANOTHER running
+  // instance (a side-by-side app sharing TMPDIR) can tell our live dirs apart.
+  const dir = mkdtempSync(join(root, `${SERVE_DIR_PREFIX}${process.pid}-`))
   chmodSync(dir, 0o700)
   const token = randomBytes(32).toString("base64url")
   writeFileSync(join(dir, "token"), `${token}\n`, { mode: 0o600, flag: "wx" })
@@ -108,10 +110,25 @@ export function createTokenDir(root: string = tmpdir()): { dir: string; token: s
 
 /**
  * Remove serve token dirs left by a sidecar that died before its wrappers
- * could clean up. Only entries directly under `root` named with our prefix,
- * that are real directories (lstat: symlinks are never followed), owned by
- * our uid, and not in use by a live child of ours.
+ * could clean up. Only entries directly under `root` named
+ * beadbox-serve-<pid>-*, whose pid is NOT a live process (another running
+ * instance's dirs are left alone), that are real directories (lstat: symlinks
+ * are never followed), owned by our uid, and not in use by a live child of
+ * ours. A name without a pid cannot be attributed and is left alone.
  */
+const OWNER_PID = new RegExp(`^${SERVE_DIR_PREFIX}(\\d+)-`)
+
+/** True if the pid is a live process, including one we may not signal. */
+function processAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
 export function sweepStaleServeDirs(
   root: string = tmpdir(),
   inUse: ReadonlySet<string> = new Set(),
@@ -125,9 +142,10 @@ export function sweepStaleServeDirs(
     return removed
   }
   for (const name of names) {
-    if (!name.startsWith(SERVE_DIR_PREFIX)) continue
+    const owner = OWNER_PID.exec(name)
+    if (!owner) continue
     const path = join(root, name)
-    if (inUse.has(path)) continue
+    if (inUse.has(path) || processAlive(Number(owner[1]))) continue
     try {
       const st = lstatSync(path)
       if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== uid) continue
@@ -197,6 +215,9 @@ export class ServeManager {
     if (!child) return
     this.children.delete(key)
     await endChild(child.process)
+    // The wrapper removes the token dir on a normal stop. If the stop had to
+    // SIGKILL its group, the wrapper died first, so remove it here too.
+    removeTokenDir(child.tokenDir)
   }
 
   async stopAll(): Promise<void> {
@@ -222,7 +243,7 @@ export class ServeManager {
     try {
       proc = spawnServeChild(this.opts.bdPath(), dir, target)
     } catch (error) {
-      rmSync(dir, { recursive: true, force: true })
+      removeTokenDir(dir)
       throw error
     }
     try {
@@ -234,16 +255,20 @@ export class ServeManager {
         tokenDir: dir,
         lastUsed: this.now(),
       }
-      // Drop the address the moment the child exits, so no caller can reach
-      // a port another process may since have taken.
+      // The moment the child exits, for any reason: drop its address, so no
+      // caller can reach a port another process may since have taken, and
+      // remove its token dir. The wrapper normally removes it, but not if its
+      // whole group was SIGKILLed (by a stop that had to escalate, or from
+      // outside).
       proc.once("exit", () => {
         if (this.children.get(target.key) === child) this.children.delete(target.key)
+        removeTokenDir(dir)
       })
       this.children.set(target.key, child)
       return child
     } catch (error) {
       await endChild(proc)
-      rmSync(dir, { recursive: true, force: true })
+      removeTokenDir(dir)
       throw error
     }
   }
@@ -261,6 +286,11 @@ function spawnServeChild(bdPath: string, tokenDir: string, target: ServeTarget):
     stdio: ["pipe", "pipe", "ignore"],
     detached: true,
   })
+}
+
+/** Remove one of our token dirs; refuses any path whose own name lacks our prefix. */
+function removeTokenDir(dir: string): void {
+  if (basename(dir).startsWith(SERVE_DIR_PREFIX)) rmSync(dir, { recursive: true, force: true })
 }
 
 function readListeningLine(proc: ChildProcess): Promise<{ url: string; port: number }> {

@@ -24,6 +24,7 @@ import { BunIo, RPCChannel } from "kkrpc"
 import { type HandlerRegistry, handlers } from "./handlers"
 import { closeLogFile } from "./lib/log-file"
 import { startParentDeathWatcherViaShell } from "./lib/parent-death-watcher"
+import { sweepServeDirsAtStartup } from "./lib/serve-reads"
 import { captureShutdownSource } from "./lib/shutdown-source"
 
 // bb-x0il (replaces bb-6x9y's Worker-based variant): when the parent
@@ -38,6 +39,8 @@ import { captureShutdownSource } from "./lib/shutdown-source"
 // No-op when started as a daemon (process.ppid === 1) or when Tauri
 // reaps us cleanly via SIGTERM before the next 5s poll.
 const stopWatcher = startParentDeathWatcherViaShell()
+// bd serve token dirs a previous sidecar could not remove (beadbox-6x2).
+sweepServeDirsAtStartup()
 
 // Boot diagnostic on stderr — proves "did the binary even start?" when smoke
 // tests fail. stdout is reserved for kkrpc frames, so this can't go there.

@@ -88,7 +88,7 @@ interface BdProbeResult {
   version?: string
 }
 
-async function probeBdVersion(bdPath: string): Promise<BdProbeResult> {
+export async function probeBdVersion(bdPath: string): Promise<BdProbeResult> {
   return execFileAsync(bdPath, ["--version"], { timeout: 5000 })
     .then(({ stdout }) => {
       const match = stdout.match(BD_VERSION_RE)

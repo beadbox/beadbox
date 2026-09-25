@@ -13,6 +13,7 @@ import { blocksMapFromIssues } from "../lib/blocks-map"
 import {
   type BdBead,
   type BdComment,
+  type BdDependency,
   type BdOptions,
   getAllBlocksDependencies,
   getComments,
@@ -27,6 +28,7 @@ import {
 import type { BdLoadError } from "../lib/bd-error"
 import { toBdLoadError } from "../lib/bd-error"
 import { readMetadataMode } from "../lib/dolt-metadata"
+import { tryServe } from "../lib/serve-reads"
 import {
   getBeadDetailCacheStats,
   getCachedBeadDetail,
@@ -105,8 +107,11 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
     }
   }
 
-  // Step 1: Get ALL beads in one call (includes parent field)
-  const allBeads = await listBeads(readOptions)
+  // Step 1: Get ALL beads in one call (includes parent field). Opted-in
+  // workspaces may read the plain list through bd serve (beadbox-6x2); its
+  // rows equal the CLI's. The system-inclusive list stays on the CLI.
+  const viaServe = options.includeSystem ? null : await tryServe(options.db, (c) => c.listIssues())
+  const allBeads = viaServe ? (viaServe.value as unknown as BdBead[]) : await listBeads(readOptions)
 
   const hierarchicalTypes = new Set(["epic", "milestone", "convoy", "molecule"])
   const epicBeads = allBeads.filter((b) => hierarchicalTypes.has(b.issue_type))
@@ -468,6 +473,37 @@ export async function getBlocksDependencies(dbPath?: string): Promise<BlocksDepe
 }
 
 // Get a single bead with full details
+/** The detail panel's four reads through the CLI, in parallel (unchanged). */
+function detailViaCli(id: string, readOptions: BdOptions): Promise<[BdBead, BdComment[], BdDependency[], BdDependency[]]> {
+  return Promise.all([
+    showBead(id, readOptions),
+    getComments(id, readOptions).catch(() => []),
+    listDependencies(id, readOptions).catch(() => []),
+    listDependents(id, readOptions).catch(() => []),
+  ])
+}
+
+/**
+ * The detail panel's four reads in one bd serve request, for an opted-in
+ * workspace (beadbox-6x2). null = read them through the CLI as before. Serve's
+ * comments and dependency lists equal the CLI's; the issue itself is the
+ * detail minus the inlined lists.
+ */
+async function detailViaServe(
+  id: string,
+  dbPath: string | undefined,
+): Promise<[BdBead, BdComment[], BdDependency[], BdDependency[]] | null> {
+  const r = await tryServe(dbPath, (c) => c.getIssueDetail(id))
+  if (!r) return null
+  const { comments, dependencies, dependents, ...issue } = r.value
+  return [
+    issue as unknown as BdBead,
+    (comments ?? []) as unknown as BdComment[],
+    (dependencies ?? []) as unknown as BdDependency[],
+    (dependents ?? []) as unknown as BdDependency[],
+  ]
+}
+
 export async function getBeadDetail(id: string, dbPath?: string): Promise<Bead | null> {
   const options: BdOptions = dbPath ? { db: dbPath } : {}
 
@@ -496,12 +532,8 @@ export async function getBeadDetail(id: string, dbPath?: string): Promise<Bead |
     // vs. reading them inline; both are cheaper than the pre-b09d6ccc
     // design's serial getComments call. Falls back to an empty list so a
     // comments fetch failure never blocks the rest of the detail panel.
-    const [bdBead, bdComments, deps, dependents] = await Promise.all([
-      showBead(id, readOptions),
-      getComments(id, readOptions).catch(() => []),
-      listDependencies(id, readOptions).catch(() => []),
-      listDependents(id, readOptions).catch(() => []),
-    ])
+    const [bdBead, bdComments, deps, dependents] =
+      (await detailViaServe(id, dbPath)) ?? (await detailViaCli(id, readOptions))
 
     const comments = bdComments.map(convertComment)
     const bead = convertBead(bdBead, comments)

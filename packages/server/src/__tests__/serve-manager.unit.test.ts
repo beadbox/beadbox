@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -14,6 +15,13 @@ import {
 } from "../lib/serve-manager"
 
 const FAKE_BD = join(import.meta.dir, "fixtures", "fake-bd-serve.py")
+const dirExists = (p: string) => {
+  try {
+    return statSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
 let root: string
 let manager: ServeManager | null = null
 afterEach(async () => {
@@ -65,16 +73,27 @@ test("C2: each token dir is fresh, 0700, with a 0600 token", () => {
   expect(readFileSync(join(a.dir, "token"), "utf-8")).toBe(`${a.token}\n`)
 })
 
-test("the sweep removes only our own real dirs, never a symlink, a foreign name, or a live dir", () => {
+/** A pid that just exited (so no process has it). */
+function deadPid(): number {
+  const r = spawnSync("/usr/bin/true")
+  if (!r.pid) throw new Error("could not spawn /usr/bin/true")
+  return r.pid
+}
+
+test("the sweep removes only stale dirs of dead sidecars: never a live pid's, a symlink, a foreign name or uid, or a live dir", () => {
   root = mkdtempSync(join(tmpdir(), "beadbox-serve-unit-"))
   const uid = process.getuid?.() ?? -1
-  const stale = join(root, `${SERVE_DIR_PREFIX}stale`)
-  const live = join(root, `${SERVE_DIR_PREFIX}live`)
+  const dead = deadPid()
+  const d = (tag: string, pid: number | string = dead) => join(root, `${SERVE_DIR_PREFIX}${pid}-${tag}`)
+  const stale = d("stale")
+  const live = d("live")
+  const otherInstance = d("other", process.pid) // a running sidecar's dir
+  const unattributed = join(root, `${SERVE_DIR_PREFIX}nopid`)
   const other = join(root, "not-ours")
   const target = join(root, "precious")
-  const link = join(root, `${SERVE_DIR_PREFIX}link`)
-  const file = join(root, `${SERVE_DIR_PREFIX}file`)
-  for (const d of [stale, live, other, target]) mkdirSync(d)
+  const link = d("link")
+  const file = d("file")
+  for (const p of [stale, live, otherInstance, unattributed, other, target]) mkdirSync(p)
   writeFileSync(join(target, "keep"), "x")
   symlinkSync(target, link)
   writeFileSync(file, "x")
@@ -82,13 +101,18 @@ test("the sweep removes only our own real dirs, never a symlink, a foreign name,
   expect(sweepStaleServeDirs(root, new Set([live]), uid)).toEqual([stale])
   expect(lstatSync(link).isSymbolicLink()).toBe(true)
   expect(readFileSync(join(target, "keep"), "utf-8")).toBe("x")
-  for (const p of [live, other, file]) expect(() => lstatSync(p)).not.toThrow()
+  for (const p of [live, otherInstance, unattributed, other, file]) expect(() => lstatSync(p)).not.toThrow()
 
-  // A dir owned by someone else (simulated by a uid that is not the owner).
-  const foreign = join(root, `${SERVE_DIR_PREFIX}foreign`)
+  const foreign = d("foreign")
   mkdirSync(foreign)
   expect(sweepStaleServeDirs(root, new Set([live]), uid + 1)).toEqual([])
   expect(() => lstatSync(foreign)).not.toThrow()
+})
+
+test("token dirs are named with the creating sidecar's pid", () => {
+  root = mkdtempSync(join(tmpdir(), "beadbox-serve-unit-"))
+  const { dir } = createTokenDir(root)
+  expect(dir.split("/").pop()?.startsWith(`${SERVE_DIR_PREFIX}${process.pid}-`)).toBe(true)
 })
 
 describe("ServeManager supervision (real children via the fake bd)", () => {
@@ -115,6 +139,20 @@ describe("ServeManager supervision (real children via the fake bd)", () => {
     await manager.get(target("fresh"))
     await Bun.sleep(300)
     expect(manager.liveTokenDirs().size).toBe(1)
+  }, 30_000)
+
+  test("a token dir never outlives its child, even when the wrapper is SIGKILLed before its cleanup (sec)", async () => {
+    root = mkdtempSync(join(tmpdir(), "beadbox-serve-unit-"))
+    manager = new ServeManager({ bdPath: () => FAKE_BD, tokenRoot: root })
+    const h = await manager.get(target("k"))
+    const [dir] = [...manager.liveTokenDirs()]
+    expect(statSync(dir).isDirectory()).toBe(true) // precondition
+    process.kill(-h.pid, "SIGKILL") // the whole group, wrapper included: its own cleanup never runs
+    const end = Date.now() + 3000
+    while (Date.now() < end && dirExists(dir)) await Bun.sleep(50)
+    expect(dirExists(dir)).toBe(false)
+    expect(manager.liveTokenDirs().size).toBe(0)
+    await manager.stop("k") // a no-op now, and harmless
   }, 30_000)
 
   test("a wrong listening line is a startup failure: rejected, cleaned up, then backed off", async () => {

@@ -39,6 +39,7 @@ import {
   updateType as bdUpdateType,
   unmapPriority,
 } from "../lib/bd"
+import { tryServe } from "../lib/serve-reads"
 import { readMetadataMode } from "../lib/dolt-metadata"
 import { invalidateEpicCache } from "../lib/epic-cache"
 import { RESERVED_STATUSES, validateStatusName } from "../lib/status-validation"
@@ -102,8 +103,22 @@ export async function getAvailableTypes(dbPath?: string): Promise<string[]> {
 // Get only the custom statuses (for the Settings → Workflow manager). Distinct
 // from getAvailableStatuses, which prepends the core lifecycle statuses.
 // Ported from v0.24 actions/beads.ts (commit 1386b41 / bb-oqux) for bb-wxuw.
+/** Same parsing as lib/bd.ts getCustomStatuses: a comma list; unset -> []. */
+function parseStatusList(raw: string): string[] {
+  const trimmed = raw.trim()
+  if (!trimmed || trimmed.includes("(not set)")) return []
+  return trimmed
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
 export async function getCustomStatusList(dbPath?: string): Promise<string[]> {
   const options: BdOptions = dbPath ? { db: dbPath } : {}
+  // Opted-in workspaces may read status.custom through bd serve (beadbox-6x2),
+  // parsed exactly as the CLI's `bd config get` output is.
+  const viaServe = await tryServe(dbPath, (c) => c.getConfig("status.custom"))
+  if (viaServe) return parseStatusList(viaServe.value ?? "")
   try {
     return await bdGetCustomStatuses(options)
   } catch {

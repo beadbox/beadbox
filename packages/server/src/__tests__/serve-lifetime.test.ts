@@ -9,6 +9,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { connect } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { sweepStaleServeDirs } from "../lib/serve-manager"
 
 const HOST = join(import.meta.dir, "fixtures", "serve-host.ts")
 const FAKE_BD = join(import.meta.dir, "fixtures", "fake-bd-serve.py")
@@ -91,3 +92,15 @@ describe("a serve child ends with its sidecar", () => {
     }, 20_000)
   }
 })
+
+// sec (beadbox-6x2 L4): two instances side by side share TMPDIR. One
+// instance's startup sweep must never delete the other's LIVE token dir.
+test("a second running instance's live token dir survives our startup sweep", async () => {
+  const { info } = await startHost("hang") // the other, still-running instance
+  expect(existsSync(info.tokenDir)).toBe(true)
+  const root = join(info.tokenDir, "..")
+  const removed = sweepStaleServeDirs(root, new Set()) // our sweep, with no live dirs of our own
+  expect(removed).not.toContain(info.tokenDir)
+  expect(existsSync(info.tokenDir)).toBe(true)
+  expect(await portAnswers(info.url)).toBe(true) // and its child is still serving
+}, 20_000)
