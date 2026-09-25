@@ -3,6 +3,7 @@ import { readFileSync } from "fs"
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "fs/promises"
 import { homedir } from "os"
 import { basename, dirname, join, resolve } from "path"
+import { readPortFile } from "./dolt-port-file"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -248,14 +249,8 @@ export interface WorkspaceMetadata {
 }
 
 export async function readWorkspacePortFile(beadsDir: string): Promise<number | null> {
-  try {
-    const value = (await readFile(join(beadsDir, "dolt-server.port"), "utf-8")).trim()
-    if (!/^\d+$/.test(value)) return null
-    const port = Number(value)
-    return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null
-  } catch {
-    return null
-  }
+  const read = await readPortFile(beadsDir)
+  return read.status === "ok" ? read.port : null
 }
 
 export async function readWorkspaceMetadata(beadsDir: string): Promise<WorkspaceMetadata> {

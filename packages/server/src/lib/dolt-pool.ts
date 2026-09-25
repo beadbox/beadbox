@@ -1,10 +1,10 @@
 // Source-local copy of lib/dolt-pool.ts (P1.3 / bb-vy13.3).
 // Imports already relative; no rewrites needed.
 
-import { readFileSync } from "fs"
 import { readFile } from "fs/promises"
 import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
+import { portFilePath, readPortFileSync } from "./dolt-port-file"
 import { getWorkspacePassword } from "./bd"
 import { findExternalWorkspaceByDbPath, parseServerUri } from "./workspace-registry"
 
@@ -37,26 +37,20 @@ function projectRootFromDb(dbPath: string): string | undefined {
 // Read the Dolt server port from .beads/dolt-server.port
 function readDoltPort(dbPath: string): number {
   const beadsDir = dirname(normalizeDbPath(dbPath))
-  const portFile = join(beadsDir, "dolt-server.port")
-  let portStr: string
-  try {
-    portStr = readFileSync(portFile, "utf-8").trim()
-  } catch (err) {
-    const code = (err as { code?: string })?.code
-    if (code === "ENOENT") {
+  const portFile = portFilePath(beadsDir)
+  const read = readPortFileSync(beadsDir)
+  switch (read.status) {
+    case "ok":
+      return read.port
+    case "missing":
       throw new PortFileMissingError(portFile)
-    }
-    console.error(
-      `[dolt-pool] failed to read ${portFile}: code=${code}, ${err instanceof Error ? err.message : err}`,
-    )
-    throw err
+    case "unreadable":
+      console.error(`[dolt-pool] failed to read ${portFile}: code=${read.error.code}, ${read.error.message}`)
+      throw read.error
+    case "invalid":
+      console.error(`[dolt-pool] invalid port value in ${portFile}: "${read.raw.trim()}"`)
+      throw new Error(`Invalid port in dolt-server.port: ${read.raw.trim()}`)
   }
-  const port = parseInt(portStr, 10)
-  if (!Number.isFinite(port) || port <= 0) {
-    console.error(`[dolt-pool] invalid port value in ${portFile}: "${portStr}"`)
-    throw new Error(`Invalid port in dolt-server.port: ${portStr}`)
-  }
-  return port
 }
 
 // Read the database name from .beads/metadata.json

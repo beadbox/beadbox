@@ -12,6 +12,7 @@ import {
   toBdLoadError,
 } from "./bd-error"
 import { __resetBdPathCache, COMMON_BD_PATHS, resolveBdPath as getBdPath } from "./bd-paths"
+import { readMetadataPortSync, readPortFileSync } from "./dolt-port-file"
 import { getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import {
   assertCommentId,
@@ -323,14 +324,8 @@ function buildArgs(args: string[], options: BdOptions, includeJson: boolean): st
 // Read the Dolt server port from a workspace's dolt-server.port file.
 // Returns undefined if the file doesn't exist or isn't a valid port.
 function readDoltPort(dbPath: string): string | undefined {
-  try {
-    const beadsDir = resolveBeadsDir(dbPath)
-    const port = readFileSync(join(beadsDir, "dolt-server.port"), "utf-8").trim()
-    if (/^\d+$/.test(port)) return port
-  } catch {
-    /* file may not exist */
-  }
-  return undefined
+  const read = readPortFileSync(resolveBeadsDir(dbPath))
+  return read.status === "ok" ? String(read.port) : undefined
 }
 
 // Detect embedded mode for a workspace. Used to guard bd sql calls
@@ -365,15 +360,7 @@ export function isEmbeddedMode(dbPath: string): boolean {
 
   // Priority 2 (fallback): port file presence indicates a server was
   // configured. Only consulted when metadata doesn't specify dolt_mode.
-  const portFile = join(beadsDir, "dolt-server.port")
-  if (existsSync(portFile)) {
-    try {
-      const port = readFileSync(portFile, "utf-8").trim()
-      if (/^\d+$/.test(port) && parseInt(port, 10) > 0) return false
-    } catch {
-      /* fall through */
-    }
-  }
+  if (readPortFileSync(beadsDir).status === "ok") return false
 
   // Default: no metadata, no port file -> embedded (fresh workspace)
   return true
@@ -491,6 +478,10 @@ export function resolveDoltPortOverride(
   env: NodeJS.ProcessEnv | undefined,
 ): string | undefined {
   if (env?.BEADS_DOLT_SERVER_PORT || process.env.BEADS_DOLT_SERVER_PORT) return undefined
+  // An explicit dolt_server_port in metadata.json is bd's own configuration
+  // and wins over a leftover port file; injecting the file's port here would
+  // override it inside bd (beadbox-01f.5).
+  if (readMetadataPortSync(resolveBeadsDir(dbPath)) !== null) return undefined
   return readDoltPort(dbPath) || undefined
 }
 

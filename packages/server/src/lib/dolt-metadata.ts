@@ -14,6 +14,7 @@
 
 import { readFile } from "fs/promises"
 import { basename, dirname, join, resolve } from "path"
+import { portFilePath, readPortFile } from "./dolt-port-file"
 
 export type DoltMode = "embedded" | "server"
 
@@ -34,18 +35,12 @@ export async function readMetadataMode(dbPath: string): Promise<DoltMode> {
     const resolved = resolve(dbPath)
     const beadsDir = basename(resolved) === ".beads" ? resolved : dirname(resolved)
 
-    const portFile = join(beadsDir, "dolt-server.port")
-    try {
-      const portContent = await readFile(portFile, "utf-8")
-      const port = parseInt(portContent.trim(), 10)
-      if (port > 0 && port <= 65535) return "server"
-    } catch (err) {
-      const code = (err as { code?: string })?.code
-      if (code !== "ENOENT") {
-        process.stderr.write(
-          `[dolt-metadata] failed to read ${portFile}: code=${code}, ${err instanceof Error ? err.message : err}\n`,
-        )
-      }
+    const portFile = await readPortFile(beadsDir)
+    if (portFile.status === "ok") return "server"
+    if (portFile.status === "unreadable") {
+      process.stderr.write(
+        `[dolt-metadata] failed to read ${portFilePath(beadsDir)}: code=${portFile.error.code}, ${portFile.error.message}\n`,
+      )
     }
 
     const metaPath = join(beadsDir, "metadata.json")

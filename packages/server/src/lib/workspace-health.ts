@@ -2,7 +2,6 @@
 // Rewrites: @/lib/* → ./* across the import block. Body unchanged.
 
 import { beadsDirOf, isWorkspacePresent } from "./workspace-presence"
-import { readFileSync } from "fs"
 import { mkdir } from "fs/promises"
 import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
@@ -10,6 +9,7 @@ import { getWorkspacePassword, initServerScaffold, stripBdWarnings } from "./bd"
 import { resolveBdPath } from "./bd-paths"
 import { flagArg } from "./bd-argv"
 import { drainPool } from "./dolt-pool"
+import { readMetadataPortSync, readPortFileSync } from "./dolt-port-file"
 import { ensureExternalScaffold } from "./external-scaffold"
 import { execFileAsync } from "./exec"
 import type { HealthError } from "./startup-machine"
@@ -47,8 +47,10 @@ function normalizeDbPathForDolt(dbPath: string): string {
  * Resolve the authoritative Dolt port for a workspace.
  *
  * - Server-only workspaces (local === null): registry port is authoritative (user-configured).
- * - Local workspaces: dolt-server.port file is authoritative (bd writes it on every start).
- *   Fallback chain: metadata.json dolt_server_port -> registry port.
+ * - Local workspaces: an explicit metadata.json dolt_server_port wins (bd does
+ *   not manage that server, so a leftover port file must not override it),
+ *   then the dolt-server.port file bd writes for its managed server, then the
+ *   registry port (beadbox-01f.5).
  */
 export function resolvePort(workspace: RegistryEntry): number | null {
   if (workspace.local === null) return workspace.server?.port ?? null
@@ -60,27 +62,11 @@ export function resolvePort(workspace: RegistryEntry): number | null {
 
   // Local workspace: workspace.local.path IS the .beads/ directory
   const beadsDir = workspace.local.path
-  const portFile = join(beadsDir, "dolt-server.port")
-  try {
-    const portStr = readFileSync(portFile, "utf-8").trim()
-    const port = parseInt(portStr, 10)
-    if (Number.isFinite(port) && port > 0) {
-      return port
-    }
-  } catch {
-    // Port file missing or unreadable, try metadata.json
-  }
+  const explicit = readMetadataPortSync(beadsDir)
+  if (explicit !== null) return explicit
 
-  // Fallback: metadata.json dolt_server_port
-  const metaPath = join(beadsDir, "metadata.json")
-  try {
-    const meta = JSON.parse(readFileSync(metaPath, "utf-8"))
-    if (typeof meta.dolt_server_port === "number" && meta.dolt_server_port > 0) {
-      return meta.dolt_server_port
-    }
-  } catch {
-    // metadata.json missing or unparseable
-  }
+  const portFile = readPortFileSync(beadsDir)
+  if (portFile.status === "ok") return portFile.port
 
   // Last resort: stale registry port
   return workspace.server?.port ?? null

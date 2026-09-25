@@ -21,6 +21,7 @@ import {
   initServerScaffold,
 } from "../lib/bd"
 import { expandHome, isValidWorkspaceDir } from "../lib/path-validation"
+import { readPortFile } from "../lib/dolt-port-file"
 import { scanPorts } from "../lib/port-scan"
 import { getPostHogNode } from "../lib/posthog-node"
 import { drainPool } from "../lib/dolt-pool"
@@ -963,15 +964,8 @@ export async function scanForDoltServers(): Promise<ScanActionResult> {
         ports.push(ws.serverPort)
         continue
       }
-      const beadsDir = inlineBeadsDirFromDatabasePath(ws.databasePath)
-      const portFile = join(beadsDir, "dolt-server.port")
-      try {
-        const content = await readFile(portFile, "utf-8")
-        const p = parseInt(content.trim(), 10)
-        if (p > 0 && p <= 65535) ports.push(p)
-      } catch {
-        // No port file for this workspace
-      }
+      const portFile = await readPortFile(inlineBeadsDirFromDatabasePath(ws.databasePath))
+      if (portFile.status === "ok") ports.push(portFile.port)
     }
 
     const uniquePorts = [...new Set(ports)]

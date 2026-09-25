@@ -49,7 +49,7 @@
 
 import { type ChildProcess, execFile, spawn } from "child_process"
 import { createHash } from "crypto"
-import { existsSync, type FSWatcher, readFileSync, watch } from "fs"
+import { existsSync, type FSWatcher, watch } from "fs"
 import { readFile } from "fs/promises"
 import { basename, dirname, join, resolve } from "path"
 import { SUBSCRIPTION_PREFIX, type SubscriptionEvent } from "../subscribe-protocol"
@@ -57,6 +57,7 @@ import { buildServerEnv, getWorkspacePassword } from "./bd"
 import { resolveBdPath } from "./bd-paths"
 import { beadsDirFromDatabasePath } from "./beadtrain-fs"
 import { drainPool, getPool, PortFileMissingError } from "./dolt-pool"
+import { portFilePath, readPortFile, readPortFileSync } from "./dolt-port-file"
 import { getDoltDir, getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import { beadsDirOf, isWorkspacePresent } from "./workspace-presence"
 import { findExternalWorkspaceByDbPath, parseServerUri } from "./workspace-registry"
@@ -123,18 +124,12 @@ export async function readMetadataMode(dbPath: string): Promise<DoltMode> {
     const resolved = resolve(dbPath)
     const beadsDir = basename(resolved) === ".beads" ? resolved : dirname(resolved)
 
-    const portFile = join(beadsDir, "dolt-server.port")
-    try {
-      const portContent = await readFile(portFile, "utf-8")
-      const port = parseInt(portContent.trim(), 10)
-      if (port > 0 && port <= 65535) return "server"
-    } catch (err) {
-      const code = (err as { code?: string })?.code
-      if (code !== "ENOENT") {
-        console.warn(
-          `[change-detector] failed to read ${portFile}: code=${code}, ${err instanceof Error ? err.message : err}`,
-        )
-      }
+    const portFile = await readPortFile(beadsDir)
+    if (portFile.status === "ok") return "server"
+    if (portFile.status === "unreadable") {
+      console.warn(
+        `[change-detector] failed to read ${portFilePath(beadsDir)}: code=${portFile.error.code}, ${portFile.error.message}`,
+      )
     }
 
     const metaPath = join(beadsDir, "metadata.json")
@@ -259,22 +254,11 @@ function buildPollSql(quote: '"' | "'"): string {
 const SERVER_POLL_SQL = buildPollSql("'")
 
 function readDoltPort(dbPath: string): string | undefined {
-  try {
-    const resolved = join(
-      basename(dbPath) === ".beads" ? dbPath : dirname(dbPath),
-      "dolt-server.port",
-    )
-    const port = readFileSync(resolved, "utf-8").trim()
-    if (/^\d+$/.test(port)) return port
-  } catch (err) {
-    const code = (err as { code?: string })?.code
-    if (code !== "ENOENT") {
-      console.warn(
-        `[change-detector] readDoltPort failed for ${dbPath}: code=${code}, ${err instanceof Error ? err.message : err}`,
-      )
-    }
+  const read = readPortFileSync(basename(dbPath) === ".beads" ? dbPath : dirname(dbPath))
+  if (read.status === "unreadable") {
+    console.warn(`[change-detector] readDoltPort failed for ${dbPath}: code=${read.error.code}, ${read.error.message}`)
   }
-  return undefined
+  return read.status === "ok" ? String(read.port) : undefined
 }
 
 function bdServerPoll(dbPath: string): Promise<string> {
