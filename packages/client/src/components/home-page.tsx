@@ -955,9 +955,8 @@ function BeadsEpicsViewer() {
         updateAvailable={updateAvailable}
         onUpdateClick={() => setUpdateDialogOpen(true)}
         versionLabel={
-          showRcVersion
-            ? `v${import.meta.env.VITE_BUILD_TAG || import.meta.env.VITE_APP_VERSION || "0.0.0"}`
-            : undefined
+          // beadbox-5yv: the plain version, never the build tag.
+          showRcVersion ? `v${import.meta.env.VITE_APP_VERSION || "0.0.0"}` : undefined
         }
         onSettingsOpen={() => {
           setSettingsInitialTab(undefined)
@@ -1378,11 +1377,8 @@ function BeadsEpicsViewer() {
           onOpenChange={setUpdateDialogOpen}
           updateInfo={updateAvailable}
           onDismiss={dismissUpdate}
-          currentVersion={
-            showRcVersion
-              ? import.meta.env.VITE_BUILD_TAG || import.meta.env.VITE_APP_VERSION || "0.0.0"
-              : import.meta.env.VITE_APP_VERSION || "0.0.0"
-          }
+          // beadbox-5yv: compare and show the plain version (latest.json carries plain versions).
+          currentVersion={import.meta.env.VITE_APP_VERSION || "0.0.0"}
         />
       )}
 

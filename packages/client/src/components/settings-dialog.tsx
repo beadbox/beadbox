@@ -1254,7 +1254,13 @@ function HelpTabContent({
 
   const handleCopySystemInfo = useCallback(async () => {
     const lines: string[] = []
-    lines.push(`Beadbox v${version}${buildId ? ` (build ${buildId})` : ""}`)
+    // beadbox-5yv: the build tag (e.g. an rc tag on a promoted build) is a support detail.
+    const buildTag = import.meta.env.VITE_BUILD_TAG as string | undefined
+    const details = [
+      buildId ? `build ${buildId}` : null,
+      buildTag && buildTag !== version ? `tag ${buildTag}` : null,
+    ].filter(Boolean)
+    lines.push(`Beadbox v${version}${details.length ? ` (${details.join(", ")})` : ""}`)
     lines.push(`beads ${bdVersion ? `v${bdVersion}` : "not found"}${bdPath ? ` (${bdPath})` : ""}`)
     lines.push(`Platform: ${platformLabel(platform)}`)
 
