@@ -14,6 +14,16 @@
 //
 // Outbound clients are unaffected: mysql2 connecting to Dolt on 127.0.0.1 is a
 // client socket, not a listener.
+//
+// The opt-in serve-reads pilot (beadbox-6x2) does not change this ban: when a
+// user enables it for a local server-mode workspace, the LISTENER belongs to
+// bd serve, a child process the sidecar starts, authenticates to with a
+// per-child token, and reaps with itself (lib/serve-manager.ts). Our code
+// still listens nowhere, and every pattern below stays banned. The sidecar's
+// side of that connection is pinned structurally, not by this file's
+// literal-URL regex (which cannot see a URL built at runtime): see
+// serve-http-census.security.test.ts (one GET-only fetch, in lib/serve-http.ts,
+// to an address parsed from our own child).
 
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
@@ -71,7 +81,9 @@ describe("no network listener in shipped source", () => {
 // `http://localhost:${PORT ?? 3000}/internal/event`. That handler lived in the
 // deleted Next.js custom server, so in a production build the POST went to
 // whatever unrelated process happened to hold port 3000. Removed, and pinned
-// here: the sidecar makes no plaintext-http request to anything.
+// here: the sidecar makes no plaintext-http request to a hard-coded URL. The
+// single runtime-built one (to our own bd serve child) is pinned by
+// serve-http-census.security.test.ts.
 // ---------------------------------------------------------------------------
 
 describe("no plaintext-http outbound calls in shipped source", () => {

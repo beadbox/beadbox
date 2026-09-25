@@ -27,7 +27,8 @@ Only the **latest release** receives security fixes. Beadbox has an in-app updat
 
 Beadbox is a local desktop application. Reports we especially care about:
 
-- Anything that lets another process, local user, or web origin reach the app's RPC surface — Beadbox opens no network listener by design, so a bypass of the Tauri IPC capability scope (or any reintroduced listener) is exactly what we want to hear about
+- Anything that lets another process, local user, or web origin reach the app's RPC surface — Beadbox itself opens no network listener by design, so a bypass of the Tauri IPC capability scope (or any reintroduced listener) is exactly what we want to hear about
+- The one listener you may see, and only if you opt in: the `bd serve` reads pilot (off by default; local server-mode workspaces on macOS and Linux). Beadbox then starts `bd serve` bound to 127.0.0.1 with a per-process bearer token (a 0600 file in a private 0700 directory), sends it GET requests only, and stops it when the app exits, however the app exits. Reaching that listener without the token, reaching it from a web origin (DNS rebinding, CORS), or finding it still running after Beadbox has exited are in scope. Its unauthenticated `/healthz`, which reveals only that a server is running, is a known and accepted residual
 - Command or argument injection into the `bd` CLI invocations via UI-controlled input
 - Path traversal via workspace paths
 - Update-mechanism integrity issues

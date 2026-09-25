@@ -113,7 +113,7 @@ app (Finder, Spotlight, `open`), but not if you run the executable inside
 
 ## Architecture (short version)
 
-Beadbox is a Tauri v2 app. The Rust shell spawns a Bun sidecar process and talks to it over stdio (kkrpc) — the app opens no network ports. All issue data flows through the `bd` CLI; Beadbox never touches the database behind `bd`'s back. Live updates come from watching the workspace filesystem (local) or polling Dolt table hashes (server workspaces).
+Beadbox is a Tauri v2 app. The Rust shell spawns a Bun sidecar process and talks to it over stdio (kkrpc) — the app itself opens no network ports. (One opt-in exception, off by default: if you enable the `bd serve` reads pilot for a local server-mode workspace, `bd` opens one token-authenticated listener on 127.0.0.1 for that workspace, which the app starts and stops with itself.) All issue data flows through the `bd` CLI; Beadbox never touches the database behind `bd`'s back. Live updates come from watching the workspace filesystem (local) or polling Dolt table hashes (server workspaces).
 
 ## Contributing
 
