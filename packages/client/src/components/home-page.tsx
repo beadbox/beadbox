@@ -27,7 +27,10 @@ import { useViewport } from "@/hooks/use-viewport"
 import { useWorkspaceLifecycle } from "@/hooks/use-workspace-lifecycle"
 import type { Bead, Epic } from "@/lib/types"
 
-const getBlocksDependencies = rpc.epics.getBlocksDependencies
+// Resolved at call time, not import time: an import-time binding captures
+// whatever rpc is installed when the module first loads, which in a shared
+// test process can be the browser-only stub (beadbox-01f.9).
+const getBlocksDependencies = (dbPath?: string) => rpc.epics.getBlocksDependencies(dbPath)
 
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react"
 import { EpicTreeSkeleton } from "@/components/epic-tree-skeleton"

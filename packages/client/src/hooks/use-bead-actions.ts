@@ -148,9 +148,15 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
   }
 
   const handleBeadUpdate = (updatedBead: Bead) => {
+    const previous = findBeadById([...epics, ...backlogEpics, ...archivedEpics], updatedBead.id)
     updateBeadInEpics(updatedBead.id, () => updatedBead)
-    // Reload to ensure left pane reflects the change
-    loadEpics()
+    // Field edits are already visible in the tree. The change subscription
+    // fetches the authoritative tree once after bd commits; fetching here as
+    // well doubles the slow remote read for every title edit. A hierarchy
+    // change still needs an immediate rebuild to move the item between roots.
+    if (previous && (previous.type !== updatedBead.type || previous.parentId !== updatedBead.parentId)) {
+      void loadEpics()
+    }
   }
 
   const handleAddComment = (beadId: string, comment: Comment) => {
