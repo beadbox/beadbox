@@ -10,9 +10,22 @@
 
 import { closeSync, mkdirSync, openSync, writeSync } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
+
+/**
+ * BEADBOX_LOG_PATH, when set to an absolute path. Side-by-side builds
+ * (scripts/build-local-macos.sh) point it at a scratch file so they never
+ * share the installed app's log. Relative values are ignored: the sidecar's
+ * cwd is not something the launcher controls.
+ */
+export function logPathOverride(): string | null {
+  const override = process.env.BEADBOX_LOG_PATH
+  return override && isAbsolute(override) ? override : null
+}
 
 function resolveLogPath(): string {
+  const override = logPathOverride()
+  if (override) return override
   if (process.platform === "darwin") {
     return join(homedir(), "Library", "Logs", "Beadbox", "beadbox-sidecar.log")
   }

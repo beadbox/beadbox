@@ -13,10 +13,11 @@ afterEach(() => {
   home = null
 })
 
-function boot(dir: string, line: string): void {
+function boot(dir: string, line: string, extraEnv: Record<string, string> = {}): void {
   const script = `const m = await import(${JSON.stringify(logFile)}); m.logFileWrite(${JSON.stringify(line)}); m.closeLogFile()`
+  const { BEADBOX_LOG_PATH: _inherited, ...env } = process.env
   const result = Bun.spawnSync([process.execPath, "-e", script], {
-    env: { ...process.env, HOME: dir, XDG_STATE_HOME: join(dir, "state"), LOCALAPPDATA: dir },
+    env: { ...env, HOME: dir, XDG_STATE_HOME: join(dir, "state"), LOCALAPPDATA: dir, ...extraEnv },
   })
   expect(result.exitCode).toBe(0)
 }
@@ -40,4 +41,20 @@ test("a second sidecar boot appends to the log instead of overwriting it", () =>
   const second = text.indexOf("second boot line")
   expect(first).toBeGreaterThanOrEqual(0)
   expect(second).toBeGreaterThan(first)
+})
+
+test("BEADBOX_LOG_PATH redirects the log and leaves the default path untouched", () => {
+  home = mkdtempSync(join(tmpdir(), "beadbox-log-"))
+  const override = join(home, "scratch", "sidecar.log")
+  boot(home, "override line", { BEADBOX_LOG_PATH: override })
+
+  expect(readFileSync(override, "utf8")).toContain("override line")
+  expect(existsSync(logPath(home))).toBe(false)
+})
+
+test("a relative BEADBOX_LOG_PATH is ignored in favour of the default path", () => {
+  home = mkdtempSync(join(tmpdir(), "beadbox-log-"))
+  boot(home, "relative line", { BEADBOX_LOG_PATH: "relative/sidecar.log" })
+
+  expect(readFileSync(logPath(home), "utf8")).toContain("relative line")
 })

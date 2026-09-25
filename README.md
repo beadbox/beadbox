@@ -59,6 +59,58 @@ bun run dev
 bun run tauri:build
 ```
 
+### Local macOS build, isolated from an installed Beadbox
+
+To try a change in a real app on macOS without touching an installed Beadbox,
+build a separate, locally signed copy:
+
+```sh
+bash scripts/build-local-macos.sh
+```
+
+Nothing is installed. The app stays in the build tree at
+`src-tauri/target/release/bundle/macos/Beadbox Local.app`, with a scratch
+profile beside it in `src-tauri/target/local-profile/`. Open it from Finder
+or with:
+
+```sh
+open -n "src-tauri/target/release/bundle/macos/Beadbox Local.app"
+```
+
+How it stays separate from the installed app:
+
+- **Own bundle identifier** (`app.beadbox.local`) and name, so macOS keeps its
+  window, WebView and app-data state apart from the installed Beadbox.
+- **Scratch workspace registry.** The app's `Info.plist` (`LSEnvironment`)
+  points `BEADBOX_REGISTRY_PATH` at
+  `src-tauri/target/local-profile/registry.json` and `BEADS_REGISTRY_PATH` at a
+  file in the same folder, so the app neither reads your registered workspaces
+  nor imports them from the legacy `~/.beads/registry.json` on first run. It starts with no workspaces; add a test workspace from inside the app.
+- **Own sidecar log** at `src-tauri/target/local-profile/sidecar.log` (via
+  `BEADBOX_LOG_PATH`) instead of `~/Library/Logs/Beadbox/`.
+- **No updates.** The build has no update endpoint, so it cannot replace itself
+  with a release build; the update check reports that it failed.
+- **No analytics.** The build blanks the analytics key.
+
+What it still shares or leaves behind:
+
+- The installed `bd`. Any workspace you add in the local app is a real
+  workspace on disk; opening one of your real workspaces from both apps at
+  once works, but edits from either land in the same database.
+- Saved server-workspace credentials live in the same macOS keychain service
+  (`beadbox`) as the installed app.
+- macOS and WebKit create per-app folders for `app.beadbox.local` (for example
+  under `~/Library/WebKit` and `~/Library/Caches`) when it first launches. They
+  are separate from the installed app's; delete them with the build if you
+  want a clean slate.
+- The build uses the usual toolchain caches (`~/.cargo`, `~/.bun`).
+
+The signature is ad hoc and the build is not notarized; it is for your own
+machine only. The scratch paths are absolute and baked into the bundle at build
+time: if you move the repository, rebuild. They apply whenever macOS opens the
+app (Finder, Spotlight, `open`), but not if you run the executable inside
+`Contents/MacOS` directly.
+
 ## Architecture (short version)
 
 Beadbox is a Tauri v2 app. The Rust shell spawns a Bun sidecar process and talks to it over stdio (kkrpc) — the app opens no network ports. All issue data flows through the `bd` CLI; Beadbox never touches the database behind `bd`'s back. Live updates come from watching the workspace filesystem (local) or polling Dolt table hashes (server workspaces).

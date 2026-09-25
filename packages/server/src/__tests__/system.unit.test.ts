@@ -4,13 +4,28 @@
 // branch was hit. openInFileManager is exercised on the missing-directory
 // path (no UI process spawn).
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import os from "node:os"
 import path from "node:path"
 import { getLogDirectory, openInFileManager } from "../handlers/system"
 
 describe("system.getLogDirectory", () => {
+  // The override is read at call time; each test sets or clears it and puts
+  // back whatever the runner had.
+  const saved = process.env.BEADBOX_LOG_PATH
+  afterEach(() => {
+    if (saved === undefined) delete process.env.BEADBOX_LOG_PATH
+    else process.env.BEADBOX_LOG_PATH = saved
+  })
+
+  test("follows an absolute BEADBOX_LOG_PATH to the directory holding the log", async () => {
+    const log = path.join(os.tmpdir(), "bb-local-profile", "sidecar.log")
+    process.env.BEADBOX_LOG_PATH = log
+    expect(await getLogDirectory()).toBe(path.dirname(log))
+  })
+
   test("returns a platform-appropriate path containing 'Beadbox'", async () => {
+    process.env.BEADBOX_LOG_PATH = "relative/sidecar.log" // ignored: not absolute
     const dir = await getLogDirectory()
     if (process.platform === "darwin") {
       expect(dir).toBe(path.join(os.homedir(), "Library", "Logs", "Beadbox"))
