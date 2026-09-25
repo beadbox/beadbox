@@ -1,0 +1,57 @@
+name: Runner hook env-override red
+
+# beadbox-5p1. A pull_request run that tries to pass the
+# release runner's job-started hook by overriding the GITHUB_* values it checks,
+# at workflow and job level. The runner's own values must win: the hook has to
+# refuse on the event (pull_request). Throwaway: lives only on its PR branch.
+on: pull_request
+
+env:
+  GITHUB_EVENT_NAME: push
+  GITHUB_REF: refs/heads/main
+  GITHUB_WORKFLOW_REF: beadbox/beadbox/.github/workflows/release.yml@refs/heads/main
+  GITHUB_WORKFLOW_SHA: 0123456789abcdef0123456789abcdef01234567
+  GITHUB_SHA: 0123456789abcdef0123456789abcdef01234567
+  GITHUB_HEAD_REF: ""
+  GITHUB_BASE_REF: ""
+
+permissions:
+  contents: read
+
+jobs:
+  env-override-red:
+    name: "Hook refuses a PR that overrides GITHUB_* via env"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GITHUB_EVENT_NAME: push
+      GITHUB_REF: refs/heads/main
+      GITHUB_WORKFLOW_REF: beadbox/beadbox/.github/workflows/release.yml@refs/heads/main
+      GITHUB_WORKFLOW_SHA: 0123456789abcdef0123456789abcdef01234567
+      GITHUB_SHA: 0123456789abcdef0123456789abcdef01234567
+      GITHUB_HEAD_REF: ""
+      GITHUB_BASE_REF: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: What a step sees
+        run: |
+          for v in GITHUB_EVENT_NAME GITHUB_REF GITHUB_WORKFLOW_REF GITHUB_WORKFLOW_SHA GITHUB_SHA GITHUB_HEAD_REF GITHUB_BASE_REF; do
+            echo "$v=${!v-<unset>}"
+          done
+
+      - name: The hook must refuse, on the event
+        run: |
+          set +e
+          bash scripts/ci-runner/job-started.sh > hook.out 2>&1
+          rc=$?
+          set -e
+          cat hook.out
+          if [ "$rc" -eq 0 ]; then echo "::error::the hook ADMITTED a pull_request run"; exit 1; fi
+          if ! grep -q "refused: event (repo=" hook.out; then
+            echo "::error::refused, but not on the event: an override may have reached an earlier check"
+            exit 1
+          fi
+          echo "RED OK: refused on the event despite the overrides"
