@@ -1,18 +1,41 @@
 import type * as DiagnosticsHandlers from "@beadbox/server/handlers"
-import { AlertCircle, AlertTriangle, ArrowUpCircle, Check, CheckCircle2, ChevronDown, CircleHelp, CircleX, Copy, ExternalLink, FolderOpen, GitBranch, Keyboard, Loader2, Minus, Plus, RefreshCw, RotateCcw, Settings, Stethoscope, Trash2, X } from "lucide-react"
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowUpCircle,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  CircleHelp,
+  CircleX,
+  Copy,
+  ExternalLink,
+  FolderOpen,
+  GitBranch,
+  Keyboard,
+  Loader2,
+  Minus,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Settings,
+  Stethoscope,
+  Trash2,
+  X,
+} from "lucide-react"
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { safeCapture } from "../lib/posthog-safe"
 import type { ThemeVariant, UpdateCheckFrequency } from "../lib/local-storage"
 import { clearCache, getAnalyticsEnabled, setAnalyticsEnabled } from "../lib/local-storage"
+import { safeCapture } from "../lib/posthog-safe"
 // P3.1 source-divergence:
 //   - actions/system { openInFileManager, getLogDirectory } → rpc.system.*
 //   - actions/diagnostics { runDiagnostics } → rpc.diagnostics.runDiagnostics
 //   - actions/diagnostics types come from packages/server/src/handlers/diagnostics
 //     (single source of truth; rpc surface mirrors handler exports)
 //   - dynamic import("@/actions/epics") for getCacheStats → rpc.epics.getCacheStats
-import { rpc } from "../lib/rpc"
+import { isTauriRuntime, rpc } from "../lib/rpc"
 import type { UpdateInfo } from "../lib/update-checker"
 import { cn } from "../lib/utils"
 import { CustomStatusesManager } from "./custom-statuses-manager"
@@ -109,6 +132,7 @@ interface SettingsDialogProps {
   zoomLevel: number
   onZoomChange: (level: number) => void
   databasePath?: string
+  workspaceId?: string
   vimNavigationEnabled: boolean
   onVimNavigationChange: (enabled: boolean) => void
   updateCheckEnabled: boolean
@@ -137,6 +161,7 @@ export function SettingsDialog({
   zoomLevel,
   onZoomChange,
   databasePath,
+  workspaceId,
   vimNavigationEnabled,
   onVimNavigationChange,
   updateCheckEnabled,
@@ -154,8 +179,7 @@ export function SettingsDialog({
   const [isTauri, setIsTauri] = useState(false)
 
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setIsTauri(!!(window as any).__TAURI_INTERNALS__)
+    setIsTauri(isTauriRuntime())
   }, [])
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
   const [focusedThemeIndex, setFocusedThemeIndex] = useState(0)
@@ -696,7 +720,7 @@ export function SettingsDialog({
             )}
             {activeTab === "workflow" && (
               <CustomStatusesManager
-                databasePath={databasePath}
+                databasePath={workspaceId ?? databasePath}
                 onStatusesChanged={onCustomStatusesChanged}
               />
             )}
@@ -956,8 +980,7 @@ export function SettingsDialog({
             <button
               onClick={() => {
                 const url = "https://github.com/beadbox/beadbox"
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                if ((window as any).__TAURI_INTERNALS__) {
+                if (isTauriRuntime()) {
                   window.location.href = url
                 } else {
                   window.open(url, "_blank", "noopener,noreferrer")
@@ -976,8 +999,7 @@ export function SettingsDialog({
                 // public repo does not carry, so it 404'd. Releases is the
                 // public changelog.
                 const url = "https://github.com/beadbox/beadbox/releases"
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                if ((window as any).__TAURI_INTERNALS__) {
+                if (isTauriRuntime()) {
                   window.location.href = url
                 } else {
                   window.open(url, "_blank", "noopener,noreferrer")
@@ -1345,8 +1367,7 @@ function HelpTabContent({
         <button
           onClick={() => {
             const url = "https://github.com/beadbox/beadbox/issues"
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            if ((window as any).__TAURI_INTERNALS__) {
+            if (isTauriRuntime()) {
               window.location.href = url
             } else {
               window.open(url, "_blank", "noopener,noreferrer")

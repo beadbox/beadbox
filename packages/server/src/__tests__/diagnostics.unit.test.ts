@@ -72,15 +72,10 @@ describe("runDiagnostics", () => {
     }
   })
 
-  test("active-workspace fallback uses registry value verbatim", async () => {
-    // Note: actions/diagnostics.ts uses `getActiveWorkspace()` which returns a
-    // workspace UUID, then treats that string as if it were a databasePath.
-    // The handler mirrors this exactly. The result is that path validation
-    // rejects the UUID — same behavior on both surfaces. This test pins the
-    // parity rather than the desirability of the underlying flow.
+  test("active-workspace fallback resolves the registry UUID", async () => {
     await writeFile(
       sandboxRegistry,
-      JSON.stringify({
+      `${JSON.stringify({
         version: 2,
         activeWorkspace: "ws-1",
         workspaces: [
@@ -93,12 +88,11 @@ describe("runDiagnostics", () => {
             mode: "embedded",
           },
         ],
-      }) + "\n",
+      })}\n`,
     )
 
     const result = await runDiagnostics()
     expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/Invalid workspace path/i)
-    expect(result.error).toContain("ws-1")
+    expect(result.error).not.toMatch(/Invalid workspace path/i)
   })
 })

@@ -10,6 +10,37 @@ mod credentials;
 pub mod paths;
 #[cfg(not(target_os = "ios"))]
 mod telemetry_id;
+#[cfg(all(unix, not(target_os = "ios")))]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(all(unix, not(target_os = "ios")))]
+use tauri_plugin_js::JsExt;
+
+#[cfg(all(unix, not(target_os = "ios")))]
+static SIDECAR_DRAIN_STARTED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(all(unix, not(target_os = "ios")))]
+async fn drain_sidecar_before_exit(app: tauri::AppHandle) {
+    let js = app.js();
+    if let Ok(processes) = js.list_processes().await {
+        for process in processes.into_iter().filter(|process| process.name == "beadbox-sidecar") {
+            if let Some(pid) = process.pid {
+                // PID comes from the plugin's owned child table immediately before signalling.
+                let _ = std::process::Command::new("kill")
+                    .arg("-TERM")
+                    .arg(pid.to_string())
+                    .status();
+            }
+        }
+    }
+    for _ in 0..300 {
+        let still_running = js.list_processes().await.map(|processes| {
+            processes.iter().any(|process| process.name == "beadbox-sidecar")
+        }).unwrap_or(false);
+        if !still_running { break; }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    app.exit(0);
+}
 // beadbox-b2p (A-3'): private-repo self-update driven from the Rust host.
 #[cfg(not(target_os = "ios"))]
 
@@ -155,7 +186,16 @@ pub fn run() {
             .build(tauri::generate_context!())
             .expect("error while building tauri application");
 
-        app.run(|_app_handle, _event| {});
+        app.run(|app_handle, event| {
+            #[cfg(unix)]
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if !SIDECAR_DRAIN_STARTED.swap(true, Ordering::SeqCst) {
+                    api.prevent_exit();
+                    let app = app_handle.clone();
+                    tauri::async_runtime::spawn(drain_sidecar_before_exit(app));
+                }
+            }
+        });
     }
 
     // ── iOS: minimal WebView-only app (no sidecar) ──

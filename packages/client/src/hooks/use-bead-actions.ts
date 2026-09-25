@@ -137,7 +137,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
     // Server update
     startTransition(async () => {
       const result = await trackedAction("updateBeadPriority", () =>
-        updateBeadPriority(beadId, priority, currentWorkspace?.databasePath),
+        updateBeadPriority(beadId, priority, currentWorkspace?.id),
       )
       if (!result.success) {
         console.error("Failed to update priority:", result.error)
@@ -148,9 +148,15 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
   }
 
   const handleBeadUpdate = (updatedBead: Bead) => {
+    const previous = findBeadById([...epics, ...backlogEpics, ...archivedEpics], updatedBead.id)
     updateBeadInEpics(updatedBead.id, () => updatedBead)
-    // Reload to ensure left pane reflects the change
-    loadEpics()
+    // Field edits are already visible in the tree. The change subscription
+    // fetches the authoritative tree once after bd commits; fetching here as
+    // well doubles the slow remote read for every title edit. A hierarchy
+    // change still needs an immediate rebuild to move the item between roots.
+    if (previous && (previous.type !== updatedBead.type || previous.parentId !== updatedBead.parentId)) {
+      void loadEpics()
+    }
   }
 
   const handleAddComment = (beadId: string, comment: Comment) => {
@@ -164,7 +170,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
     // Server update
     startTransition(async () => {
       const result = await trackedAction("addComment", () =>
-        addCommentAction(beadId, comment.content, currentWorkspace?.databasePath),
+        addCommentAction(beadId, comment.content, currentWorkspace?.id),
       )
       if (!result.success) {
         console.error("Failed to add comment:", result.error)
@@ -208,7 +214,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
 
       startTransition(async () => {
         const result = await trackedAction("deleteBead", () =>
-          deleteBead(beadId, currentWorkspace?.databasePath),
+          deleteBead(beadId, currentWorkspace?.id),
         )
         if (result.success) {
           toast.success("Bead deleted")
@@ -229,7 +235,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
     },
     [
       handleCloseDetail,
-      currentWorkspace?.databasePath,
+      currentWorkspace?.id,
       loadEpics,
       treeContainerRef,
       removeBeadFromEpics,
@@ -264,6 +270,10 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
 
       // Check if the bead is in backlog or archive
       const bead = findBead(beadId, [...epics, ...backlogEpics, ...archivedEpics, ...archivedBeads])
+      if (targetEpicId === "_standalone" && bead?.type === "milestone") {
+        toast("Milestones stay in Milestones")
+        return
+      }
       const isInBacklog = bead?.priority === "backlog"
       const isInArchive = bead?.labels?.includes("archived")
 
@@ -277,7 +287,13 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
       // null so the equality matches newParentId's null sentinel for the
       // _toplevel/_standalone targets.
       const currentParentId = bead?.parentId ?? null
-      if (bead && currentParentId === newParentId && !demoteToTask && !isInBacklog && !isInArchive) {
+      if (
+        bead &&
+        currentParentId === newParentId &&
+        !demoteToTask &&
+        !isInBacklog &&
+        !isInArchive
+      ) {
         toast("Already in this epic")
         return
       }
@@ -294,35 +310,39 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
       startTransition(async () => {
         // Update parent
         const result = await trackedAction("updateBeadParent", () =>
-          updateBeadParent(beadId, newParentId, currentWorkspace?.databasePath),
+          updateBeadParent(beadId, newParentId, currentWorkspace?.id),
         )
         if (!result.success) {
           console.error("Failed to move bead:", result.error)
         }
 
         // Promote to epic if dropping on "Make top-level epic"
-        if (targetEpicId === "_toplevel" && bead?.type !== "epic") {
+        if (
+          targetEpicId === "_toplevel" &&
+          bead &&
+          !["epic", "milestone", "convoy", "molecule"].includes(bead.type)
+        ) {
           await trackedAction("updateBeadType", () =>
-            updateBeadType(beadId, "epic", currentWorkspace?.databasePath),
+            updateBeadType(beadId, "epic", currentWorkspace?.id),
           )
         }
 
         // Demote epic to task if requested
         if (demoteToTask && bead?.type === "epic") {
           await trackedAction("updateBeadType", () =>
-            updateBeadType(beadId, "task", currentWorkspace?.databasePath),
+            updateBeadType(beadId, "task", currentWorkspace?.id),
           )
         }
 
         // If moving from backlog or archive, restore priority / remove labels
         if (isInBacklog) {
           await trackedAction("updateBeadPriority", () =>
-            updateBeadPriority(beadId, "medium", currentWorkspace?.databasePath),
+            updateBeadPriority(beadId, "medium", currentWorkspace?.id),
           )
         }
         if (isInArchive) {
           await trackedAction("archiveBead", () =>
-            archiveBead(beadId, false, currentWorkspace?.databasePath),
+            archiveBead(beadId, false, currentWorkspace?.id),
           )
         }
 
@@ -330,7 +350,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
         loadEpics()
       })
     },
-    [currentWorkspace?.databasePath, loadEpics, epics, backlogEpics, archivedEpics, archivedBeads],
+    [currentWorkspace?.id, loadEpics, epics, backlogEpics, archivedEpics, archivedBeads],
   )
 
   // Validate if an epic can be moved to a target (prevents circular references)
@@ -366,7 +386,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
       // No optimistic update: keep the row visible with a spinner until bd confirms.
       // Optimistic removal caused flicker when WS refreshes fired mid-operation.
       const result = await trackedAction("archiveBead", () =>
-        archiveBead(id, archived, currentWorkspace?.databasePath),
+        archiveBead(id, archived, currentWorkspace?.id),
       )
       if (!result.success) {
         console.error("Failed to archive bead:", result.error)
@@ -376,7 +396,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
       }
       await loadEpics()
     },
-    [currentWorkspace?.databasePath, loadEpics, epics],
+    [currentWorkspace?.id, loadEpics, epics],
   )
 
   // Archive handler for BeadTable rows (always archives, returns Promise for spinner)
@@ -393,7 +413,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
       startTransition(async () => {
         const priority = inBacklog ? ("backlog" as const) : ("medium" as const)
         const result = await trackedAction("updateBeadPriority", () =>
-          updateBeadPriority(id, priority, currentWorkspace?.databasePath),
+          updateBeadPriority(id, priority, currentWorkspace?.id),
         )
         if (!result.success) {
           console.error("Failed to update backlog status:", result.error)
@@ -404,7 +424,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
         loadEpics()
       })
     },
-    [currentWorkspace?.databasePath, loadEpics],
+    [currentWorkspace?.id, loadEpics],
   )
 
   // Epic close confirmation: close/archive children too
@@ -416,20 +436,20 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
     startTransition(async () => {
       if (action === "close") {
         await trackedAction("closeBeadChildren", () =>
-          closeBeadChildren(childIds, currentWorkspace?.databasePath),
+          closeBeadChildren(childIds, currentWorkspace?.id),
         )
         const result = await trackedAction("closeBead", () =>
-          closeBead(epicId, currentWorkspace?.databasePath),
+          closeBead(epicId, currentWorkspace?.id),
         )
         if (!result.success) {
           toastError("Failed to close epic", { description: result.error })
         }
       } else {
         await trackedAction("archiveBeadChildren", () =>
-          archiveBeadChildren(childIds, currentWorkspace?.databasePath),
+          archiveBeadChildren(childIds, currentWorkspace?.id),
         )
         const result = await trackedAction("archiveBead", () =>
-          archiveBead(epicId, true, currentWorkspace?.databasePath),
+          archiveBead(epicId, true, currentWorkspace?.id),
         )
         if (!result.success) {
           toastError("Failed to archive epic", { description: result.error })
@@ -438,7 +458,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
       loadEpics()
     })
     setEpicCloseConfirm(null)
-  }, [epicCloseConfirm, currentWorkspace?.databasePath, loadEpics])
+  }, [epicCloseConfirm, currentWorkspace?.id, loadEpics])
 
   // Epic close confirmation: proceed without handling children
   const handleEpicCloseOnly = useCallback(() => {
@@ -449,14 +469,14 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
       if (action === "close") {
         updateBeadInEpics(epicId, (bead) => ({ ...bead, status: "closed" as BeadStatus }))
         const result = await trackedAction("closeBead", () =>
-          closeBead(epicId, currentWorkspace?.databasePath),
+          closeBead(epicId, currentWorkspace?.id),
         )
         if (!result.success) {
           toastError("Failed to close epic", { description: result.error })
         }
       } else {
         const result = await trackedAction("archiveBead", () =>
-          archiveBead(epicId, true, currentWorkspace?.databasePath),
+          archiveBead(epicId, true, currentWorkspace?.id),
         )
         if (!result.success) {
           toastError("Failed to archive epic", { description: result.error })
@@ -465,7 +485,7 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
       loadEpics()
     })
     setEpicCloseConfirm(null)
-  }, [epicCloseConfirm, currentWorkspace?.databasePath, loadEpics, updateBeadInEpics])
+  }, [epicCloseConfirm, currentWorkspace?.id, loadEpics, updateBeadInEpics])
 
   return {
     isPending,

@@ -10,15 +10,16 @@
 // error frame and lose the message detail the dev console + activity feed
 // rely on.
 
-import { type BdBead, type BdOptions, listActivity, listBeads } from "../lib/bd"
+import { type BdBead, listActivity, listBeads } from "../lib/bd"
 import type { ActivityEvent } from "../lib/types"
+import { workspaceTargetOptions } from "./workspace-target-options"
 
 export async function getActivityEvents(
   dbPath?: string,
   limit: number = 100,
 ): Promise<{ events: ActivityEvent[]; error?: string }> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
   try {
+    const { options } = await workspaceTargetOptions(dbPath)
     const events = await listActivity(options, limit)
     return { events }
   } catch (error: unknown) {
@@ -30,8 +31,8 @@ export async function getActivityEvents(
 export async function listBeadsByStatus(
   dbPath?: string,
 ): Promise<{ beads: BdBead[]; error?: string }> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
   try {
+    const { options } = await workspaceTargetOptions(dbPath)
     const beads = await listBeads(options)
     return { beads }
   } catch (error: unknown) {
@@ -45,8 +46,8 @@ export async function getActivityEventsSince(
   since: string,
   limit: number = 100,
 ): Promise<{ events: ActivityEvent[]; error?: string }> {
-  const options: BdOptions = { db: dbPath }
   try {
+    const { options } = await workspaceTargetOptions(dbPath)
     const events = await listActivity(options, limit, since)
     return { events }
   } catch (error: unknown) {

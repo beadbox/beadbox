@@ -2,7 +2,6 @@
 
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { safeCapture } from "../lib/posthog-safe"
 import {
   getAnalyticsEnabled,
   getUpdateCheckEnabled,
@@ -10,10 +9,10 @@ import {
   getUpdateDismissedVersion,
   setUpdateDismissedVersion,
 } from "../lib/local-storage"
-import { checkForUpdate, type UpdateCheckOptions, type UpdateInfo } from "../lib/update-checker"
+import { safeCapture } from "../lib/posthog-safe"
+import { checkForUpdate, type UpdateInfo } from "../lib/update-checker"
 
 const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.0.0"
-const BUILD_TAG = import.meta.env.VITE_BUILD_TAG ?? ""
 
 interface UpdateCheckerConfig {
   enabled?: boolean

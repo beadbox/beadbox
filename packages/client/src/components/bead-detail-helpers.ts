@@ -16,6 +16,9 @@ export type FieldName =
   | "deferUntil"
   | "estimatedMinutes"
   | "design"
+  | "description"
+  | "acceptanceCriteria"
+  | "notes"
 
 export interface FieldState {
   isSaving: boolean
@@ -33,6 +36,9 @@ export const initialFieldStates: Record<FieldName, FieldState> = {
   deferUntil: { isSaving: false, hasError: false },
   estimatedMinutes: { isSaving: false, hasError: false },
   design: { isSaving: false, hasError: false },
+  description: { isSaving: false, hasError: false },
+  acceptanceCriteria: { isSaving: false, hasError: false },
+  notes: { isSaving: false, hasError: false },
 }
 
 // ---------------------------------------------------------------------------

@@ -2,13 +2,14 @@
 
 import { getMoleculeStructure } from "../lib/bd"
 import type { MoleculeGraph } from "../lib/types"
+import { workspaceTargetOptions } from "./workspace-target-options"
 
 export async function loadMoleculeGraph(
   beadId: string,
   dbPath?: string,
 ): Promise<{ success: true; graph: MoleculeGraph } | { success: false; error: string }> {
   try {
-    const graph = await getMoleculeStructure(beadId, dbPath ? { db: dbPath } : {})
+    const graph = await getMoleculeStructure(beadId, (await workspaceTargetOptions(dbPath)).options)
     return { success: true, graph }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to load molecule graph"

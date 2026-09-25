@@ -24,6 +24,7 @@ import { BunIo, RPCChannel } from "kkrpc"
 import { type HandlerRegistry, handlers } from "./handlers"
 import { closeLogFile } from "./lib/log-file"
 import { startParentDeathWatcherViaShell } from "./lib/parent-death-watcher"
+import { serveManager } from "./lib/serve-manager"
 
 // bb-x0il (replaces bb-6x9y's Worker-based variant): when the parent
 // (Tauri host in production, bash/Claude Code wrapper in dev) dies
@@ -36,7 +37,7 @@ import { startParentDeathWatcherViaShell } from "./lib/parent-death-watcher"
 // mode does NOT bundle, so the production sidecar silently no-op'd).
 // No-op when started as a daemon (process.ppid === 1) or when Tauri
 // reaps us cleanly via SIGTERM before the next 5s poll.
-const stopWatcher = startParentDeathWatcherViaShell()
+const stopWatcher = startParentDeathWatcherViaShell({ signal: "TERM" })
 
 // Boot diagnostic on stderr — proves "did the binary even start?" when smoke
 // tests fail. stdout is reserved for kkrpc frames, so this can't go there.
@@ -100,7 +101,7 @@ function captureShutdownSource(): { parentChain: string; beadboxProcs: string } 
   return { parentChain, beadboxProcs }
 }
 
-function shutdown(signal: NodeJS.Signals): void {
+async function shutdown(signal: NodeJS.Signals | "fatal", exitCode = 0): Promise<void> {
   if (shuttingDown) return
   shuttingDown = true
 
@@ -116,7 +117,7 @@ function shutdown(signal: NodeJS.Signals): void {
   // the main event loop is blocked (BunIo stdin reader, kkrpc message in
   // flight, or a hanging cleanup step below). Same problem bb-6x9y solved
   // for the parent-death watcher: spawn /bin/sh which has its own
-  // independent scheduler. The shell child sleeps 2s then SIGKILLs us;
+  // independent scheduler. The shell child sleeps 30s then SIGKILLs us;
   // if process.exit(0) succeeds first, the kill -KILL on our (now-gone)
   // pid is a silent no-op. stderr inherits ours so the escalation line
   // lands in bb-pnk0's tee + tauri-plugin-js's onStderr relay.
@@ -125,7 +126,7 @@ function shutdown(signal: NodeJS.Signals): void {
       [
         "/bin/sh",
         "-c",
-        `sleep 2; printf '[bb-0vlu] shutdown_watchdog_escalating signal=${signal} pid=${process.pid} reason=process_exit_hung\\n' >&2; kill -KILL ${process.pid} 2>/dev/null`,
+        `sleep 30; printf '[bb-0vlu] shutdown_watchdog_escalating signal=${signal} pid=${process.pid} reason=process_exit_hung\\n' >&2; kill -KILL ${process.pid} 2>/dev/null`,
       ],
       { stdio: ["ignore", "ignore", "inherit"] },
     )
@@ -144,20 +145,27 @@ function shutdown(signal: NodeJS.Signals): void {
   } catch (err) {
     process.stderr.write(`[beadbox-sidecar] channel.destroy() threw: ${String(err)}\n`)
   }
+  try {
+    await serveManager.stopAll()
+  } catch (err) {
+    process.stderr.write(`[beadbox-sidecar] bd serve shutdown failed: ${String(err)}\n`)
+  }
   closeLogFile()
-  process.exit(0)
+  process.exit(exitCode)
 }
-process.on("SIGTERM", shutdown)
-process.on("SIGINT", shutdown)
+process.on("SIGTERM", () => { void shutdown("SIGTERM") })
+process.on("SIGINT", () => { void shutdown("SIGINT") })
 
 // Uncaught failures must never silently kill the sidecar without leaving a
 // trace. Write to stderr (Tauri host relays it as a `js-process-stderr`
 // event) and exit non-zero so the parent treats it as a crash.
 process.on("uncaughtException", (err) => {
   process.stderr.write(`[beadbox-sidecar] uncaughtException: ${err.stack ?? String(err)}\n`)
-  process.exit(1)
+  void shutdown("fatal", 1)
 })
 process.on("unhandledRejection", (reason) => {
-  process.stderr.write(`[beadbox-sidecar] unhandledRejection: ${String(reason)}\n`)
-  process.exit(1)
+  process.stderr.write(
+    `[beadbox-sidecar] unhandledRejection: ${reason instanceof Error ? (reason.stack ?? String(reason)) : String(reason)}\n`,
+  )
+  void shutdown("fatal", 1)
 })

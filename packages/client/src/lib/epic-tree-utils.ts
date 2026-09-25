@@ -107,13 +107,14 @@ function matchesSearch(bead: Bead, filters: Filters): boolean {
 
 const BEAD_FILTER_PREDICATES: BeadFilterPredicate[] = [
   // Hide messages unless explicitly shown
-  (b, f) => f.showMessages || b.type !== "message",
+  (b, f) => f.showMessages || f.type === "message" || f.includeSystem || b.type !== "message",
   // beadbox-brg: multi-select status. Strict whitelist — bead matches if
   // its status is in the array. Empty array → nothing visible (Gmail/Linear
   // convention). The FilterBar populates a sensible default on first paint
   // so empty only happens via explicit "deselect all".
   (b, f) => f.status.includes(b.status),
   (b, f) => f.priority === "all" || b.priority === f.priority,
+  (b, f) => !f.type || f.type === "all" || b.type === f.type,
   (b, f) => f.assignee === "all" || b.assignee === f.assignee,
   (b, f) => !f.hasSpec || Boolean(b.specId),
   (b, f) => !f.hasDeadline || Boolean(b.dueAt),
@@ -209,19 +210,28 @@ export function findParentPath(
   beadId: string,
   path: { id: string; title: string }[] = [],
 ): { id: string; title: string }[] | null {
-  for (const epic of epics) {
-    const currentPath = [...path, { id: epic.id, title: epic.title }]
-
-    // Check direct children
-    if (epic.children?.some((child) => child.id === beadId)) {
-      return currentPath
-    }
-
-    // Check child epics
-    if (epic.childEpics) {
-      const result = findParentPath(epic.childEpics, beadId, currentPath)
+  function findInChildren(
+    parent: Bead,
+    parentPath: { id: string; title: string }[],
+  ): { id: string; title: string }[] | null {
+    for (const child of parent.children ?? []) {
+      if (child.id === beadId) return parentPath
+      const result = findInChildren(child, [...parentPath, { id: child.id, title: child.title }])
       if (result) return result
     }
+    if ("childEpics" in parent && Array.isArray(parent.childEpics)) {
+      for (const childEpic of parent.childEpics) {
+        if (childEpic.id === beadId) return parentPath
+        const result = findInChildren(childEpic, [...parentPath, { id: childEpic.id, title: childEpic.title }])
+        if (result) return result
+      }
+    }
+    return null
+  }
+  for (const epic of epics) {
+    const currentPath = [...path, { id: epic.id, title: epic.title }]
+    const result = findInChildren(epic, currentPath)
+    if (result) return result
   }
   return null
 }

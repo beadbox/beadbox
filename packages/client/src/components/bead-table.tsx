@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  Flag,
   Ghost,
   GitMerge,
   Hexagon,
@@ -26,7 +27,7 @@ import {
   Wrench,
   Zap,
 } from "lucide-react"
-import React, { useState } from "react"
+import { useState } from "react"
 import { CopyableId } from "@/components/copyable-id"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -34,7 +35,7 @@ import { useViewport } from "@/hooks/use-viewport"
 import { type BadgeConfig, getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
 import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
-import type { Bead, BeadPriority, BeadType, ReadState } from "@/lib/types"
+import type { Bead, ReadState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface BeadTableProps {
@@ -273,7 +274,15 @@ function BeadRow({
           <CopyableId id={bead.id} />
         </div>
         <div className="bead-row-type shrink-0">
-          <PillBadge config={typeConfig[bead.type]} />
+          <PillBadge
+            config={
+              typeConfig[bead.type] ?? {
+                label: bead.type,
+                className: "bg-slate-500/20 text-slate-400 border-slate-500/40",
+                icon: <Hexagon className="h-3 w-3" />,
+              }
+            }
+          />
         </div>
         {bead.specId && (
           <Tooltip>
@@ -433,7 +442,7 @@ function BeadRow({
                         beadParts.length > 1 &&
                         depParts[0] === beadParts[0]
                       ) {
-                        return "." + depParts.slice(1).join(".")
+                        return `.${depParts.slice(1).join(".")}`
                       }
                       return dep.id
                     })
@@ -497,7 +506,7 @@ function BeadRow({
   )
 }
 
-const typeConfig: Record<BeadType, BadgeConfig> = {
+const typeConfig: Record<string, BadgeConfig> = {
   bug: {
     label: "Bug",
     className: "bg-red-500/20 text-red-400 border-red-500/40",
@@ -517,6 +526,11 @@ const typeConfig: Record<BeadType, BadgeConfig> = {
     label: "Epic",
     className: "bg-amber-500/20 text-amber-400 border-amber-500/40",
     icon: <Layers className="h-3 w-3" />,
+  },
+  milestone: {
+    label: "Milestone",
+    className: "bg-sky-500/20 text-sky-400 border-sky-500/40",
+    icon: <Flag className="h-3 w-3" />,
   },
   chore: {
     label: "Chore",

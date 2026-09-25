@@ -7,6 +7,7 @@
 //   - actions/molecules.loadMoleculeGraph → rpc.molecules.loadMoleculeGraph
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { ForceGraphMethods } from "react-force-graph-3d"
 import ForceGraph3D from "react-force-graph-3d"
 import * as THREE from "three"
 import { rpc } from "../lib/rpc"
@@ -56,8 +57,7 @@ interface MoleculeDagProps {
 
 export function MoleculeDag({ beadId, dbPath, onBeadNavigate }: MoleculeDagProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const graphRef = useRef<any>(undefined)
+  const graphRef = useRef<ForceGraphMethods | undefined>(undefined)
   const [graph, setGraph] = useState<MoleculeGraph | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -91,7 +91,7 @@ export function MoleculeDag({ beadId, dbPath, onBeadNavigate }: MoleculeDagProps
   }, [beadId, dbPath])
 
   useEffect(() => {
-    if (!containerRef.current) return
+    if (!graph || !containerRef.current) return
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect

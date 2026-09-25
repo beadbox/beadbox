@@ -46,6 +46,11 @@ interface FilterBarProps {
   assignees: string[]
   rigNames?: string[]
   availableStatuses?: string[]
+  availableTypes?: string[]
+  selectedType?: string
+  onTypeChange?: (type: string) => void
+  includeSystem?: boolean
+  onIncludeSystemChange?: (enabled: boolean) => void
   sort: SortOption
   onSortChange: (sort: SortOption) => void
 }
@@ -87,12 +92,105 @@ function statusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+interface StatusFilterProps {
+  filters: Filters
+  allStatuses: string[]
+  allSelected: boolean
+  masterChecked: boolean | "indeterminate"
+  isDesktop: boolean
+  triggerLabel: string
+  onToggleAll: () => void
+  onToggleStatus: (status: BeadStatus) => void
+  onToggleGrouped: () => void
+}
+
+function StatusFilter({
+  filters,
+  allStatuses,
+  allSelected,
+  masterChecked,
+  isDesktop,
+  triggerLabel,
+  onToggleAll,
+  onToggleStatus,
+  onToggleGrouped,
+}: StatusFilterProps) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          className={cn(
+            "justify-between font-normal",
+            isDesktop
+              ? "w-[160px] h-9 px-3 bg-transparent border-0 rounded-none"
+              : "w-full min-h-[44px] bg-transparent border border-border/50",
+          )}
+        >
+          <span className="truncate">{triggerLabel}</span>
+          <SlidersHorizontal className="h-3.5 w-3.5 opacity-50 shrink-0" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-0" align="start">
+        <div className="py-1">
+          <button
+            type="button"
+            onClick={onToggleAll}
+            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
+          >
+            <Checkbox
+              checked={masterChecked}
+              className="pointer-events-none"
+              aria-label="All Status"
+            />
+            <span className="font-medium">All Status</span>
+          </button>
+          <div className="my-1 border-t border-border" />
+          {allStatuses.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onToggleStatus(s as BeadStatus)}
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
+            >
+              <Checkbox
+                checked={filters.status.includes(s as BeadStatus)}
+                className="pointer-events-none"
+                aria-label={statusLabel(s)}
+              />
+              <span>{statusLabel(s)}</span>
+            </button>
+          ))}
+          <div className="my-1 border-t border-border" />
+          <button
+            type="button"
+            onClick={onToggleGrouped}
+            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
+          >
+            <Checkbox
+              checked={filters.grouped}
+              className="pointer-events-none"
+              aria-label="Grouped"
+            />
+            <span>Grouped</span>
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 export function FilterBar({
   filters,
   onFiltersChange,
   assignees,
   rigNames,
   availableStatuses,
+  availableTypes = [],
+  selectedType = "all",
+  onTypeChange,
+  includeSystem = false,
+  onIncludeSystemChange,
   sort,
   onSortChange,
 }: FilterBarProps) {
@@ -151,128 +249,64 @@ export function FilterBar({
     return `${filters.status.length} statuses`
   }
 
-  const filterControls = (
-    <>
-      {/* Status Filter — beadbox-brg multi-select + Grouped toggle */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            variant="ghost"
-            className={cn(
-              "justify-between font-normal",
-              isDesktop
-                ? "w-[160px] h-9 px-3 bg-transparent border-0 rounded-none"
-                : "w-full min-h-[44px] bg-transparent border border-border/50",
-            )}
-          >
-            <span className="truncate">{statusTriggerLabel()}</span>
-            <SlidersHorizontal className="h-3.5 w-3.5 opacity-50 shrink-0" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-56 p-0" align="start">
-          <div className="py-1">
-            <button
-              type="button"
-              onClick={toggleAllStatuses}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
+  function renderFilterControls() {
+    return (
+      <>
+        <StatusFilter
+          filters={filters}
+          allStatuses={allStatuses}
+          allSelected={allSelected}
+          masterChecked={allSelected ? true : filters.status.length === 0 ? false : "indeterminate"}
+          isDesktop={isDesktop}
+          triggerLabel={statusTriggerLabel()}
+          onToggleAll={toggleAllStatuses}
+          onToggleStatus={toggleStatus}
+          onToggleGrouped={() => updateFilter("grouped", !filters.grouped)}
+        />
+
+        {/* Priority Filter */}
+        {onTypeChange && (
+          <Select value={selectedType} onValueChange={onTypeChange}>
+            <SelectTrigger
+              className={
+                isDesktop
+                  ? "w-[140px] h-9 bg-transparent border-0 rounded-none"
+                  : "w-full min-h-[44px] bg-transparent border-border/50"
+              }
+              aria-label="Issue type"
             >
-              <Checkbox
-                checked={
-                  allSelected
-                    ? true
-                    : filters.status.length === 0
-                      ? false
-                      : "indeterminate"
-                }
-                className="pointer-events-none"
-                aria-label="All Status"
-              />
-              <span className="font-medium">All Status</span>
-            </button>
-            <div className="my-1 border-t border-border" />
-            {allStatuses.map((s) => {
-              const checked = filters.status.includes(s as BeadStatus)
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => toggleStatus(s as BeadStatus)}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
-                >
-                  <Checkbox
-                    checked={checked}
-                    className="pointer-events-none"
-                    aria-label={statusLabel(s)}
-                  />
-                  <span>{statusLabel(s)}</span>
-                </button>
-              )
-            })}
-            <div className="my-1 border-t border-border" />
-            <button
-              type="button"
-              onClick={() => updateFilter("grouped", !filters.grouped)}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
-            >
-              <Checkbox
-                checked={filters.grouped}
-                className="pointer-events-none"
-                aria-label="Grouped"
-              />
-              <span>Grouped</span>
-            </button>
-          </div>
-        </PopoverContent>
-      </Popover>
+              <SelectValue placeholder="Issue type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              {[...new Set([selectedType, ...availableTypes])]
+                .filter((type) => type !== "all")
+                .map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {type}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        )}
 
-      {/* Priority Filter */}
-      <Select
-        value={filters.priority}
-        onValueChange={(value) => updateFilter("priority", value as BeadPriority | "all")}
-      >
-        <SelectTrigger
-          className={
-            isDesktop
-              ? "w-[140px] h-9 bg-transparent border-0 rounded-none"
-              : "w-full min-h-[44px] bg-transparent border-border/50"
-          }
+        {/* Priority Filter */}
+        {onIncludeSystemChange && (
+          <label className="flex items-center gap-2 px-3 text-sm cursor-pointer">
+            <Checkbox
+              checked={includeSystem}
+              onCheckedChange={(checked) => onIncludeSystemChange(checked === true)}
+              aria-label="Show system issues"
+            />
+            <span>System issues</span>
+          </label>
+        )}
+
+        {/* Priority Filter */}
+        <Select
+          value={filters.priority}
+          onValueChange={(value) => updateFilter("priority", value as BeadPriority | "all")}
         >
-          <SelectValue placeholder="Priority" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All Priority</SelectItem>
-          <SelectItem value="critical">P0 - Critical</SelectItem>
-          <SelectItem value="high">P1 - High</SelectItem>
-          <SelectItem value="medium">P2 - Medium</SelectItem>
-          <SelectItem value="low">P3 - Low</SelectItem>
-          <SelectItem value="backlog">P4 - Backlog</SelectItem>
-        </SelectContent>
-      </Select>
-
-      {/* Assignee Filter */}
-      <Select value={filters.assignee} onValueChange={(value) => updateFilter("assignee", value)}>
-        <SelectTrigger
-          className={
-            isDesktop
-              ? "w-[165px] h-9 bg-transparent border-0 rounded-none"
-              : "w-full min-h-[44px] bg-transparent border-border/50"
-          }
-        >
-          <SelectValue placeholder="Assignee" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All Assignees</SelectItem>
-          {assignees.map((assignee) => (
-            <SelectItem key={assignee} value={assignee}>
-              {assignee}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      {/* Rig Filter (only for multi-rig workspaces) */}
-      {rigNames && rigNames.length > 0 && (
-        <Select value={filters.rig} onValueChange={(value) => updateFilter("rig", value)}>
           <SelectTrigger
             className={
               isDesktop
@@ -280,140 +314,184 @@ export function FilterBar({
                 : "w-full min-h-[44px] bg-transparent border-border/50"
             }
           >
-            <SelectValue placeholder="Rig" />
+            <SelectValue placeholder="Priority" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Rigs</SelectItem>
-            {rigNames.map((rig) => (
-              <SelectItem key={rig} value={rig}>
-                {rig}
+            <SelectItem value="all">All Priority</SelectItem>
+            <SelectItem value="critical">P0 - Critical</SelectItem>
+            <SelectItem value="high">P1 - High</SelectItem>
+            <SelectItem value="medium">P2 - Medium</SelectItem>
+            <SelectItem value="low">P3 - Low</SelectItem>
+            <SelectItem value="backlog">P4 - Backlog</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {/* Assignee Filter */}
+        <Select value={filters.assignee} onValueChange={(value) => updateFilter("assignee", value)}>
+          <SelectTrigger
+            className={
+              isDesktop
+                ? "w-[165px] h-9 bg-transparent border-0 rounded-none"
+                : "w-full min-h-[44px] bg-transparent border-border/50"
+            }
+          >
+            <SelectValue placeholder="Assignee" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Assignees</SelectItem>
+            {assignees.map((assignee) => (
+              <SelectItem key={assignee} value={assignee}>
+                {assignee}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-      )}
 
-      {/* Sort */}
-      <Select
-        value={encodeSortValue(sort)}
-        onValueChange={(value) => {
-          const newSort = decodeSortValue(value)
-          if (getAnalyticsEnabled()) {
-            safeCapture("app_sort_changed", {
-              sort_field: newSort.field,
-              sort_direction: newSort.direction,
-              previous_field: sort.field,
-              previous_direction: sort.direction,
-            })
-          }
-          onSortChange(newSort)
-        }}
-      >
-        <SelectTrigger
-          className={
-            isDesktop
-              ? "w-[235px] h-9 bg-transparent border-0 rounded-none"
-              : "w-full min-h-[44px] bg-transparent border-border/50"
-          }
-        >
-          <ArrowUpDown className="h-4 w-4 mr-2 text-muted-foreground" />
-          <SelectValue placeholder="Sort by" />
-        </SelectTrigger>
-        <SelectContent>
-          {sortOptions.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        {/* Rig Filter (only for multi-rig workspaces) */}
+        {rigNames && rigNames.length > 0 && (
+          <Select value={filters.rig} onValueChange={(value) => updateFilter("rig", value)}>
+            <SelectTrigger
+              className={
+                isDesktop
+                  ? "w-[140px] h-9 bg-transparent border-0 rounded-none"
+                  : "w-full min-h-[44px] bg-transparent border-border/50"
+              }
+            >
+              <SelectValue placeholder="Rig" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Rigs</SelectItem>
+              {rigNames.map((rig) => (
+                <SelectItem key={rig} value={rig}>
+                  {rig}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-      {/* Filter Toggles */}
-      <TooltipProvider delayDuration={200} skipDelayDuration={0}>
-        <ToggleGroup
-          type="multiple"
-          variant="outline"
-          size={isDesktop ? "sm" : "lg"}
-          value={[
-            ...(filters.showMessages ? ["showMessages"] : []),
-            ...(filters.showWaves ? ["showWaves"] : []),
-            ...(filters.hasSpec ? ["hasSpec"] : []),
-            ...(filters.hasDeadline ? ["hasDeadline"] : []),
-          ]}
-          onValueChange={(value: string[]) => {
-            onFiltersChange({
-              ...filters,
-              showMessages: value.includes("showMessages"),
-              showWaves: value.includes("showWaves"),
-              hasSpec: value.includes("hasSpec"),
-              hasDeadline: value.includes("hasDeadline"),
-            })
+        {/* Sort */}
+        <Select
+          value={encodeSortValue(sort)}
+          onValueChange={(value) => {
+            const newSort = decodeSortValue(value)
+            if (getAnalyticsEnabled()) {
+              safeCapture("app_sort_changed", {
+                sort_field: newSort.field,
+                sort_direction: newSort.direction,
+                previous_field: sort.field,
+                previous_direction: sort.direction,
+              })
+            }
+            onSortChange(newSort)
           }}
         >
-          <TooltipPrimitive.Root>
-            <TooltipTrigger asChild>
-              <ToggleGroupItem
-                value="showMessages"
-                aria-label="Show messages"
-                className={cn(
-                  !isDesktop ? "min-h-[44px] min-w-[44px]" : "",
-                  filters.showMessages && "bg-primary/20 text-primary",
-                )}
-              >
-                <MessageSquare className="h-4 w-4" />
-              </ToggleGroupItem>
-            </TooltipTrigger>
-            <TooltipContent>Show messages</TooltipContent>
-          </TooltipPrimitive.Root>
-          <TooltipPrimitive.Root>
-            <TooltipTrigger asChild>
-              <ToggleGroupItem
-                value="showWaves"
-                aria-label="Show waves"
-                className={cn(
-                  !isDesktop ? "min-h-[44px] min-w-[44px]" : "",
-                  filters.showWaves && "bg-primary/20 text-primary",
-                )}
-              >
-                <Waves className="h-4 w-4" />
-              </ToggleGroupItem>
-            </TooltipTrigger>
-            <TooltipContent>Show waves</TooltipContent>
-          </TooltipPrimitive.Root>
-          <TooltipPrimitive.Root>
-            <TooltipTrigger asChild>
-              <ToggleGroupItem
-                value="hasSpec"
-                aria-label="Has spec"
-                className={cn(
-                  !isDesktop ? "min-h-[44px] min-w-[44px]" : "",
-                  filters.hasSpec && "bg-primary/20 text-primary",
-                )}
-              >
-                <FileText className="h-4 w-4" />
-              </ToggleGroupItem>
-            </TooltipTrigger>
-            <TooltipContent>Has spec</TooltipContent>
-          </TooltipPrimitive.Root>
-          <TooltipPrimitive.Root>
-            <TooltipTrigger asChild>
-              <ToggleGroupItem
-                value="hasDeadline"
-                aria-label="Has deadline"
-                className={cn(
-                  !isDesktop ? "min-h-[44px] min-w-[44px]" : "",
-                  filters.hasDeadline && "bg-primary/20 text-primary",
-                )}
-              >
-                <Calendar className="h-4 w-4" />
-              </ToggleGroupItem>
-            </TooltipTrigger>
-            <TooltipContent>Has deadline</TooltipContent>
-          </TooltipPrimitive.Root>
-        </ToggleGroup>
-      </TooltipProvider>
-    </>
-  )
+          <SelectTrigger
+            className={
+              isDesktop
+                ? "w-[235px] h-9 bg-transparent border-0 rounded-none"
+                : "w-full min-h-[44px] bg-transparent border-border/50"
+            }
+          >
+            <ArrowUpDown className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            {sortOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Filter Toggles */}
+        <TooltipProvider delayDuration={200} skipDelayDuration={0}>
+          <ToggleGroup
+            type="multiple"
+            variant="outline"
+            size={isDesktop ? "sm" : "lg"}
+            value={[
+              ...(filters.showMessages ? ["showMessages"] : []),
+              ...(filters.showWaves ? ["showWaves"] : []),
+              ...(filters.hasSpec ? ["hasSpec"] : []),
+              ...(filters.hasDeadline ? ["hasDeadline"] : []),
+            ]}
+            onValueChange={(value: string[]) => {
+              onFiltersChange({
+                ...filters,
+                showMessages: value.includes("showMessages"),
+                showWaves: value.includes("showWaves"),
+                hasSpec: value.includes("hasSpec"),
+                hasDeadline: value.includes("hasDeadline"),
+              })
+            }}
+          >
+            <TooltipPrimitive.Root>
+              <TooltipTrigger asChild>
+                <ToggleGroupItem
+                  value="showMessages"
+                  aria-label="Show messages"
+                  className={cn(
+                    !isDesktop ? "min-h-[44px] min-w-[44px]" : "",
+                    filters.showMessages && "bg-primary/20 text-primary",
+                  )}
+                >
+                  <MessageSquare className="h-4 w-4" />
+                </ToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent>Show messages</TooltipContent>
+            </TooltipPrimitive.Root>
+            <TooltipPrimitive.Root>
+              <TooltipTrigger asChild>
+                <ToggleGroupItem
+                  value="showWaves"
+                  aria-label="Show waves"
+                  className={cn(
+                    !isDesktop ? "min-h-[44px] min-w-[44px]" : "",
+                    filters.showWaves && "bg-primary/20 text-primary",
+                  )}
+                >
+                  <Waves className="h-4 w-4" />
+                </ToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent>Show waves</TooltipContent>
+            </TooltipPrimitive.Root>
+            <TooltipPrimitive.Root>
+              <TooltipTrigger asChild>
+                <ToggleGroupItem
+                  value="hasSpec"
+                  aria-label="Has spec"
+                  className={cn(
+                    !isDesktop ? "min-h-[44px] min-w-[44px]" : "",
+                    filters.hasSpec && "bg-primary/20 text-primary",
+                  )}
+                >
+                  <FileText className="h-4 w-4" />
+                </ToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent>Has spec</TooltipContent>
+            </TooltipPrimitive.Root>
+            <TooltipPrimitive.Root>
+              <TooltipTrigger asChild>
+                <ToggleGroupItem
+                  value="hasDeadline"
+                  aria-label="Has deadline"
+                  className={cn(
+                    !isDesktop ? "min-h-[44px] min-w-[44px]" : "",
+                    filters.hasDeadline && "bg-primary/20 text-primary",
+                  )}
+                >
+                  <Calendar className="h-4 w-4" />
+                </ToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent>Has deadline</TooltipContent>
+            </TooltipPrimitive.Root>
+          </ToggleGroup>
+        </TooltipProvider>
+      </>
+    )
+  }
 
   if (isDesktop) {
     return (
@@ -429,7 +507,7 @@ export function FilterBar({
             className="pl-9 h-9 bg-transparent border-0 rounded-none"
           />
         </div>
-        {filterControls}
+        {renderFilterControls()}
       </div>
     )
   }
@@ -467,7 +545,7 @@ export function FilterBar({
       </div>
 
       <CollapsibleContent>
-        <div className="flex flex-col gap-2 pt-2">{filterControls}</div>
+        <div className="flex flex-col gap-2 pt-2">{renderFilterControls()}</div>
       </CollapsibleContent>
     </Collapsible>
   )

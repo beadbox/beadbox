@@ -38,9 +38,7 @@ export class HandlerTimeoutError extends Error {
   }
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: generic constraint must accept
-// any handler signature (kkrpc namespace surface is heterogeneous).
-type AnyAsyncFn = (...args: any[]) => Promise<unknown>
+type AnyAsyncFn = (...args: never[]) => Promise<unknown>
 
 export function withHandlerTimeout<F extends AnyAsyncFn>(
   fn: F,

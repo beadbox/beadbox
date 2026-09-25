@@ -13,7 +13,6 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
-import { useHasTrains } from "@/hooks/use-has-trains"
 import {
   Activity,
   AlertTriangle,
@@ -28,9 +27,9 @@ import {
 } from "lucide-react"
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState, useTransition } from "react"
+import { useHasTrains } from "@/hooks/use-has-trains"
 import { useActiveWorkspace } from "../hooks/use-active-workspace"
 import { useAppHealth } from "../hooks/use-app-health"
-import { safeCapture } from "../lib/posthog-safe"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import {
   getAnalyticsEnabled,
@@ -51,6 +50,7 @@ import {
   type ThemeVariant,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
+import { safeCapture } from "../lib/posthog-safe"
 import { rpc } from "../lib/rpc"
 import type {
   FormulaDetail,
@@ -199,7 +199,7 @@ export function FormulasView() {
   const [workspaces] = useState<Workspace[]>(initialWorkspaces)
   // Cookie-resolved active workspace (subscribed — see use-active-workspace).
   const [currentWorkspace, setCurrentWorkspace] = useActiveWorkspace(workspaces)
-  const hasTrains = useHasTrains(currentWorkspace?.databasePath)
+  const hasTrains = useHasTrains(currentWorkspace?.id)
   const [loadingWorkspaceId, setLoadingWorkspaceId] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -292,8 +292,8 @@ export function FormulasView() {
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
     setUpdateCheckFrequencyState(getUpdateCheckFrequency())
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    isTauriRef.current = !!(window as any).__TAURI_INTERNALS__
+    isTauriRef.current = !!(window as Window & { __TAURI_INTERNALS__?: unknown })
+      .__TAURI_INTERNALS__
     if (isTauriRef.current) {
       setZoomLevelState(getZoomLevel())
     }
@@ -341,7 +341,7 @@ export function FormulasView() {
         setLoadingWorkspaceId(null)
       })
     },
-    [currentWorkspace?.id, setHealthy],
+    [currentWorkspace?.id, setHealthy, setCurrentWorkspace],
   )
 
   // Fetch formulas when workspace changes
@@ -349,7 +349,7 @@ export function FormulasView() {
     if (!databasePath) return
     setFormulasLoading(true)
     setFormulasError(null)
-    const result = await rpc.formulas.loadFormulas(databasePath)
+    const result = await rpc.formulas.loadFormulas(currentWorkspace?.id)
     if (result.success) {
       setFormulas(result.data)
     } else {
@@ -357,7 +357,7 @@ export function FormulasView() {
       setFormulas([])
     }
     setFormulasLoading(false)
-  }, [databasePath])
+  }, [databasePath, currentWorkspace?.id])
 
   useEffect(() => {
     fetchFormulas()
@@ -375,10 +375,11 @@ export function FormulasView() {
       setSelectedName(formulas[0].name)
     }
     restoredRef.current = true
-  }, [formulas])
+  }, [formulas, setSelectedName])
 
   // Clear step selection when formula changes
   useEffect(() => {
+    void selectedName
     setSelectedStepId(null)
   }, [selectedName])
 
@@ -390,7 +391,7 @@ export function FormulasView() {
     }
     let cancelled = false
     setDetailLoading(true)
-    rpc.formulas.loadFormulaDetail(selectedName, databasePath).then((result) => {
+    rpc.formulas.loadFormulaDetail(selectedName, currentWorkspace?.id).then((result) => {
       if (cancelled) return
       if (result.success) {
         setDetail(result.data)
@@ -402,7 +403,7 @@ export function FormulasView() {
     return () => {
       cancelled = true
     }
-  }, [selectedName, databasePath])
+  }, [selectedName, databasePath, currentWorkspace?.id])
 
   // Fetch active molecules for the selected formula
   const fetchMolecules = useCallback(async () => {
@@ -411,14 +412,14 @@ export function FormulasView() {
       return
     }
     setMoleculesLoading(true)
-    const result = await rpc.formulas.loadFormulaMolecules(selectedName, databasePath)
+    const result = await rpc.formulas.loadFormulaMolecules(selectedName, currentWorkspace?.id)
     if (result.success) {
       setMolecules(result.data)
     } else {
       setMolecules([])
     }
     setMoleculesLoading(false)
-  }, [selectedName, databasePath])
+  }, [selectedName, databasePath, currentWorkspace?.id])
 
   useEffect(() => {
     fetchMolecules()
@@ -431,7 +432,11 @@ export function FormulasView() {
     async (molId: string) => {
       if (!detail || !databasePath) return
       setOverlayLoading(true)
-      const result = await rpc.formulas.loadMoleculeOverlay(molId, detail.steps, databasePath)
+      const result = await rpc.formulas.loadMoleculeOverlay(
+        molId,
+        detail.steps,
+        currentWorkspace?.id,
+      )
       if (result.success) {
         setOverlay(result.data)
       } else {
@@ -439,7 +444,7 @@ export function FormulasView() {
       }
       setOverlayLoading(false)
     },
-    [detail, databasePath],
+    [detail, databasePath, currentWorkspace?.id],
   )
 
   const handleMoleculeClick = useCallback(
@@ -467,11 +472,28 @@ export function FormulasView() {
     staleTime: Infinity,
   }).dataUpdatedAt
 
+  const liveRefreshRef = useRef({
+    databasePath,
+    selectedName,
+    activeMolId,
+    fetchMolecules,
+    fetchOverlay,
+  })
   useEffect(() => {
-    if (!databasePath) return
-    if (selectedName) fetchMolecules()
-    if (activeMolId) fetchOverlay(activeMolId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- subscribeTick is the live-update trigger; the fetch fns close over current state already
+    liveRefreshRef.current = {
+      databasePath,
+      selectedName,
+      activeMolId,
+      fetchMolecules,
+      fetchOverlay,
+    }
+  }, [databasePath, selectedName, activeMolId, fetchMolecules, fetchOverlay])
+  useEffect(() => {
+    void subscribeTick
+    const current = liveRefreshRef.current
+    if (!current.databasePath) return
+    if (current.selectedName) current.fetchMolecules()
+    if (current.activeMolId) current.fetchOverlay(current.activeMolId)
   }, [subscribeTick])
 
   // Keyboard shortcuts
@@ -494,14 +516,15 @@ export function FormulasView() {
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [router, hasTrains])
 
-  // Track page view
+  // Track the workspace mode present when this page mounts.
+  const initialWorkspaceModeRef = useRef(currentWorkspace?.mode || "unknown")
   useEffect(() => {
     if (getAnalyticsEnabled()) {
       safeCapture("app_formulas_viewed", {
-        workspace_mode: currentWorkspace?.mode || "unknown",
+        workspace_mode: initialWorkspaceModeRef.current,
       })
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleThemeChange = (next: ThemeVariant) => {
     setTheme(next)
@@ -828,6 +851,7 @@ export function FormulasView() {
         zoomLevel={zoomLevel}
         onZoomChange={handleZoomChange}
         databasePath={databasePath}
+        workspaceId={currentWorkspace?.id}
         vimNavigationEnabled={vimEnabled}
         onVimNavigationChange={handleVimNavigationChange}
         updateCheckEnabled={updateCheckEnabled}
@@ -846,7 +870,7 @@ export function FormulasView() {
           open={previewOpen}
           onOpenChange={setPreviewOpen}
           formula={detail}
-          dbPath={databasePath}
+          dbPath={currentWorkspace?.id}
         />
       )}
 
@@ -855,7 +879,7 @@ export function FormulasView() {
           open={pourOpen}
           onOpenChange={setPourOpen}
           formula={detail}
-          dbPath={databasePath}
+          dbPath={currentWorkspace?.id}
         />
       )}
 

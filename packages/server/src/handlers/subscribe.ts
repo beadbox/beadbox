@@ -8,23 +8,28 @@
 import { randomUUID } from "node:crypto"
 
 import { createChangeDetector } from "../lib/change-detector"
-import { formatLine, type SubscriptionEvent } from "../subscribe-protocol"
-import { state } from "./subscribe-internals"
+import type { SubscriptionEvent } from "../subscribe-protocol"
+import { emitForSubscription, state } from "./subscribe-internals"
+import { workspaceTargetOptions } from "./workspace-target-options"
 
-export async function start(workspacePath: string): Promise<{ id: string }> {
+export async function start(workspaceIdOrPath: string): Promise<{ id: string }> {
+  const { target, dbPath } = await workspaceTargetOptions(workspaceIdOrPath)
+  if (!dbPath) throw new Error("Workspace is required for subscription")
   const id = randomUUID()
   const emit = (payload: SubscriptionEvent): void => {
-    state.writer(formatLine(id, payload))
+    emitForSubscription(id, payload)
   }
-  // bb-xe8g: pass id so the server-mode shell-spawn child can format
-  // [SUBSCRIPTION:<id>] lines matching the in-process formatLine emit.
-  const detector = await createChangeDetector(workspacePath, emit, id)
+  const detector = await createChangeDetector(dbPath, emit, id, target?.id)
   state.detectors.set(id, detector)
+  state.paths.set(id, dbPath)
+  if (target) state.workspaceIds.set(id, target.id)
   return { id }
 }
 
 export async function stop(id: string): Promise<void> {
   const detector = state.detectors.get(id)
+  state.paths.delete(id)
+  state.workspaceIds.delete(id)
   if (!detector) return
   state.detectors.delete(id)
   await detector.stop()

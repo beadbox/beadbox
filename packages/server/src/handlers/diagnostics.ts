@@ -7,11 +7,13 @@
 // The old action keeps running. P3 will switch call sites to this handler;
 // P6 will delete the action.
 
-import { dirname } from "path"
+import { dirname } from "node:path"
 import { resolveBdPath } from "../lib/bd-paths"
 import { execFileAsync } from "../lib/exec"
 import { isValidDbPath } from "../lib/path-validation"
 import { getActiveWorkspace } from "../lib/workspace-registry"
+import { resolveWorkspaceTarget } from "../lib/workspace-resolver"
+import { workspaceTransition } from "../lib/workspace-transition"
 
 // bb-2a9b: bd doctor 1.0.x detects the workspace via process.cwd(), not the
 // `--db` flag. The flag controls which database doctor QUERIES, but the
@@ -126,7 +128,7 @@ export async function runDiagnostics(databasePath?: string): Promise<Diagnostics
       error: "No active workspace. Select a workspace to run diagnostics.",
     }
   }
-  if (!isValidDbPath(resolvedPath)) {
+  if (resolvedPath.includes("/") && !isValidDbPath(resolvedPath)) {
     return {
       ok: false,
       passed: 0,
@@ -138,12 +140,17 @@ export async function runDiagnostics(databasePath?: string): Promise<Diagnostics
   }
 
   try {
-    const cwd = projectDirFromDb(resolvedPath)
-    const { stdout, stderr } = await execFileAsync(
-      resolveBdPath(),
-      ["doctor", "--agent", "--json", "--db", resolvedPath],
-      { cwd: cwd || undefined, timeout: 15_000, maxBuffer: 5 * 1024 * 1024 },
-    )
+    const target = await resolveWorkspaceTarget(resolvedPath)
+    const { stdout, stderr } = await workspaceTransition.withOperation(target.id, async () => {
+      const current = await resolveWorkspaceTarget(resolvedPath)
+      if (current.id !== target.id) throw new Error("Workspace target changed")
+      const cwd = projectDirFromDb(current.cliDbPath)
+      return execFileAsync(
+        resolveBdPath(),
+        ["doctor", "--agent", "--json", "--db", current.cliDbPath],
+        { cwd: cwd || undefined, timeout: 15_000, maxBuffer: 5 * 1024 * 1024 },
+      )
+    })
 
     // Defensive: bd 1.0.x can exit 0 with EMPTY stdout when its cwd-based
     // workspace detection misfires (e.g. server-mode workspaces where

@@ -3,7 +3,10 @@ import { existsSync, readFileSync } from "fs"
 import { readFile } from "fs/promises"
 import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
-import { classifyBdError } from "./bd-error"
+import { BdError, classifyBdError } from "./bd-error"
+import { bdServeReadsEnabled } from "./app-config"
+import { buildServerEnv, getWorkspacePassword } from "./credential-provider"
+import { ensureExternalScaffold } from "./external-scaffold"
 import { __resetBdPathCache, COMMON_BD_PATHS, resolveBdPath as getBdPath } from "./bd-paths"
 import { getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import {
@@ -17,10 +20,15 @@ import {
 } from "./bd-argv"
 import { execFileAsync } from "./exec"
 import { recordFlockContention } from "./flock-contention-tracker"
+import { SERVER_POLL_SQL } from "./server-poll-sql"
+import { ServeHttpError, type IssueDetails } from "./serve-http"
+import { serveManager } from "./serve-manager"
+import { resolveWorkspaceTarget, type WorkspaceTarget } from "./workspace-resolver"
+import { workspaceTransition } from "./workspace-transition"
+import { compareVersions } from "./version-requirements"
 import type {
   BeadPriority,
   BeadStatus,
-  BeadType,
   CookedFormula,
   FormulaDetail,
   FormulaSummary,
@@ -32,7 +40,11 @@ import type {
   MolProgressRaw,
   ServerDatabase,
 } from "./types"
-import { parseServerUri, type ServerConnection } from "./workspace-registry"
+import {
+  findExternalWorkspaceByDbPath,
+  parseServerUri,
+  type ServerConnection,
+} from "./workspace-registry"
 
 // Reset helpers are exported for test teardown only.
 // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -132,52 +144,162 @@ async function retryOnFlock<T>(fn: () => Promise<T>, dbPath: string | undefined)
   throw lastError
 }
 
-// In-memory password store keyed by server identity (host:port/database).
-// Passwords never touch disk; they live only in the Node.js sidecar process.
-const workspacePasswords = new Map<string, string>()
-
-// Hydrate passwords from BEADBOX_CRED_* env vars injected by the Tauri host.
-// Env var name: BEADBOX_CRED_{url_encoded_credentialKey}
-// credentialKey format: host:port/database/user
-// Map key format: host:port/database (strip last /segment)
-// Do NOT delete env vars after reading (Turbopack reloads modules).
-const credEnvKeys = Object.keys(process.env).filter((k) => k.startsWith("BEADBOX_CRED_"))
-console.log(
-  `[bd] credential hydration: found ${credEnvKeys.length} BEADBOX_CRED_* env vars: [${credEnvKeys.join(", ")}]`,
-)
-for (const [key, value] of Object.entries(process.env)) {
-  if (key.startsWith("BEADBOX_CRED_") && value) {
-    const encoded = key.slice("BEADBOX_CRED_".length)
-    const credentialKey = decodeURIComponent(encoded)
-    // Strip /user suffix to get the Map key (host:port/database)
-    const lastSlash = credentialKey.lastIndexOf("/")
-    const mapKey = lastSlash > 0 ? credentialKey.slice(0, lastSlash) : credentialKey
-    console.log(`[bd] credential hydration: ${key} -> mapKey="${mapKey}" (has password: true)`)
-    workspacePasswords.set(mapKey, value)
-  }
-}
-
-export function setWorkspacePassword(workspacePath: string, password: string): void {
-  workspacePasswords.set(workspacePath, password)
-}
-
-export function clearWorkspacePassword(workspacePath: string): void {
-  workspacePasswords.delete(workspacePath)
-}
-
-export function getWorkspacePassword(workspacePath: string): string | undefined {
-  return workspacePasswords.get(workspacePath)
-}
+// Keep the public bd.ts exports for existing handlers and tests.
+export {
+  setWorkspacePassword,
+  clearWorkspacePassword,
+  getWorkspacePassword,
+} from "./credential-provider"
 
 // Re-export for existing consumers
 export { __resetBdPathCache, COMMON_BD_PATHS, getBdPath }
 
 export interface BdOptions {
   db?: string // Path to database file
+  workspaceId?: string // Stable registry identity for new RPC callers
   server?: import("./workspace-registry").ServerConnection // For server-only workspaces (env var mode)
   cwd?: string // Working directory
   env?: Record<string, string> // Extra environment variables
   parallel?: boolean // Bypass per-db lock (safe for read-only calls in server mode)
+  includeSystem?: boolean // Include gates, infrastructure, and template issues in lists
+}
+
+type ScopedOptions = BdOptions & { __scoped?: true }
+const verifiedCliTargets = new Set<string>()
+const detailReads = new Map<string, Promise<IssueDetails>>()
+
+async function targetFor(options: BdOptions): Promise<WorkspaceTarget | null> {
+  const key = options.workspaceId ?? options.db
+  if (!key) return null
+  try {
+    return await resolveWorkspaceTarget(key)
+  } catch (error) {
+    if (
+      !options.workspaceId &&
+      options.db &&
+      !options.db.startsWith("server://") &&
+      error instanceof Error &&
+      error.message.startsWith("Workspace not found:")
+    )
+      return null
+    throw error
+  }
+}
+
+async function assertCurrentTarget(target: WorkspaceTarget): Promise<void> {
+  const current = await resolveWorkspaceTarget(target.id)
+  if (current.generation !== target.generation) {
+    throw new Error(`Workspace target changed during operation: ${target.id}`)
+  }
+}
+
+async function withCliScope<T>(
+  options: ScopedOptions,
+  run: (scoped: BdOptions) => Promise<T>,
+): Promise<T> {
+  if (options.__scoped) return run(options)
+  const target = await targetFor(options)
+  if (!target) return run(options)
+  return workspaceTransition.withOperation(target.id, async () => {
+    await assertCurrentTarget(target)
+    const scoped: BdOptions = {
+      ...options,
+      db: target.cliDbPath,
+      server: target.localBeadsDir ? undefined : (target.serverConnection ?? undefined),
+    }
+    const result = await run(scoped)
+    verifiedCliTargets.add(`${target.id}:${target.generation}`)
+    return result
+  })
+}
+
+function mayFallbackToCli(error: unknown, target: WorkspaceTarget): boolean {
+  if (!(error instanceof ServeHttpError)) return false
+  if (error.kind !== "startup" && error.kind !== "transport" && !(error.status === 503))
+    return false
+  return (
+    verifiedCliTargets.has(`${target.id}:${target.generation}`) &&
+    !!target.localBeadsDir &&
+    existsSync(join(target.localBeadsDir, "metadata.json"))
+  )
+}
+
+async function readViaServe<T>(
+  options: BdOptions,
+  capability: string,
+  http: (target: WorkspaceTarget) => Promise<T>,
+  cli: (options: BdOptions) => Promise<T>,
+  retryTransient = true,
+): Promise<T> {
+  const target = await targetFor(options)
+  if (!target || target.mode !== "server" || !(await bdServeReadsEnabled())) return cli(options)
+  return workspaceTransition.withOperation(target.id, async () => {
+    await assertCurrentTarget(target)
+    const scoped: ScopedOptions = { ...options, db: target.cliDbPath, __scoped: true }
+    if (compareVersions(await workspaceTransition.bdVersion(), "1.3.0") < 0) return cli(scoped)
+    // A cold remote serve takes several seconds to complete DB readiness.
+    // The first tree can use the already validated CLI route while serve warms
+    // for subsequent reads; this preserves the single flat-list request.
+    if (capability === "issues.list" && !serveManager.hasReadySession(target)) {
+      serveManager.prewarm(target)
+      console.debug(`[bd-serve] CLI read workspace=${target.id} capability=issues.list reason=cold_start`)
+      return cli(scoped)
+    }
+    const started = performance.now()
+    let retriesUsed = 0
+    try {
+      let retriesLeft = retryTransient ? 1 : 0
+      const withTransientRetry = async <R>(operation: () => Promise<R>): Promise<R> => {
+        try {
+          return await operation()
+        } catch (error) {
+          const transient =
+            error instanceof ServeHttpError &&
+            (error.status === 503 || error.kind === "transport")
+          const delay = error instanceof ServeHttpError && error.status === 503
+            ? (error.retryAfter ?? 0) * 1_000
+            : 200
+          // A server-specified delay beyond the UI budget means no HTTP retry.
+          if (!transient || retriesLeft === 0 || delay > 1_500) throw error
+          retriesLeft -= 1
+          retriesUsed += 1
+          await new Promise((resolve) => setTimeout(resolve, Math.max(delay, 100)))
+          return operation()
+        }
+      }
+      const session = await withTransientRetry(() => serveManager.getSession(target))
+      if (!session.hasCapability(capability)) {
+        console.debug(`[bd-serve] CLI fallback workspace=${target.id} capability=${capability} reason=unsupported`)
+        return cli(scoped)
+      }
+      const result = await withTransientRetry(() => http(target))
+      console.debug(`[bd-serve] HTTP read workspace=${target.id} capability=${capability} elapsedMs=${Math.round(performance.now() - started)} retries=${retriesUsed}`)
+      return result
+    } catch (error) {
+      if (!mayFallbackToCli(error, target)) throw error
+      const reason = error instanceof ServeHttpError ? error.kind : "unknown"
+      const status = error instanceof ServeHttpError ? (error.status ?? 0) : 0
+      const retryAfter = error instanceof ServeHttpError && typeof error.retryAfter === "number"
+        ? error.retryAfter : "none"
+      const code = error instanceof ServeHttpError && error.code && /^[a-z0-9_]+$/.test(error.code)
+        ? error.code : "none"
+      const requestId = error instanceof ServeHttpError && error.requestId && /^[a-zA-Z0-9_-]{1,80}$/.test(error.requestId)
+        ? error.requestId : "none"
+      console.warn(`[bd-serve] CLI fallback workspace=${target.id} capability=${capability} reason=${reason} status=${status} code=${code} request_id=${requestId} retry_after=${retryAfter} elapsedMs=${Math.round(performance.now() - started)} retries=${retriesUsed}`)
+      return cli(scoped)
+    }
+  })
+}
+
+function detailFromServe(target: WorkspaceTarget, id: string): Promise<IssueDetails> {
+  const key = `${target.id}:${target.generation}:${id}`
+  let pending = detailReads.get(key)
+  if (!pending) {
+    pending = serveManager.getSession(target).then((session) => session.getFullIssue(id))
+    detailReads.set(key, pending)
+    void pending.finally(() => detailReads.delete(key)).catch(() => {})
+  }
+  return pending
 }
 
 export interface BdBead {
@@ -187,21 +309,7 @@ export interface BdBead {
   design?: string
   status: "open" | "in_progress" | "ready_for_qa" | "ready_to_ship" | "closed" | "tombstone"
   priority: number // 0-4 (0=critical, 4=low)
-  issue_type:
-    | "bug"
-    | "feature"
-    | "task"
-    | "epic"
-    | "chore"
-    | "message"
-    | "gate"
-    | "merge-request"
-    | "molecule"
-    | "agent"
-    | "role"
-    | "rig"
-    | "convoy"
-    | "event"
+  issue_type: string
   assignee?: string
   owner?: string
   created_by?: string
@@ -422,22 +530,7 @@ export async function getEmbeddedFingerprint(dbPath: string): Promise<string> {
  * Build BEADS_DOLT_SERVER_* environment variables from a server connection.
  * Shared helper used by buildEnv(), workspace-health, and the legacy ws transport.
  */
-export function buildServerEnv(
-  server: ServerConnection,
-  password?: string,
-): Record<string, string> {
-  const env: Record<string, string> = {
-    BEADS_DOLT_SERVER_HOST: server.host,
-    BEADS_DOLT_SERVER_PORT: server.port.toString(),
-    BEADS_DOLT_SERVER_DATABASE: server.database,
-    BEADS_DOLT_SERVER_USER: server.user,
-    BEADS_DOLT_SERVER_TLS: server.tls ? "1" : "",
-  }
-  if (password) {
-    env.BEADS_DOLT_PASSWORD = password
-  }
-  return env
-}
+export { buildServerEnv } from "./credential-provider"
 
 // Best-effort JSON read. Returns parsed contents or null if the file is
 // missing / unreadable / not JSON. bb-fe03.4: helper extracted so callers
@@ -468,17 +561,12 @@ export function readMetadataServerKey(dbPath: string): string | null {
 // metadata.json (scaffold workspaces backed by a remote server).
 export function resolveLocalDbPassword(dbPath: string): string | undefined {
   const wsPath = projectRootFromDb(dbPath)
-  const direct = wsPath ? workspacePasswords.get(wsPath) : undefined
+  const direct = wsPath ? getWorkspacePassword(wsPath) : undefined
   if (direct) return direct
   const serverKey = readMetadataServerKey(dbPath)
   if (!serverKey) return undefined
-  const fromMeta = workspacePasswords.get(serverKey)
-  if (!fromMeta) {
-    console.debug(
-      `[bd] buildEnv: no password for serverKey="${serverKey}" (map has: [${[...workspacePasswords.keys()].join(", ")}])`,
-    )
-  }
-  return fromMeta
+  const external = findExternalWorkspaceByDbPath(dbPath)
+  return getWorkspacePassword(external?.server ? `${serverKey}/${external.server.user}` : serverKey)
 }
 
 // Resolve the BEADS_DOLT_SERVER_PORT injection. Returns undefined when an
@@ -497,7 +585,7 @@ export function resolveDoltPortOverride(
 //
 // bb-fe03.4: lifted password / port resolution into resolveLocalDbPassword
 // + resolveDoltPortOverride; this orchestrator now stays well under CCN 15.
-function buildEnv(options: BdOptions): NodeJS.ProcessEnv | undefined {
+export function buildEnv(options: BdOptions): NodeJS.ProcessEnv | undefined {
   let env: NodeJS.ProcessEnv | undefined = options.env
     ? { ...process.env, ...options.env }
     : undefined
@@ -505,15 +593,30 @@ function buildEnv(options: BdOptions): NodeJS.ProcessEnv | undefined {
   // Server connection (explicit or server:// URI): inject all connection env vars
   const server = resolveServer(options)
   if (server) {
-    const serverKey = `${server.host}:${server.port}/${server.database}`
-    const password = workspacePasswords.get(serverKey)
+    const serverKey = `${server.host}:${server.port}/${server.database}/${server.user}`
+    const password = getWorkspacePassword(serverKey)
     return {
       ...(env ?? process.env),
       ...buildServerEnv(server, password),
+      BEADS_DOLT_AUTO_START: "0",
+      BEADS_DOLT_SERVER_MODE: "1",
     }
   }
 
   if (!options.db) return env
+
+  const externalWorkspace = findExternalWorkspaceByDbPath(options.db)
+  if (externalWorkspace?.server) {
+    const configuredServer = externalWorkspace.server
+    const serverKey = `${configuredServer.host}:${configuredServer.port}/${configuredServer.database}/${configuredServer.user}`
+    const password = getWorkspacePassword(serverKey)
+    return {
+      ...(env ?? process.env),
+      ...buildServerEnv(configuredServer, password),
+      BEADS_DOLT_AUTO_START: "0",
+      BEADS_DOLT_SERVER_MODE: "1",
+    }
+  }
 
   const password = resolveLocalDbPassword(options.db)
   if (password) {
@@ -615,61 +718,73 @@ function handleBdError(
 
 // Execute a bd command and return parsed JSON (serialized per db path).
 async function bdExec<T>(args: string[], options: BdOptions = {}): Promise<T> {
-  const run = async () => {
-    const execArgs = buildArgs(args, options, true)
-    const cwd = options.cwd ?? (options.db ? projectRootFromDb(options.db) : undefined)
-    const subcmd = args[0] ?? "unknown"
-    const t0 = performance.now()
-    try {
-      const { stdout, stderr } = await execBdWithRetry(execArgs, cwd, options)
-      const elapsed = Math.round(performance.now() - t0)
-      console.log(`[bd] ${subcmd} completed in ${elapsed}ms`)
-      if (stderr) {
-        const actionable = stripBdWarnings(stderr)
-        if (actionable) console.error("bd stderr:", actionable)
+  return withCliScope(options, async (scoped) => {
+    const run = async () => {
+      const execArgs = buildArgs(args, scoped, true)
+      const cwd = scoped.cwd ?? (scoped.db ? projectRootFromDb(scoped.db) : undefined)
+      const subcmd = args[0] ?? "unknown"
+      const t0 = performance.now()
+      try {
+        const { stdout, stderr } = await execBdWithRetry(execArgs, cwd, scoped)
+        const elapsed = Math.round(performance.now() - t0)
+        console.log(`[bd] ${subcmd} completed in ${elapsed}ms`)
+        if (stderr) {
+          const actionable = stripBdWarnings(stderr)
+          if (actionable) console.error("bd stderr:", actionable)
+        }
+        const parsed = parseBdJson<T>(stdout)
+        return parsed
+      } catch (error) {
+        const elapsed = Math.round(performance.now() - t0)
+        handleBdError(error, subcmd, elapsed, {
+          rethrowOnContextCanceled: true,
+          logExecArgs: execArgs,
+        })
       }
-      const parsed = parseBdJson<T>(stdout)
-      return parsed
-    } catch (error) {
-      const elapsed = Math.round(performance.now() - t0)
-      handleBdError(error, subcmd, elapsed, {
-        rethrowOnContextCanceled: true,
-        logExecArgs: execArgs,
-      })
     }
-  }
-  const withFlock = () => retryOnFlock(run, options.db)
-  return options.parallel ? withFlock() : withDbLock(lockKeyFromOptions(options), withFlock)
+    const withFlock = () => retryOnFlock(run, scoped.db)
+    return scoped.parallel ? withFlock() : withDbLock(lockKeyFromOptions(scoped), withFlock)
+  })
 }
 
 // Execute a bd command that doesn't return JSON (serialized per db path).
 async function bdExecRaw(args: string[], options: BdOptions = {}): Promise<string> {
-  const run = async () => {
-    const execArgs = buildArgs(args, options, false)
-    const cwd = options.cwd ?? (options.db ? projectRootFromDb(options.db) : undefined)
-    const subcmd = args[0] ?? "unknown"
-    const t0 = performance.now()
-    try {
-      const { stdout } = await execBdWithRetry(execArgs, cwd, options)
-      const elapsed = Math.round(performance.now() - t0)
-      console.log(`[bd] ${subcmd} completed in ${elapsed}ms`)
-      return stdout.trim()
-    } catch (error) {
-      const elapsed = Math.round(performance.now() - t0)
-      handleBdError(error, subcmd, elapsed, {
-        rethrowOnContextCanceled: false,
-      })
+  return withCliScope(options, async (scoped) => {
+    const run = async () => {
+      const execArgs = buildArgs(args, scoped, false)
+      const cwd = scoped.cwd ?? (scoped.db ? projectRootFromDb(scoped.db) : undefined)
+      const subcmd = args[0] ?? "unknown"
+      const t0 = performance.now()
+      try {
+        const { stdout } = await execBdWithRetry(execArgs, cwd, scoped)
+        const elapsed = Math.round(performance.now() - t0)
+        console.log(`[bd] ${subcmd} completed in ${elapsed}ms`)
+        return stdout.trim()
+      } catch (error) {
+        const elapsed = Math.round(performance.now() - t0)
+        handleBdError(error, subcmd, elapsed, {
+          rethrowOnContextCanceled: false,
+        })
+      }
     }
-  }
-  const withFlock = () => retryOnFlock(run, options.db)
-  return options.parallel ? withFlock() : withDbLock(lockKeyFromOptions(options), withFlock)
+    const withFlock = () => retryOnFlock(run, scoped.db)
+    return scoped.parallel ? withFlock() : withDbLock(lockKeyFromOptions(scoped), withFlock)
+  })
 }
 
 // List all epics
 export async function listEpics(options: BdOptions = {}): Promise<BdBead[]> {
   const args = ["list", "--type", "epic", "--status", "all", "--limit", "0"]
   args.push("--flat")
-  return bdExec<BdBead[]>(args, options)
+  return readViaServe(
+    options,
+    "issues.list",
+    async (target) =>
+      (await (
+        await serveManager.getSession(target)
+      ).listIssues({ type: "epic", all: true, limit: 0 })) as unknown as BdBead[],
+    (scoped) => bdExec<BdBead[]>(args, scoped),
+  )
 }
 
 // Get epic status counters (total_children, closed_children for each epic)
@@ -687,9 +802,16 @@ export async function getEpicStatuses(options: BdOptions = {}): Promise<BdEpicSt
 // subcommand (getComments below), called in parallel from
 // getBeadDetail. See __tests__/bd-getBeadDetail-comments.test.ts.
 export async function showBead(id: string, options: BdOptions = {}): Promise<BdBead> {
-  const result = await bdExec<BdBead[]>(["show", assertSafeBeadId(id)], options)
-  // bd show returns an array with a single element
-  return result[0]
+  const safeId = assertSafeBeadId(id)
+  return readViaServe(
+    options,
+    "issues.get",
+    async (target) => (await detailFromServe(target, safeId)) as unknown as BdBead,
+    async (scoped) => {
+      const result = await bdExec<BdBead[]>(["show", safeId], scoped)
+      return result[0]
+    },
+  )
 }
 
 // Get multiple beads by ID in a single call (includes dependents for epics)
@@ -700,7 +822,69 @@ export async function showBeads(ids: string[], options: BdOptions = {}): Promise
 
 // Get comments for a bead
 export async function getComments(id: string, options: BdOptions = {}): Promise<BdComment[]> {
-  return bdExec<BdComment[]>(["comments", assertSafeBeadId(id)], options)
+  const safeId = assertSafeBeadId(id)
+  return readViaServe(
+    options,
+    "issues.get",
+    async (target) =>
+      ((await detailFromServe(target, safeId)).comments ?? []) as unknown as BdComment[],
+    (scoped) => bdExec<BdComment[]>(["comments", safeId], scoped),
+  )
+}
+
+export interface BdDetailRead {
+  bead: BdBead
+  comments: BdComment[]
+  dependencies: BdDependency[]
+  dependents: BdDependency[]
+}
+
+// The detail panel chooses one transport for the whole response. A 503 must
+// never combine an HTTP issue with CLI comments or dependency lists.
+export async function readBeadDetail(
+  id: string,
+  options: BdOptions = {},
+): Promise<BdDetailRead> {
+  const safeId = assertSafeBeadId(id)
+  return readViaServe(
+    options,
+    "issues.get",
+    async (target) => {
+      const detail = await detailFromServe(target, safeId)
+      return {
+        bead: detail as unknown as BdBead,
+        comments: (detail.comments ?? []) as unknown as BdComment[],
+        dependencies: (detail.dependencies ?? []) as unknown as BdDependency[],
+        dependents: (detail.dependents ?? []) as unknown as BdDependency[],
+      }
+    },
+    async (scoped) => {
+      const [shown, comments, dependencies, dependents] = await Promise.allSettled([
+        bdExec<BdBead[]>(["show", safeId], scoped),
+        bdExec<BdComment[]>(["comments", safeId], scoped),
+        bdExec<BdDependency[]>(["dep", "list", safeId], scoped),
+        bdExec<BdDependency[]>(["dep", "list", safeId, "--direction=up"], scoped),
+      ])
+      if (shown.status === "rejected") {
+        if (
+          shown.reason instanceof BdError &&
+          shown.reason.message.includes(`Issue ${safeId} not found`)
+        )
+          throw new Error(`Issue not found: ${safeId}`)
+        throw shown.reason
+      }
+      if (!shown.value[0]) throw new Error(`Issue not found: ${safeId}`)
+      if (comments.status === "rejected") throw comments.reason
+      if (dependencies.status === "rejected") throw dependencies.reason
+      if (dependents.status === "rejected") throw dependents.reason
+      return {
+        bead: shown.value[0],
+        comments: comments.value,
+        dependencies: dependencies.value,
+        dependents: dependents.value,
+      }
+    },
+  )
 }
 
 // Add a comment to a bead
@@ -741,19 +925,17 @@ export async function updateStatus(
 
 // Get custom statuses from bd config
 export async function getCustomStatuses(options: BdOptions = {}): Promise<string[]> {
-  try {
-    const result = await bdExecRaw(["config", "get", "status.custom"], options)
-    // Result may be a comma-separated list or single status
-    const trimmed = result.trim()
+  const parse = (value: string | null): string[] => {
+    const trimmed = value?.trim() ?? ""
     if (!trimmed || trimmed.includes("(not set)")) return []
-    return trimmed
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-  } catch {
-    // Config key doesn't exist or other error
-    return []
+    return trimmed.split(",").map((s) => s.trim()).filter(Boolean)
   }
+  return readViaServe(
+    options,
+    "config.get",
+    async (target) => parse(await (await serveManager.getSession(target)).getSetting("status.custom")),
+    async (scoped) => parse(await bdExecRaw(["config", "get", "status.custom"], scoped)),
+  )
 }
 
 // Replace the custom-status list in bd config. Empty list unsets the key.
@@ -818,6 +1000,20 @@ export async function updateDescription(
   await bdExecRaw(buildUpdateArgs(id, "--description", description), options)
 }
 
+export async function updateTextField(
+  id: string,
+  field: "description" | "acceptanceCriteria" | "notes",
+  value: string,
+  options: BdOptions = {},
+): Promise<void> {
+  const flags = {
+    description: "--description",
+    acceptanceCriteria: "--acceptance",
+    notes: "--notes",
+  } as const
+  await bdExecRaw(buildUpdateArgs(id, flags[field], value), options)
+}
+
 // Update bead type
 export async function updateType(
   id: string,
@@ -846,7 +1042,55 @@ export async function deleteBead(id: string, options: BdOptions = {}): Promise<v
 export async function listBeads(options: BdOptions = {}): Promise<BdBead[]> {
   const args = ["list", "--status", "all", "--limit", "0"]
   args.push("--flat")
-  return bdExec<BdBead[]>(args, options)
+  return readViaServe(
+    options,
+    "issues.list",
+    async (target) =>
+      (await (await serveManager.getSession(target)).listIssues({
+        all: true,
+        limit: 0,
+        ...(options.includeSystem
+          ? { include_gates: true, include_infra: true, include_templates: true }
+          : {}),
+      })) as unknown as BdBead[],
+    async (scoped) => {
+      if (!options.includeSystem) return bdExec<BdBead[]>(args, scoped)
+      // Full view must not silently omit a category on older bd releases.
+      const flags = ["--include-gates", "--include-infra", "--include-templates"]
+      try {
+        return await bdExec<BdBead[]>([...args, ...flags], scoped)
+      } catch (error) {
+        const message = `${(error as { stderr?: string }).stderr ?? ""} ${String(error)}`
+        const unsupported = message.match(
+          /unknown flag:\s*['"]?(--include-(?:gates|infra|templates))/i,
+        )?.[1]
+        if (unsupported) {
+          throw new Error(
+            `The installed bd does not support ${unsupported}; upgrade bd to use All issues view`,
+            { cause: error },
+          )
+        }
+        throw error
+      }
+    },
+  )
+}
+
+interface BdTypesResult {
+  core_types?: Array<string | { name?: string }>
+  custom_types?: Array<string | { name?: string }>
+}
+
+export function parseAvailableTypes(value: BdTypesResult): string[] {
+  const names = [...(value.core_types ?? []), ...(value.custom_types ?? [])]
+    .map((entry) => (typeof entry === "string" ? entry : entry?.name))
+    .filter((name): name is string => typeof name === "string" && name.length > 0)
+  return [...new Set(names)]
+}
+
+export async function getAvailableTypes(options: BdOptions = {}): Promise<string[]> {
+  const result = await bdExec<BdTypesResult>(["types"], options)
+  return parseAvailableTypes(result)
 }
 
 // Map bd priority number to our priority type.
@@ -916,31 +1160,9 @@ export async function updateParent(
   await bdExecRaw(args, options)
 }
 
-// Map bd issue_type to our BeadType.
-//
-// bb-fe03.4: lookup table replaces a 13-case switch (CCN 16 → 2). The
-// keys are the lowercased bd type names; case-insensitive lookup happens
-// via .toLowerCase() at call time. Unknown types default to "task".
-const BEAD_TYPE_BY_NAME: Readonly<Record<string, import("./types").BeadType>> = Object.freeze({
-  bug: "bug",
-  feature: "feature",
-  epic: "epic",
-  chore: "chore",
-  message: "message",
-  gate: "gate",
-  "merge-request": "merge-request",
-  molecule: "molecule",
-  agent: "agent",
-  role: "role",
-  rig: "rig",
-  convoy: "convoy",
-  event: "event",
-  task: "task",
-})
-
 export function mapType(type?: string): import("./types").BeadType {
-  if (!type) return "task"
-  return BEAD_TYPE_BY_NAME[type.toLowerCase()] ?? "task"
+  if (!type?.trim()) throw new Error("bd returned an issue without issue_type")
+  return type
 }
 
 // Dependency types returned by bd dep list
@@ -1050,85 +1272,87 @@ export async function listActivity(
   limit: number = 100,
   since?: string,
 ): Promise<import("./types").ActivityEvent[]> {
-  const args: string[] = []
-  const server = resolveServer(options)
-  if (options.db && !server) {
-    args.push("--db", normalizeDbPath(options.db))
-  }
-  args.push("activity", "--limit", limit.toString())
-  if (since) {
-    args.push(flagArg("--since", since))
-  }
-  args.push("--json")
-  const cwd = options.cwd ?? (options.db && !server ? projectRootFromDb(options.db) : undefined)
+  return withCliScope(options, async (scoped) => {
+    const args: string[] = []
+    const server = resolveServer(scoped)
+    if (scoped.db && !server) {
+      args.push("--db", normalizeDbPath(scoped.db))
+    }
+    args.push("activity", "--limit", limit.toString())
+    if (since) {
+      args.push(flagArg("--since", since))
+    }
+    args.push("--json")
+    const cwd = scoped.cwd ?? (scoped.db && !server ? projectRootFromDb(scoped.db) : undefined)
 
-  try {
-    const result = await withDbLock(lockKeyFromOptions(options), async () => {
-      try {
-        const { stdout, stderr } = await execFileAsync(getBdPath(), args, {
-          cwd,
-          env: buildEnv(options),
-          maxBuffer: 10 * 1024 * 1024,
-        })
-
-        if (stderr) {
-          const actionable = stripBdWarnings(stderr)
-          if (actionable) {
-            console.error("bd activity stderr:", actionable)
-          }
-        }
-
-        return parseBdJson<import("./types").ActivityEvent[]>(stdout)
-      } catch (innerError: unknown) {
-        const innerExecError = innerError as { code?: string }
-        if (innerExecError.code === "ENOENT") {
-          console.warn(`bd not found, re-resolving path...`)
-          __resetBdPathCache()
-          const retryPath = getBdPath()
-          const { stdout: retryActivityStdout } = await execFileAsync(retryPath, args, {
+    try {
+      const result = await withDbLock(lockKeyFromOptions(scoped), async () => {
+        try {
+          const { stdout, stderr } = await execFileAsync(getBdPath(), args, {
             cwd,
-            env: buildEnv(options),
+            env: buildEnv(scoped),
             maxBuffer: 10 * 1024 * 1024,
           })
-          return parseBdJson<import("./types").ActivityEvent[]>(retryActivityStdout)
+
+          if (stderr) {
+            const actionable = stripBdWarnings(stderr)
+            if (actionable) {
+              console.error("bd activity stderr:", actionable)
+            }
+          }
+
+          return parseBdJson<import("./types").ActivityEvent[]>(stdout)
+        } catch (innerError: unknown) {
+          const innerExecError = innerError as { code?: string }
+          if (innerExecError.code === "ENOENT") {
+            console.warn(`bd not found, re-resolving path...`)
+            __resetBdPathCache()
+            const retryPath = getBdPath()
+            const { stdout: retryActivityStdout } = await execFileAsync(retryPath, args, {
+              cwd,
+              env: buildEnv(scoped),
+              maxBuffer: 10 * 1024 * 1024,
+            })
+            return parseBdJson<import("./types").ActivityEvent[]>(retryActivityStdout)
+          }
+          // Strip warnings before classification
+          const innerExec = innerError as { stderr?: string }
+          if (innerExec.stderr) {
+            const cleaned = stripBdWarnings(innerExec.stderr)
+            if (cleaned !== innerExec.stderr) innerExec.stderr = cleaned
+          }
+          classifyBdError(innerError)
         }
-        // Strip warnings before classification
-        const innerExec = innerError as { stderr?: string }
-        if (innerExec.stderr) {
-          const cleaned = stripBdWarnings(innerExec.stderr)
-          if (cleaned !== innerExec.stderr) innerExec.stderr = cleaned
-        }
-        classifyBdError(innerError)
+      })
+      return result
+    } catch (error: unknown) {
+      const execError = error as { stderr?: string; message?: string; code?: string }
+      const stderr = execError.stderr || execError.message || ""
+      const needsFallback = stderr.includes("requires daemon") || stderr.includes("unknown command")
+
+      if (!needsFallback) {
+        throw error
       }
-    })
-    return result
-  } catch (error: unknown) {
-    const execError = error as { stderr?: string; message?: string; code?: string }
-    const stderr = execError.stderr || execError.message || ""
-    const needsFallback = stderr.includes("requires daemon") || stderr.includes("unknown command")
 
-    if (!needsFallback) {
-      throw error
+      // Fallback: synthesize activity from recently-updated issues
+      console.warn("bd activity unavailable, falling back to bd list")
+      const listArgs: string[] = [
+        "list",
+        "--status",
+        "all",
+        "--sort",
+        "updated",
+        "--limit",
+        limit.toString(),
+      ]
+      listArgs.push("--flat")
+      if (since) {
+        listArgs.push("--updated-after", durationToISODate(since))
+      }
+      const issues = await bdExec<BdBead[]>(listArgs, scoped)
+      return synthesizeActivityFromList(issues)
     }
-
-    // Fallback: synthesize activity from recently-updated issues
-    console.warn("bd activity unavailable, falling back to bd list")
-    const listArgs: string[] = [
-      "list",
-      "--status",
-      "all",
-      "--sort",
-      "updated",
-      "--limit",
-      limit.toString(),
-    ]
-    listArgs.push("--flat")
-    if (since) {
-      listArgs.push("--updated-after", durationToISODate(since))
-    }
-    const issues = await bdExec<BdBead[]>(listArgs, options)
-    return synthesizeActivityFromList(issues)
-  }
+  })
 }
 
 // Get workspace status summary (open, in_progress counts, etc.)
@@ -1182,6 +1406,7 @@ export async function initServerScaffold(
     "init",
     flagArg("--prefix", server.database),
     "--server",
+    "--external",
     flagArg("--server-host", server.host),
     flagArg("--server-port", server.port.toString()),
     flagArg("--server-user", server.user),
@@ -1191,7 +1416,7 @@ export async function initServerScaffold(
     "--skip-agents",
     "--skip-hooks",
   ]
-  const env: NodeJS.ProcessEnv = { ...process.env }
+  const env: NodeJS.ProcessEnv = { ...process.env, BEADS_DOLT_AUTO_START: "0" }
   if (password) env.BEADS_DOLT_PASSWORD = password
 
   await execFileAsync(getBdPath(), args, {
@@ -1200,55 +1425,30 @@ export async function initServerScaffold(
     maxBuffer: 10 * 1024 * 1024,
     timeout: 30_000,
   })
+  await ensureExternalScaffold(join(scaffoldDir, ".beads"), server)
 }
 
-// Run a SQL query via mysql2 for server-only workspaces (server:// URIs).
-// bd CLI requires a local .beads/ directory for all commands. Server-only
-// workspaces may not have one (scaffold not yet created or legacy entry).
-// Reads user/password from the workspace registry (parseServerUri only has
-// host:port/database, not the user).
-async function serverSqlQuery<T>(sql: string, options: BdOptions): Promise<T[]> {
-  const server = resolveServer(options)
-  if (!server) throw new Error("serverSqlQuery called without server connection")
-  // parseServerUri defaults user to "root". Look up the actual user from
-  // the registry entry, which stores the user provided during workspace add.
-  const { readRegistry } = await import("./workspace-registry")
-  const registry = await readRegistry()
-  const entry = registry.workspaces.find(
-    (w) =>
-      w.server?.host === server.host &&
-      w.server?.port === server.port &&
-      w.server?.database === server.database,
-  )
-  const user = entry?.server?.user ?? server.user
-  const serverKey = `${server.host}:${server.port}/${server.database}`
-  const password = workspacePasswords.get(serverKey)
-  const conn = await mysql.createConnection({
-    host: server.host,
-    port: server.port,
-    database: server.database,
-    user,
-    password: password || undefined,
-    connectTimeout: 5000,
-  })
-  try {
-    const [rows] = await conn.query(sql)
+async function queryWorkspaceSql<T>(
+  options: BdOptions,
+  sql: string,
+  values: unknown[] = [],
+): Promise<T[]> {
+  const target = await targetFor(options)
+  const dbPath = target?.cliDbPath ?? options.db
+  if (!dbPath) throw new Error("Workspace database path is required")
+  const query = async () => {
+    if (target) await assertCurrentTarget(target)
+    const { getPool } = await import("./dolt-pool")
+    const pool = await getPool(dbPath, target?.id)
+    const [rows] = await pool.query(sql, values)
     return rows as T[]
-  } finally {
-    await conn.end().catch(() => {})
   }
-}
-
-// Check if a db path is a server-only URI with no local .beads/ scaffold.
-// These workspaces need direct MySQL queries instead of bd CLI.
-function isServerOnlyWithoutScaffold(dbPath: string): boolean {
-  if (!dbPath.startsWith("server://")) return false
-  return true // server:// URIs always use direct MySQL for SQL queries
+  return target ? workspaceTransition.withOperation(target.id, query) : query()
 }
 
 // Get a data fingerprint for cache validation.
 // Server-only: direct MySQL query. Embedded: last-touched file.
-// Local server: bd sql via CLI.
+// Local server: direct SQL through the existing pool.
 //
 // bb-gp97 (port of bb-y14e / commit ea7a14a from origin/main): early-
 // return "" when options.db is undefined. Without the guard, the
@@ -1260,19 +1460,12 @@ function isServerOnlyWithoutScaffold(dbPath: string): boolean {
 // this on v0.24.1). Sentinel "" doesn't match any cached fingerprint,
 // forcing the upstream caller to take the cold path.
 export async function getDataFingerprint(options: BdOptions = {}): Promise<string> {
-  if (!options.db) return ""
-  if (options.db && isEmbeddedMode(options.db)) {
-    return await getEmbeddedFingerprint(options.db)
+  const dbPath = options.db ?? (await targetFor(options))?.cliDbPath
+  if (!dbPath) return ""
+  if (isEmbeddedMode(dbPath)) {
+    return await getEmbeddedFingerprint(dbPath)
   }
-  if (options.db && isServerOnlyWithoutScaffold(options.db)) {
-    const sql =
-      "SELECT HASHOF('HEAD') as h, (SELECT MAX(updated_at) FROM issues) as i, (SELECT COUNT(*) FROM comments) as c"
-    const rows = await serverSqlQuery<Record<string, string>>(sql, options)
-    return JSON.stringify(rows)
-  }
-  const sql =
-    "SELECT HASHOF('HEAD') as h, (SELECT MAX(updated_at) FROM issues) as i, (SELECT COUNT(*) FROM comments) as c"
-  const rows = await bdExec<Array<Record<string, string>>>(["sql", sql], options)
+  const rows = await queryWorkspaceSql<Record<string, string>>(options, SERVER_POLL_SQL)
   return JSON.stringify(rows)
 }
 
@@ -1284,19 +1477,16 @@ export async function getDataFingerprint(options: BdOptions = {}): Promise<strin
 // and getAllBlocksDependencies below. Returns [] (forces full rebuild,
 // matching the embedded-mode shape).
 export async function getChangedBeadIds(since: string, options: BdOptions = {}): Promise<string[]> {
-  if (!options.db) return []
-  if (options.db && isEmbeddedMode(options.db)) {
+  const dbPath = options.db ?? (await targetFor(options))?.cliDbPath
+  if (!dbPath) return []
+  if (isEmbeddedMode(dbPath)) {
     return [] // force full rebuild; embedded mode can't do SQL queries
   }
-  if (options.db && isServerOnlyWithoutScaffold(options.db)) {
-    const rows = await serverSqlQuery<{ id: string }>(
-      `SELECT id FROM issues WHERE updated_at > '${since}'`,
-      options,
-    )
-    return rows.map((r) => r.id)
-  }
-  const sql = `SELECT id FROM issues WHERE updated_at > '${since}'`
-  const rows = await bdExec<Array<{ id: string }>>(["sql", sql], options)
+  const rows = await queryWorkspaceSql<{ id: string }>(
+    options,
+    "SELECT id FROM issues WHERE updated_at > ?",
+    [since],
+  )
   return rows.map((r) => r.id)
 }
 
@@ -1306,14 +1496,13 @@ export async function getChangedBeadIds(since: string, options: BdOptions = {}):
 export async function getAllBlocksDependencies(
   options: BdOptions = {},
 ): Promise<Map<string, string[]>> {
-  if (!options.db) return new Map()
-  if (isEmbeddedMode(options.db)) return new Map()
+  const dbPath = options.db ?? (await targetFor(options))?.cliDbPath
+  if (!dbPath) return new Map()
+  if (isEmbeddedMode(dbPath)) return new Map()
 
   try {
-    const sql = `SELECT issue_id, depends_on_id FROM dependencies WHERE type = 'blocks'`
-    const rows = isServerOnlyWithoutScaffold(options.db)
-      ? await serverSqlQuery<{ issue_id: string; depends_on_id: string }>(sql, options)
-      : await bdExec<Array<{ issue_id: string; depends_on_id: string }>>(["sql", sql], options)
+    const sql = `SELECT issue_id, depends_on_issue_id AS depends_on_id FROM dependencies WHERE type = 'blocks'`
+    const rows = await queryWorkspaceSql<{ issue_id: string; depends_on_id: string }>(options, sql)
     if (!rows || rows.length === 0) return new Map()
 
     const map = new Map<string, string[]>()
@@ -1478,7 +1667,7 @@ export async function getMoleculeStructure(
       id: nid,
       title: b?.title ?? nid,
       status: (b?.status ?? "open") as BeadStatus,
-      type: mapType(b?.issue_type) as BeadType,
+      type: b ? mapType(b.issue_type) : "unknown",
       gateType: b?.issue_type === "gate" ? (b.metadata?.gate_type ?? "human") : undefined,
     }
   })
@@ -1545,9 +1734,7 @@ export async function listMoleculesForFormula(
   formulaName: string,
   options: BdOptions = {},
 ): Promise<MoleculeCard[]> {
-  const args = ["list", "--type", "epic", "--status", "all", "--limit", "0"]
-  args.push("--flat")
-  const epics = await bdExec<BdBead[]>(args, options)
+  const epics = await listEpics(options)
   return epics
     .filter((b) => b.id.startsWith("bb-mol-") && b.title.startsWith(formulaName))
     .map((b) => ({

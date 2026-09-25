@@ -59,7 +59,7 @@ export function loadAndClearScrollPosition(): number | null {
     sessionStorage.removeItem(SCROLL_STORAGE_KEY)
     if (stored !== null) {
       const val = parseInt(stored, 10)
-      return isNaN(val) ? null : val
+      return Number.isNaN(val) ? null : val
     }
   } catch {
     // ignore storage errors

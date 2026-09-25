@@ -25,9 +25,12 @@
 //      grant re-opens this endpoint, so treat that file as part of this
 //      module's security contract.
 
+import { buildEnv } from "../lib/bd"
 import { resolveBdPath } from "../lib/bd-paths"
 import { execFileAsync } from "../lib/exec"
 import { isValidDbPath } from "../lib/path-validation"
+import { resolveWorkspaceTarget } from "../lib/workspace-resolver"
+import { workspaceTransition } from "../lib/workspace-transition"
 
 export const ALLOWED_COMMANDS = [
   "show",
@@ -123,22 +126,31 @@ export async function run(opts: ConsoleRunArgs): Promise<ConsoleRunResult> {
     }
   }
 
-  const bdArgs: string[] = []
-  if (db) {
+  if (command !== "help" && !db)
+    return rejectResult("Select a registered workspace for this command")
+  if (db && command !== "help") {
     if (typeof db !== "string" || !isValidDbPath(db)) {
       return rejectResult(
         `Invalid database path: ${db} (must be a .beads directory or a file inside one)`,
       )
     }
-    bdArgs.push("--db", db)
   }
-  bdArgs.push(...args)
 
   try {
-    const { stdout, stderr } = await execFileAsync(resolveBdPath(), bdArgs, {
-      timeout: EXEC_TIMEOUT_MS,
-      maxBuffer: 10 * 1024 * 1024,
-    })
+    const target = db && command !== "help" ? await resolveWorkspaceTarget(db) : null
+    const execute = (scopedDb?: string) =>
+      execFileAsync(resolveBdPath(), scopedDb ? ["--db", scopedDb, ...args] : args, {
+        timeout: EXEC_TIMEOUT_MS,
+        maxBuffer: 10 * 1024 * 1024,
+        env: scopedDb ? buildEnv({ db: scopedDb }) : undefined,
+      })
+    const { stdout, stderr } = target
+      ? await workspaceTransition.withOperation(target.id, async () => {
+          const current = await resolveWorkspaceTarget(db!)
+          if (current.id !== target.id) throw new Error("Workspace target changed")
+          return execute(current.cliDbPath)
+        })
+      : await execute()
     return {
       stdout: stdout ?? "",
       stderr: stderr ?? "",

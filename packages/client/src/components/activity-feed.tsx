@@ -213,7 +213,7 @@ export function ActivityFeed({
       if (!dbPath) return
       setLoading(true)
       setError(null)
-      const result = await rpc.activity.getActivityEvents(dbPath, limit)
+      const result = await rpc.activity.getActivityEvents(workspaceId ?? dbPath, limit)
       if (result.error) {
         setError(result.error)
       } else {
@@ -223,27 +223,27 @@ export function ActivityFeed({
       setLoading(false)
       initialLoadDoneRef.current = true
     },
-    [dbPath],
+    [dbPath, workspaceId],
   )
 
   const loadMore = useCallback(async () => {
     if (!dbPath || loadingMore || !hasMore) return
     setLoadingMore(true)
     const newLimit = events.length + 100
-    const result = await rpc.activity.getActivityEvents(dbPath, newLimit)
+    const result = await rpc.activity.getActivityEvents(workspaceId ?? dbPath, newLimit)
     if (!result.error) {
       setEvents(result.events)
       setHasMore(result.events.length >= newLimit)
     }
     setLoadingMore(false)
-  }, [dbPath, events.length, loadingMore, hasMore])
+  }, [dbPath, workspaceId, events.length, loadingMore, hasMore])
 
   // Fetch new events using a 2-minute window (bd --since expects duration, not timestamp)
   const fetchNewEvents = useCallback(async () => {
     if (!dbPath || !initialLoadDoneRef.current || fetchInProgressRef.current) return
     fetchInProgressRef.current = true
     try {
-      const result = await rpc.activity.getActivityEventsSince(dbPath, "2m")
+      const result = await rpc.activity.getActivityEventsSince(workspaceId ?? dbPath, "2m")
       if (result.error || result.events.length === 0) {
         fetchInProgressRef.current = false
         return
@@ -276,7 +276,7 @@ export function ActivityFeed({
     } finally {
       fetchInProgressRef.current = false
     }
-  }, [dbPath])
+  }, [dbPath, workspaceId])
 
   // Initial load
   useEffect(() => {
@@ -294,9 +294,8 @@ export function ActivityFeed({
         }
       })
     }
-    // Only run once after first successful load
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading])
+    // loadAndClearScrollPosition consumes the saved value on the first successful load.
+  }, [loading, events.length])
 
   // React to changeSignal (WebSocket change events) with debounce
   useEffect(() => {

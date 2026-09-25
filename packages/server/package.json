@@ -23,7 +23,7 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "tsc --noEmit",
-    "test": "bun test",
+    "test": "bun test --parallel=4",
     "typecheck": "tsc --noEmit",
     "quality:mutation": "stryker run stryker.config.json",
     "_note:macos-sign": "macOS rejects unsigned Mach-O with 'load code signature error 4' (Bun --compile gap). copy-sidecar.sh runs --remove-signature first (else --sign errors 'invalid or unsupported format'), then ad-hoc sign. The notarized .app overrides this with the real signing identity at bundle time.",

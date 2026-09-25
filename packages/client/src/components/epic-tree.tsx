@@ -6,9 +6,11 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  Flag,
   Hexagon,
   Inbox,
   Layers,
+  RotateCcw,
   Trash2,
   Truck,
 } from "lucide-react"
@@ -19,11 +21,13 @@ import { MoleculePhaseView } from "@/components/molecule-phase-view"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useViewport } from "@/hooks/use-viewport"
 import { getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
+import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import type { Bead, Epic, ReadState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface EpicTreeProps {
   epics: Epic[]
+  milestones?: Epic[]
   convoys?: Epic[]
   molecules?: Epic[]
   archivedEpics?: Epic[]
@@ -58,7 +62,7 @@ interface EpicTreeProps {
 }
 
 // Depth-based left border colors
-import { countBeadAndSubtasks, getAggregatedCounts } from "@/lib/epic-progress"
+import { getAggregatedCounts } from "@/lib/epic-progress"
 
 const depthBorderColors = [
   "border-l-emerald-500",
@@ -84,6 +88,7 @@ function collectAllEpicIds(epics: Epic[]): string[] {
 
 export function EpicTree({
   epics,
+  milestones = [],
   convoys = [],
   molecules = [],
   archivedEpics = [],
@@ -123,6 +128,7 @@ export function EpicTree({
   const [isDraggingToBacklogSection, setIsDraggingToBacklogSection] = useState(false)
   const [isDraggingToArchiveSection, setIsDraggingToArchiveSection] = useState(false)
   const [isEpicsExpanded, setIsEpicsExpanded] = useState(true)
+  const [isMilestonesExpanded, setIsMilestonesExpanded] = useState(true)
   const [isMoleculesExpanded, setIsMoleculesExpanded] = useState(true)
   const [isConvoysExpanded, setIsConvoysExpanded] = useState(true)
   const [isBacklogExpanded, setIsBacklogExpanded] = useState(false)
@@ -158,16 +164,6 @@ export function EpicTree({
     return false
   }
 
-  // Check if the dragged item is from backlog (including nested items)
-  const isBacklogItem =
-    draggedBeadId &&
-    (isInEpicTree(draggedBeadId, backlogEpics) || isInBeadTree(draggedBeadId, backlogBeads))
-
-  // Check if dragged item is from archive (including nested items)
-  const isArchivedItem =
-    draggedBeadId &&
-    (isInEpicTree(draggedBeadId, archivedEpics) || isInBeadTree(draggedBeadId, archivedBeads))
-
   // Find an epic by ID across all trees
   const findEpicById = (id: string, epicList: Epic[]): Epic | null => {
     for (const epic of epicList) {
@@ -180,9 +176,28 @@ export function EpicTree({
     return null
   }
 
+  const draggedEpic = draggedBeadId
+    ? [epics, milestones, molecules, convoys, backlogEpics, archivedEpics]
+        .map((group) => findEpicById(draggedBeadId, group))
+        .find((epic) => epic !== null)
+    : null
+  const isBacklogItem = Boolean(
+    draggedBeadId &&
+      (draggedEpic?.priority === "backlog" ||
+        isInEpicTree(draggedBeadId, backlogEpics) ||
+        isInBeadTree(draggedBeadId, backlogBeads)),
+  )
+  const isArchivedItem = Boolean(
+    draggedBeadId &&
+      (draggedEpic?.labels?.includes("archived") ||
+        isInEpicTree(draggedBeadId, archivedEpics) ||
+        isInBeadTree(draggedBeadId, archivedBeads)),
+  )
+
   const epicHasChildren = (id: string): boolean => {
     const epic =
       findEpicById(id, epics) ||
+      findEpicById(id, milestones) ||
       findEpicById(id, molecules) ||
       findEpicById(id, convoys) ||
       findEpicById(id, archivedEpics) ||
@@ -191,9 +206,21 @@ export function EpicTree({
     return (epic.children?.length ?? 0) > 0 || (epic.childEpics?.length ?? 0) > 0
   }
 
+  const draggedMilestone = Boolean(
+    draggedBeadId &&
+      [epics, milestones, molecules, convoys, archivedEpics, backlogEpics].some(
+        (group) => findEpicById(draggedBeadId, group)?.type === "milestone",
+      ),
+  )
+
   // Count only actual epics (not _standalone)
   const epicCount = epics.filter((e) => e.id !== "_standalone").length
   const standaloneEpic = epics.find((e) => e.id === "_standalone")
+
+  const milestoneCount = milestones.length
+  const allMilestoneIds = collectAllEpicIds(milestones)
+  const allMilestonesExpanded =
+    allMilestoneIds.length > 0 && allMilestoneIds.every((id) => expandedEpics.has(id))
 
   // Expand/collapse all logic for epics
   const allEpicIds = collectAllEpicIds(epics)
@@ -213,6 +240,97 @@ export function EpicTree({
 
   return (
     <div className="space-y-1 epic-tree-container">
+      {milestoneCount > 0 && (
+        <>
+          <div className="flex items-center bg-muted/10">
+            <button
+              type="button"
+              onClick={() => setIsMilestonesExpanded(!isMilestonesExpanded)}
+              className={cn(
+                "flex-1 flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors",
+                isMobile && "min-h-[44px]",
+              )}
+            >
+              {isMilestonesExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+              <Flag className="h-3.5 w-3.5" />
+              <span className="uppercase tracking-wide font-medium">Milestones</span>
+              <span className="text-muted-foreground/60">({milestoneCount})</span>
+            </button>
+            {isMilestonesExpanded && onSetExpandedEpics && allMilestoneIds.length > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (allMilestonesExpanded) {
+                        onSetExpandedEpics(
+                          Array.from(expandedEpics).filter((id) => !allMilestoneIds.includes(id)),
+                        )
+                      } else {
+                        onSetExpandedEpics([...Array.from(expandedEpics), ...allMilestoneIds])
+                      }
+                    }}
+                    className={cn(
+                      "p-1.5 mr-1 text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-white/[0.07]",
+                      isMobile && "min-h-[44px] min-w-[44px] flex items-center justify-center",
+                    )}
+                  >
+                    {allMilestonesExpanded ? (
+                      <ChevronsDownUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronsUpDown className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {allMilestonesExpanded ? "Collapse all milestones" : "Expand all milestones"}
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+          {isMilestonesExpanded && (
+            <div className="space-y-3 mt-1">
+              {milestones.map((milestone) => (
+                <EpicRow
+                  key={milestone.id}
+                  epic={milestone}
+                  depth={0}
+                  expandedEpics={expandedEpics}
+                  onToggle={onToggleEpic}
+                  onBeadClick={onBeadClick}
+                  onRequestDelete={onDelete}
+                  onArchiveBead={archiveBeadHandler}
+                  onArchiveEpic={onArchive}
+                  onBacklogEpic={onBacklog}
+                  onBeadMove={onBeadMove}
+                  canMoveEpic={canMoveEpic}
+                  dragOverEpicId={dragOverEpicId}
+                  onDragOver={onDragOver}
+                  onDragStart={onDragStart}
+                  onDragEnd={onDragEnd}
+                  draggedBeadId={draggedBeadId}
+                  expandedBeads={expandedBeads}
+                  onToggleBead={onToggleBead}
+                  focusedItemId={focusedItemId}
+                  onFocusItem={onFocusItem}
+                  selectedBeadId={selectedBeadId}
+                  showWaves={showWaves}
+                  selectedIds={selectedIds}
+                  onToggleSelect={onToggleSelect}
+                  onToggleSelectAll={onToggleSelectAll}
+                  isMobile={isMobile}
+                  readState={readState}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
       {/* Epics section header */}
       {epicCount > 0 && (
         <>
@@ -277,6 +395,7 @@ export function EpicTree({
                     onRequestDelete={onDelete}
                     onArchiveBead={archiveBeadHandler}
                     onArchiveEpic={onArchive}
+                    onBacklogEpic={onBacklog}
                     onBeadMove={onBeadMove}
                     canMoveEpic={canMoveEpic}
                     dragOverEpicId={dragOverEpicId}
@@ -314,6 +433,7 @@ export function EpicTree({
           onRequestDelete={onDelete}
           onArchiveBead={archiveBeadHandler}
           onArchiveEpic={onArchive}
+          onBacklogEpic={onBacklog}
           onBeadMove={onBeadMove}
           canMoveEpic={canMoveEpic}
           dragOverEpicId={dragOverEpicId}
@@ -403,6 +523,7 @@ export function EpicTree({
                   onRequestDelete={onDelete}
                   onArchiveBead={archiveBeadHandler}
                   onArchiveEpic={onArchive}
+                  onBacklogEpic={onBacklog}
                   onBeadMove={onBeadMove}
                   canMoveEpic={canMoveEpic}
                   dragOverEpicId={dragOverEpicId}
@@ -497,6 +618,7 @@ export function EpicTree({
                   onRequestDelete={onDelete}
                   onArchiveBead={archiveBeadHandler}
                   onArchiveEpic={onArchive}
+                  onBacklogEpic={onBacklog}
                   onBeadMove={onBeadMove}
                   canMoveEpic={canMoveEpic}
                   dragOverEpicId={dragOverEpicId}
@@ -615,23 +737,26 @@ export function EpicTree({
               onDragOver?.(null)
             }}
           >
-            Make top-level epic
+            {draggedMilestone ? "Make top-level milestone" : "Make top-level epic"}
           </div>
           <div
             className={cn(
               "flex-1 border-2 border-dashed rounded-lg p-3 text-center text-sm text-muted-foreground transition-colors",
+              draggedMilestone && "opacity-50",
               dragOverEpicId === "_loose" ? "border-blue-500 bg-blue-500/10" : "border-border",
             )}
+            aria-disabled={draggedMilestone}
             onDragOver={(e) => {
               e.preventDefault()
-              e.dataTransfer.dropEffect = "move"
-              onDragOver?.("_loose")
+              e.dataTransfer.dropEffect = draggedMilestone ? "none" : "move"
+              if (!draggedMilestone) onDragOver?.("_loose")
             }}
             onDragLeave={() => onDragOver?.(null)}
             onDrop={(e) => {
               e.preventDefault()
               try {
                 const data = JSON.parse(e.dataTransfer.getData("application/x-bead-move"))
+                if (data.type === "milestone") return
                 if (data.type === "epic" && epicHasChildren(data.beadId)) {
                   // Epic with children can't become a loose bead
                   return
@@ -643,7 +768,7 @@ export function EpicTree({
               onDragOver?.(null)
             }}
           >
-            Make loose bead
+            {draggedMilestone ? "Milestones cannot be loose" : "Make loose bead"}
           </div>
         </div>
       )}
@@ -763,6 +888,7 @@ export function EpicTree({
                   onRequestDelete={onDelete}
                   onArchiveBead={archiveBeadHandler}
                   onArchiveEpic={onArchive}
+                  onBacklogEpic={onBacklog}
                   onBeadMove={onBeadMove}
                   canMoveEpic={canMoveEpic}
                   dragOverEpicId={dragOverEpicId}
@@ -928,6 +1054,7 @@ export function EpicTree({
                   onRequestDelete={onDelete}
                   onArchiveBead={archiveBeadHandler}
                   onArchiveEpic={onArchive}
+                  onBacklogEpic={onBacklog}
                   onBeadMove={onBeadMove}
                   canMoveEpic={canMoveEpic}
                   dragOverEpicId={dragOverEpicId}
@@ -995,6 +1122,7 @@ interface EpicRowProps {
   // so the server-confirmed re-render pattern from §4.2.2 is inherited
   // without a new IPC method.
   onArchiveEpic?: (id: string, archived: boolean) => void
+  onBacklogEpic?: (id: string, inBacklog: boolean) => void
   onBeadMove?: (beadId: string, targetEpicId: string, demoteToTask?: boolean) => void
   canMoveEpic?: (epicId: string, targetEpicId: string) => boolean
   dragOverEpicId?: string | null
@@ -1017,6 +1145,33 @@ interface EpicRowProps {
   onToggleSelectAll?: (visibleIds: string[]) => void
 }
 
+function getEpicRowState(
+  epic: Epic,
+  depth: number,
+  isMobile: boolean,
+  isArchived: boolean,
+  isBacklog: boolean,
+) {
+  const hasChildEpics = epic.childEpics && epic.childEpics.length > 0
+  const hasChildBeads = (epic.children?.length ?? 0) > 0
+  const hasContent = hasChildEpics || hasChildBeads
+  const isStandalone = epic.id === "_standalone"
+  return {
+    hasChildEpics,
+    hasChildBeads,
+    hasContent,
+    isEmpty: !hasContent,
+    depthMargin: isMobile ? Math.min(depth, 2) * 6 : depth * 12,
+    isStandalone,
+    rowArchived: isArchived || Boolean(epic.labels?.includes("archived")),
+    rowBacklogged: isBacklog || epic.priority === "backlog",
+    borderColor: isStandalone
+      ? ""
+      : depthBorderColors[Math.min(depth, depthBorderColors.length - 1)],
+    isDraggable: !isStandalone,
+  }
+}
+
 function EpicRow({
   epic,
   depth,
@@ -1026,6 +1181,7 @@ function EpicRow({
   onRequestDelete,
   onArchiveBead,
   onArchiveEpic,
+  onBacklogEpic,
   onBeadMove,
   canMoveEpic,
   dragOverEpicId,
@@ -1050,25 +1206,18 @@ function EpicRow({
   const isExpanded = expandedEpics.has(epic.id)
   const { closed: closedCount, total: totalCount } = getAggregatedCounts(epic)
   const progress = totalCount > 0 ? (closedCount / totalCount) * 100 : 0
-
-  const hasChildEpics = epic.childEpics && epic.childEpics.length > 0
-  const hasChildBeads = (epic.children?.length ?? 0) > 0
-  const hasContent = hasChildEpics || hasChildBeads
-  const isEmpty = !hasContent
-
-  // Calculate left margin based on depth (for nested epics)
-  // Mobile: 6px per level, capped at 2 levels (max 12px) to save space
-  const depthMargin = isMobile ? Math.min(depth, 2) * 6 : depth * 12
-  const isStandalone = epic.id === "_standalone"
-  const borderColor = isStandalone
-    ? ""
-    : depthBorderColors[Math.min(depth, depthBorderColors.length - 1)]
-
-  // All epics are draggable (except the special _standalone pseudo-epic)
-  // - Nested epics can be moved to other parents
-  // - Top-level epics can be archived
-  // - Archived epics can be unarchived
-  const isDraggable = !isStandalone
+  const {
+    hasChildEpics,
+    hasChildBeads,
+    hasContent,
+    isEmpty,
+    depthMargin,
+    isStandalone,
+    rowArchived,
+    rowBacklogged,
+    borderColor,
+    isDraggable,
+  } = getEpicRowState(epic, depth, isMobile, isArchived, isBacklog)
 
   // Render standalone beads with a minimal header instead of a full card
   if (isStandalone) {
@@ -1159,7 +1308,7 @@ function EpicRow({
           if (isDraggable) {
             e.dataTransfer.setData(
               "application/x-bead-move",
-              JSON.stringify({ beadId: epic.id, sourceEpicId: epic.parentId, type: "epic" }),
+              JSON.stringify({ beadId: epic.id, sourceEpicId: epic.parentId, type: epic.type }),
             )
             e.dataTransfer.effectAllowed = "move"
             onDragStart?.(epic.id)
@@ -1179,10 +1328,11 @@ function EpicRow({
         }}
         onDrop={(e) => {
           e.preventDefault()
+          e.stopPropagation()
           try {
             const data = JSON.parse(e.dataTransfer.getData("application/x-bead-move"))
             if (data.sourceEpicId !== epic.id) {
-              if (data.type === "epic") {
+              if (data.type === "epic" || data.type === "milestone") {
                 // Validate epic move: can't drop on self or create cycles
                 if (data.beadId === epic.id) return
                 if (canMoveEpic && !canMoveEpic(data.beadId, epic.id)) return
@@ -1242,7 +1392,7 @@ function EpicRow({
               <TooltipContent>Convoy</TooltipContent>
             </Tooltip>
           )}
-          {!isStandalone && epic.type === "molecule" && (
+          {!isStandalone && isMoleculePresentation(epic) && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Hexagon className="h-3.5 w-3.5 text-pink-400 shrink-0" />
@@ -1250,14 +1400,25 @@ function EpicRow({
               <TooltipContent>Molecule</TooltipContent>
             </Tooltip>
           )}
-          {!isStandalone && epic.type !== "convoy" && epic.type !== "molecule" && (
+          {!isStandalone && epic.type === "milestone" && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Layers className="h-3.5 w-3.5 text-amber-400/60 shrink-0" />
+                <Flag className="h-3.5 w-3.5 text-sky-400 shrink-0" />
               </TooltipTrigger>
-              <TooltipContent>Epic</TooltipContent>
+              <TooltipContent>Milestone</TooltipContent>
             </Tooltip>
           )}
+          {!isStandalone &&
+            epic.type !== "convoy" &&
+            epic.type !== "milestone" &&
+            !isMoleculePresentation(epic) && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Layers className="h-3.5 w-3.5 text-amber-400/60 shrink-0" />
+                </TooltipTrigger>
+                <TooltipContent>Epic</TooltipContent>
+              </Tooltip>
+            )}
           <span
             className={cn(
               "font-medium text-foreground/70 flex-1 truncate min-w-[80px]",
@@ -1275,27 +1436,41 @@ function EpicRow({
           </>
         )}
 
-        {/* beadbox-7xr: row-level Archive button per pm/spec.md §4.2.
-            Hidden on the standalone pseudo-epic and on already-archived
-            rows (those live in the Archived section and have the
-            drag-to-unarchive zone instead). Co-exists with the
-            right-click context menu's archive action (§4.2 Behaviors). */}
-        {onArchiveEpic && !isStandalone && !isArchived && (
+        {onBacklogEpic && !isStandalone && rowBacklogged && !rowArchived && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={`Restore ${epic.type} from backlog: ${epic.title}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onBacklogEpic(epic.id, false)
+                }}
+                className="p-1.5 rounded hover:bg-blue-500/20 text-muted-foreground hover:text-blue-400 transition-colors"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Restore from backlog</TooltipContent>
+          </Tooltip>
+        )}
+
+        {onArchiveEpic && !isStandalone && (
           <Tooltip>
             <TooltipTrigger asChild>
               <div
                 role="button"
                 tabIndex={0}
-                aria-label={`Archive epic: ${epic.title}`}
+                aria-label={`${rowArchived ? "Unarchive" : "Archive"} ${epic.type}: ${epic.title}`}
                 onClick={(e) => {
                   e.stopPropagation()
-                  onArchiveEpic(epic.id, true)
+                  onArchiveEpic(epic.id, !rowArchived)
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.stopPropagation()
                     e.preventDefault()
-                    onArchiveEpic(epic.id, true)
+                    onArchiveEpic(epic.id, !rowArchived)
                   }
                 }}
                 className={cn(
@@ -1306,11 +1481,13 @@ function EpicRow({
                 <Archive className="h-4 w-4" />
               </div>
             </TooltipTrigger>
-            <TooltipContent>Archive epic</TooltipContent>
+            <TooltipContent>
+              {rowArchived ? "Unarchive" : "Archive"} {epic.type}
+            </TooltipContent>
           </Tooltip>
         )}
 
-        {/* Delete button for empty epics */}
+        {/* Delete button for empty root issues */}
         {onRequestDelete && isEmpty && !isStandalone && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1336,7 +1513,7 @@ function EpicRow({
                 <Trash2 className="h-4 w-4" />
               </div>
             </TooltipTrigger>
-            <TooltipContent>Delete empty epic</TooltipContent>
+            <TooltipContent>Delete empty {epic.type}</TooltipContent>
           </Tooltip>
         )}
 
@@ -1408,10 +1585,11 @@ function EpicRow({
           }}
           onDrop={(e) => {
             e.preventDefault()
+            e.stopPropagation()
             try {
               const data = JSON.parse(e.dataTransfer.getData("application/x-bead-move"))
               if (data.sourceEpicId !== epic.id) {
-                if (data.type === "epic") {
+                if (data.type === "epic" || data.type === "milestone") {
                   if (data.beadId === epic.id) return
                   if (canMoveEpic && !canMoveEpic(data.beadId, epic.id)) return
                 }
@@ -1437,6 +1615,7 @@ function EpicRow({
                   onRequestDelete={onRequestDelete}
                   onArchiveBead={onArchiveBead}
                   onArchiveEpic={onArchiveEpic}
+                  onBacklogEpic={onBacklogEpic}
                   onBeadMove={onBeadMove}
                   canMoveEpic={canMoveEpic}
                   dragOverEpicId={dragOverEpicId}
@@ -1463,7 +1642,7 @@ function EpicRow({
           {/* Render child beads */}
           {hasChildBeads && (
             <div className={cn(hasChildEpics && "border-t border-border/30")}>
-              {epic.type === "molecule" ? (
+              {isMoleculePresentation(epic) ? (
                 <MoleculePhaseView
                   beads={epic.children ?? []}
                   epicId={epic.id}

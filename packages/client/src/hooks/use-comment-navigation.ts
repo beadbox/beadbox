@@ -24,6 +24,9 @@ export function useCommentNavigation({
   const [isFirstCommentVisible, setIsFirstCommentVisible] = useState(false)
   const [isLastCommentVisible, setIsLastCommentVisible] = useState(false)
   const [isAtTop, setIsAtTop] = useState(true)
+  const beadId = bead?.id
+  const commentCount = bead?.comments.length ?? 0
+  const previousBeadIdRef = useRef<string | undefined>(undefined)
 
   // Sorted comments
   const sortedComments = useMemo(() => {
@@ -70,9 +73,11 @@ export function useCommentNavigation({
 
   // Reset on bead change
   useEffect(() => {
+    if (previousBeadIdRef.current === beadId) return
+    previousBeadIdRef.current = beadId
     setFocusedCommentIndex(null)
     setIsAtTop(true)
-  }, [bead?.id])
+  }, [beadId])
 
   // Reset focus when panel loses focus
   useEffect(() => {
@@ -84,7 +89,7 @@ export function useCommentNavigation({
     const firstElement = firstCommentRef.current
     const lastElement = lastCommentRef.current
     const container = scrollContainerRef.current
-    if (!container) {
+    if (!container || commentCount === 0) {
       setIsFirstCommentVisible(false)
       setIsLastCommentVisible(false)
       return
@@ -110,19 +115,25 @@ export function useCommentNavigation({
       observers.push(lastObserver)
     }
 
-    return () => observers.forEach((obs) => obs.disconnect())
-  }, [bead?.comments.length, scrollContainerRef])
+    return () => {
+      for (const observer of observers) observer.disconnect()
+    }
+  }, [commentCount, scrollContainerRef])
 
   // Track scroll position
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
+    if (beadId === undefined) {
+      setIsAtTop(true)
+      return
+    }
 
     const handleScroll = () => setIsAtTop(container.scrollTop < 50)
     handleScroll()
     container.addEventListener("scroll", handleScroll)
     return () => container.removeEventListener("scroll", handleScroll)
-  }, [bead?.id, scrollContainerRef])
+  }, [beadId, scrollContainerRef])
 
   const scrollToFirstComment = useCallback(() => {
     firstCommentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })

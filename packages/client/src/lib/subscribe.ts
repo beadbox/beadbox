@@ -26,17 +26,14 @@ import {
   type SubscriptionEvent,
 } from "@beadbox/server/subscribe-protocol"
 import type { UnlistenFn } from "@tauri-apps/api/event"
-import { useEffect, useSyncExternalStore } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { onStderr } from "tauri-plugin-js-api"
 import type { WsLifecycleEvent } from "./console-types"
 import { getAnalyticsEnabled } from "./local-storage"
 import { safeCapture } from "./posthog-safe"
 import { queryClient } from "./query-client"
 import { isTauriRuntime, rpc } from "./rpc"
-import {
-  type BeadboxSubscriptionStamp,
-  ensureBeadboxStamp,
-} from "./window-globals"
+import { type BeadboxSubscriptionStamp, ensureBeadboxStamp } from "./window-globals"
 
 const SIDECAR_NAME = "beadbox-sidecar"
 
@@ -285,6 +282,14 @@ export function useChangeSubscription(
   options: UseChangeSubscriptionOptions = {},
 ): void {
   const { onEvent = applyEvent } = options
+  const [transportEpoch, setTransportEpoch] = useState(0)
+
+  useEffect(() => {
+    if (!runtimeCheck()) return
+    const onSidecarExit = () => setTransportEpoch((epoch) => epoch + 1)
+    window.addEventListener("beadbox:sidecar-exit", onSidecarExit)
+    return () => window.removeEventListener("beadbox:sidecar-exit", onSidecarExit)
+  }, [])
 
   useEffect(() => {
     if (!workspacePath || !runtimeCheck()) return
@@ -345,6 +350,9 @@ export function useChangeSubscription(
           // each mount is a fresh subscription (workspace switch or app start),
           // not a retry of a dropped connection.
           connectedAt = Date.now()
+          if (transportEpoch > 0) {
+            onEvent({ type: "change", timestamp: connectedAt, trigger: "sidecar-reconnected" })
+          }
           if (getAnalyticsEnabled()) {
             safeCapture("ws_connected", { reconnect: false })
           }
@@ -403,5 +411,5 @@ export function useChangeSubscription(
         teardownStamp.workspacePath = null
       }
     }
-  }, [workspacePath, onEvent])
+  }, [workspacePath, onEvent, transportEpoch])
 }

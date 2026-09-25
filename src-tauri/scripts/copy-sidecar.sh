@@ -118,6 +118,7 @@ bun build --compile \
   --sourcemap=none \
   --target="$BUN_TARGET" \
   "$SERVER_DIR/src/index.ts" \
+  "$SERVER_DIR/src/lib/server-poll-worker.ts" \
   --outfile "$OUTFILE"
 
 # macOS rejects unsigned Mach-O with "load code signature error 4" when

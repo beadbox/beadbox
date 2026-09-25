@@ -12,6 +12,7 @@ import { useCallback, useEffect } from "react"
 import { type DownloadStatus, useUpdateDownloader } from "../hooks/use-update-downloader"
 import { getAnalyticsEnabled } from "../lib/local-storage"
 import { safeCapture } from "../lib/posthog-safe"
+import { isTauriRuntime } from "../lib/rpc"
 import type { UpdateInfo } from "../lib/update-checker"
 import { SimpleMarkdown } from "./simple-markdown"
 import { Button } from "./ui/button"
@@ -56,8 +57,7 @@ export function UpdateDialog({
   const { status, progress, error, platform, startDownload, cancelDownload, reset } =
     useUpdateDownloader()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isTauri = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__
+  const isTauri = isTauriRuntime()
 
   // Reset downloader state when dialog closes
   useEffect(() => {
@@ -71,8 +71,7 @@ export function UpdateDialog({
 
   const handleViewOnGitHub = useCallback(() => {
     const url = updateInfo.releaseUrl
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if ((window as any).__TAURI_INTERNALS__) {
+    if (isTauriRuntime()) {
       window.location.href = url
     } else {
       window.open(url, "_blank", "noopener,noreferrer")

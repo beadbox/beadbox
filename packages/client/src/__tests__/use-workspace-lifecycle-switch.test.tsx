@@ -46,9 +46,9 @@ function epic(id: string): Epic {
   return { id, type: "epic", title: id, children: [] } as unknown as Epic
 }
 
-const EPICS_BY_DB: Record<string, Epic[]> = {
-  [alpha.databasePath as string]: [epic("alpha-1")],
-  [beta.databasePath as string]: [epic("beta-1"), epic("beta-2")],
+const EPICS_BY_WORKSPACE: Record<string, Epic[]> = {
+  [alpha.id]: [epic("alpha-1")],
+  [beta.id]: [epic("beta-1"), epic("beta-2")],
 }
 
 type LifecycleResult = ReturnType<typeof useWorkspaceLifecycle>
@@ -69,14 +69,19 @@ function healthSpelling(workspace: Workspace): Workspace {
   return { ...workspace, databasePath: `${workspace.databasePath}/beads.db` }
 }
 
-function mountLifecycle(options: { deferAfter?: number } = {}): Harness {
+function mountLifecycle(
+  options: {
+    deferAfter?: number
+    rejectStatuses?: boolean
+    getAvailableTypes?: (dbPath?: string) => Promise<string[]>
+  } = {},
+): Harness {
   let calls = 0
   let pendingResolve: (() => void) | null = null
 
-  const getEpics = mock((dbPath?: string) => {
+  const getEpics = mock((workspaceId?: string) => {
     calls += 1
-    const key = (dbPath ?? "").replace(/\/beads\.db$/, "")
-    const payload = { success: true as const, epics: EPICS_BY_DB[key] ?? [] }
+    const payload = { success: true as const, epics: EPICS_BY_WORKSPACE[workspaceId ?? ""] ?? [] }
     if (options.deferAfter !== undefined && calls > options.deferAfter) {
       return new Promise<typeof payload>((resolve) => {
         pendingResolve = () => resolve(payload)
@@ -92,8 +97,15 @@ function mountLifecycle(options: { deferAfter?: number } = {}): Harness {
       setActiveWorkspaceAction: mock(() => Promise.resolve()),
     },
     beads: {
-      getAvailableStatuses: mock(() => Promise.resolve(["open", "in_progress", "closed"])),
-      getCustomStatusList: mock(() => Promise.resolve([])),
+      getAvailableTypes: mock(options.getAvailableTypes ?? (() => Promise.resolve(["task"]))),
+      getAvailableStatuses: mock(() =>
+        options.rejectStatuses
+          ? Promise.reject(new Error("Sidecar exited"))
+          : Promise.resolve(["open", "in_progress", "closed"]),
+      ),
+      getCustomStatusList: mock(() =>
+        options.rejectStatuses ? Promise.reject(new Error("Sidecar exited")) : Promise.resolve([]),
+      ),
     },
   } as unknown as RemoteApi)
 
@@ -143,6 +155,67 @@ afterEach(() => {
 })
 
 describe("useWorkspaceLifecycle workspace switching", () => {
+  test("retry keeps type edits disabled until the current catalog succeeds", async () => {
+    setWorkspaceCookie(alpha.id)
+    let releaseRetry: (() => void) | undefined
+    let calls = 0
+    const { seen } = mountLifecycle({
+      getAvailableTypes: () => {
+        calls++
+        if (calls === 1) return Promise.reject(new Error("catalog timed out"))
+        return new Promise<string[]>((resolve) => {
+          releaseRetry = () => resolve(["task", "decision"])
+        })
+      },
+    })
+    await waitFor(() => expect(seen.current?.typeCatalogError).toBe("catalog timed out"))
+    expect(seen.current?.typeCatalogReady).toBe(false)
+
+    act(() => seen.current?.retryAvailableTypes())
+    expect(seen.current?.typeCatalogRetrying).toBe(true)
+    expect(seen.current?.typeCatalogReady).toBe(false)
+    expect(seen.current?.typeCatalogError).toBe("catalog timed out")
+
+    await act(async () => releaseRetry?.())
+    await waitFor(() => expect(seen.current?.typeCatalogReady).toBe(true))
+    expect(seen.current?.availableTypes).toEqual(["task", "decision"])
+    expect(seen.current?.typeCatalogError).toBeNull()
+  })
+
+  test("late retry response from the previous workspace cannot replace current types", async () => {
+    setWorkspaceCookie(alpha.id)
+    let releaseAlpha: (() => void) | undefined
+    let alphaCalls = 0
+    const { seen } = mountLifecycle({
+      getAvailableTypes: (dbPath) => {
+        if (dbPath?.includes("beta")) return Promise.resolve(["beta-type"])
+        alphaCalls++
+        if (alphaCalls === 1) return Promise.reject(new Error("catalog timed out"))
+        return new Promise<string[]>((resolve) => {
+          releaseAlpha = () => resolve(["alpha-type"])
+        })
+      },
+    })
+    await waitFor(() => expect(seen.current?.typeCatalogError).toBe("catalog timed out"))
+    act(() => seen.current?.retryAvailableTypes())
+    await act(async () => setWorkspaceCookie(beta.id))
+    await waitFor(() => expect(seen.current?.currentWorkspace?.id).toBe(beta.id))
+    await waitFor(() => expect(seen.current?.availableTypes).toEqual(["beta-type"]))
+
+    await act(async () => releaseAlpha?.())
+    expect(seen.current?.availableTypes).toEqual(["beta-type"])
+    expect(seen.current?.typeCatalogReady).toBe(true)
+  })
+
+  test("status RPC failures do not block the workspace tree", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { seen } = mountLifecycle({ rejectStatuses: true })
+
+    await waitFor(() => {
+      expect(seen.current?.epics.map((e) => e.id)).toEqual(["alpha-1"])
+    })
+  })
+
   test("a cookie write switches the active workspace and loads its epics", async () => {
     setWorkspaceCookie(alpha.id)
     const { seen } = mountLifecycle()

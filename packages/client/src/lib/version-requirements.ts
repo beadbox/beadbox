@@ -53,7 +53,7 @@ function parseSemver(version: string): [number, number, number] {
   const major = parseInt(parts[0], 10)
   const minor = parseInt(parts[1], 10)
   const patch = parseInt(parts[2], 10)
-  if (isNaN(major) || isNaN(minor) || isNaN(patch)) {
+  if (Number.isNaN(major) || Number.isNaN(minor) || Number.isNaN(patch)) {
     return [0, 0, 0]
   }
   return [major, minor, patch]

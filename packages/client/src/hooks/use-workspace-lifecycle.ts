@@ -22,7 +22,6 @@ import {
   setWorkspaceCookie,
   subscribeWorkspaceCookie,
 } from "@/lib/workspace-cookie"
-import { subscribeWorkspaceLabels } from "@/lib/workspace-labels"
 import { sessionEpics } from "@/lib/workspace-session-cache"
 
 // beadbox-jk7 / cascade-9 diagnostic: ring-buffer push for loadEpics lifecycle
@@ -54,6 +53,53 @@ function recordLoadEpicsPhase(
 // telemetry. Paired with app_workspace_load_succeeded on success, this lets us measure
 // the real load-time distribution instead of conflating "slow but working" with stuck.
 const WORKSPACE_LOAD_TIMEOUT_MS = 15_000
+const systemIssuesKey = (id: string) => `beadbox:system-issues:${id}`
+const treeCacheKey = (id: string | undefined, includeSystem: boolean) =>
+  id ? `${id}:${includeSystem ? "all" : "normal"}` : undefined
+
+function readSystemIssues(id: string | undefined): boolean {
+  if (!id || typeof localStorage === "undefined") return false
+  try {
+    return localStorage.getItem(systemIssuesKey(id)) === "true"
+  } catch {
+    return false
+  }
+}
+
+function modeForWorkspace(id: string | undefined, sessionModes: Record<string, boolean>): boolean {
+  return id ? (sessionModes[id] ?? readSystemIssues(id)) : false
+}
+
+function isHealthReady(healthRef: React.RefObject<AppHealth>): boolean {
+  return healthRef.current.status === "healthy"
+}
+
+function includeSystemForWorkspace(
+  workspace: Workspace | null,
+  savedModes: Record<string, boolean>,
+  sessionModes: Record<string, boolean>,
+): boolean {
+  if (!workspace) return false
+  return savedModes[workspace.id] ?? modeForWorkspace(workspace.id, sessionModes)
+}
+
+type TypeCatalog = {
+  workspaceId: string
+  status: "loading" | "retrying" | "ready" | "error"
+  message?: string
+}
+
+function typeCatalogState(catalog: TypeCatalog | null, workspaceId: string | undefined) {
+  const active = catalog?.workspaceId === workspaceId ? catalog : null
+  return {
+    ready: active?.status === "ready",
+    retrying: active?.status === "retrying",
+    error:
+      active && (active.status === "error" || active.status === "retrying")
+        ? (active.message ?? "Could not load issue types")
+        : null,
+  }
+}
 
 interface UseWorkspaceLifecycleOpts {
   initialWorkspaces: Workspace[]
@@ -66,22 +112,50 @@ interface UseWorkspaceLifecycleOpts {
 }
 
 export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
-  const {
-    initialWorkspaces,
-    appHealth,
-    appHealthRef,
-    setHealthy,
-    setDegraded,
-    setHealthError,
-    setFatal,
-  } = opts
+  const { initialWorkspaces, appHealth, appHealthRef, setHealthy, setHealthError, setFatal } = opts
 
   const navigate = useNavigate()
-  const router = { push: (to: string) => navigate({ to: to as never }) }
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>(initialWorkspaces)
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null)
+  const [systemIssuesByWorkspace, setSystemIssuesByWorkspace] = useState<Record<string, boolean>>(
+    {},
+  )
+  const systemIssuesRef = useRef<Record<string, boolean>>({})
+  const workspaceId = currentWorkspace?.id
+  const workspaceDbPath = currentWorkspace?.databasePath
+  const includeSystem = includeSystemForWorkspace(
+    currentWorkspace,
+    systemIssuesByWorkspace,
+    systemIssuesRef.current,
+  )
+  const setIncludeSystem = useCallback(
+    (enabled: boolean) => {
+      if (!workspaceId) return
+      try {
+        localStorage.setItem(systemIssuesKey(workspaceId), String(enabled))
+      } catch {
+        // Keep this session's setting even when WebView storage is unavailable.
+      }
+      loadGenRef.current++
+      const cached = sessionEpics.get(treeCacheKey(workspaceId, enabled))
+      epicsWorkspaceIdRef.current = cached ? (treeCacheKey(workspaceId, enabled) ?? null) : null
+      setEpics(cached ?? [])
+      hasExistingDataRef.current = !!cached
+      systemIssuesRef.current[workspaceId] = enabled
+      setSystemIssuesByWorkspace((current) => ({ ...current, [workspaceId]: enabled }))
+    },
+    [workspaceId],
+  )
   const [epics, setEpics] = useState<Epic[]>([])
+  const [availableTypes, setAvailableTypes] = useState<string[]>([])
+  const [typeCatalog, setTypeCatalog] = useState<TypeCatalog | null>(null)
+  const {
+    ready: typeCatalogReady,
+    retrying: typeCatalogRetrying,
+    error: typeCatalogError,
+  } = typeCatalogState(typeCatalog, currentWorkspace?.id)
+  const typeCatalogRequestRef = useRef(0)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [loadingWorkspaceId, setLoadingWorkspaceId] = useState<string | null>(null)
@@ -155,6 +229,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const workspaceOpenedFiredRef = useRef<string | null>(null)
   const issuesEventFiredRef = useRef<string | null>(null)
   const timeoutFiredRef = useRef<string | null>(null)
+  const loadStartedFiredRef = useRef(false)
 
   // Derive loadError from health for auto-retry logic and error display components
   const loadError =
@@ -167,13 +242,13 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   // on page.tsx. Without this, users stuck before workspace_opened are
   // invisible to analytics (bb-g4sz). Fires once per hook instance.
   useEffect(() => {
-    if (!getAnalyticsEnabled()) return
+    if (loadStartedFiredRef.current || !getAnalyticsEnabled()) return
+    loadStartedFiredRef.current = true
     safeCapture("app_workspace_load_started", {
       initial_workspace_count: initialWorkspaces.length,
       cookie_present: !!getWorkspaceCookie(),
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only fire; deps would re-fire on unrelated state changes
-  }, [])
+  }, [initialWorkspaces.length])
 
   // Set initial workspace from props (already fetched by StartupGate)
   useEffect(() => {
@@ -191,16 +266,16 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       // check (a workspace it has not verified yet, a retry, StrictMode's
       // double mount in dev), and a fresh instance would otherwise drop
       // back to the skeleton for a tree it already has.
-      const cached = sessionEpics.get(selected?.id)
+      const selectedMode = modeForWorkspace(selected?.id, systemIssuesRef.current)
+      const cached = sessionEpics.get(treeCacheKey(selected?.id, selectedMode))
       if (cached) {
         setEpics(cached)
-        epicsWorkspaceIdRef.current = selected?.id ?? null
+        epicsWorkspaceIdRef.current = treeCacheKey(selected?.id, selectedMode) ?? null
         hasExistingDataRef.current = true
       }
       setCurrentWorkspace(selected)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on mount with initial data; currentWorkspace is being set here
-  }, [initialWorkspaces])
+  }, [initialWorkspaces, currentWorkspace])
 
   // Adopt in-place workspace switches driven by the workspace rail.
   //
@@ -217,6 +292,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   useEffect(() => {
     workspacesRef.current = workspaces
   }, [workspaces])
+  const currentWorkspaceRef = useRef(currentWorkspace)
+  useEffect(() => {
+    currentWorkspaceRef.current = currentWorkspace
+  }, [currentWorkspace])
 
   useEffect(
     () =>
@@ -245,12 +324,14 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         // every switch drops back to the skeleton for the length of a bd +
         // Dolt round trip. hasExistingDataRef gates that skeleton (see
         // home-page's `isLoading && !hasExistingDataRef.current`).
-        const cached = sessionEpics.get(target.id)
-        epicsWorkspaceIdRef.current = target.id
+        const targetMode = modeForWorkspace(target.id, systemIssuesRef.current)
+        const cached = sessionEpics.get(treeCacheKey(target.id, targetMode))
+        epicsWorkspaceIdRef.current = cached ? (treeCacheKey(target.id, targetMode) ?? null) : null
         if (cached) {
           setEpics(cached)
           hasExistingDataRef.current = true
         } else {
+          setEpics([])
           hasExistingDataRef.current = false
         }
       }),
@@ -268,17 +349,17 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   // the previous workspace's tree, and storing that under the new key
   // would turn a one-frame glitch into a persistent wrong-project paint.
   useEffect(() => {
-    if (epicsWorkspaceIdRef.current !== currentWorkspace?.id) return
-    sessionEpics.set(currentWorkspace?.id, epics)
-  }, [epics, currentWorkspace?.id])
+    if (epicsWorkspaceIdRef.current !== treeCacheKey(currentWorkspace?.id, includeSystem)) return
+    sessionEpics.set(treeCacheKey(currentWorkspace?.id, includeSystem), epics)
+  }, [epics, currentWorkspace?.id, includeSystem])
 
   // Fire app_workspace_opened when a workspace STARTS loading (once per workspace.id)
   // This fires at load start so app_issues_rendered (which fires at load end) has
   // a meaningful elapsed time gap — enabling workspace load time measurement.
   useEffect(() => {
-    if (!currentWorkspace || !isLoading || !getAnalyticsEnabled()) return
-    if (workspaceOpenedFiredRef.current === currentWorkspace.id) return
-    workspaceOpenedFiredRef.current = currentWorkspace.id
+    if (!workspaceId || !isLoading || !getAnalyticsEnabled()) return
+    if (workspaceOpenedFiredRef.current === workspaceId) return
+    workspaceOpenedFiredRef.current = workspaceId
     // bb-kr64: anchor the "whole user experience" timer here — once per
     // workspace.id, never reset by auto-retries. Distinct from
     // loadStartTimeRef which resets per attempt.
@@ -291,17 +372,16 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
 
     // After first fire, subsequent workspace changes are manual
     workspaceSourceRef.current = "manual"
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentWorkspace tracked via .id; workspaces.length captured at fire time
-  }, [currentWorkspace?.id, isLoading, workspaces.length])
+  }, [workspaceId, isLoading, workspaces.length])
 
   // Fire app_issues_rendered or app_empty_state_shown once per workspace load,
   // plus app_workspace_load_succeeded with elapsed_ms for load-time distribution
   // analysis (bb-0wpy). Shares the same timer origin (loadStartTimeRef) as
   // app_workspace_load_timeout, so the two events can be compared directly.
   useEffect(() => {
-    if (!currentWorkspace || isLoading || !getAnalyticsEnabled()) return
-    if (issuesEventFiredRef.current === currentWorkspace.id) return
-    issuesEventFiredRef.current = currentWorkspace.id
+    if (!workspaceId || isLoading || !getAnalyticsEnabled()) return
+    if (issuesEventFiredRef.current === workspaceId) return
+    issuesEventFiredRef.current = workspaceId
 
     const issueCount = countAllBeads(epics)
     if (issueCount > 0) {
@@ -331,11 +411,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         initial_switch_ms: switchOrigin > 0 ? Date.now() - switchOrigin : null,
         issue_count: issueCount,
         workspace_count: workspaces.length,
-        had_timeout: timeoutFiredRef.current === currentWorkspace.id,
+        had_timeout: timeoutFiredRef.current === workspaceId,
       })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentWorkspace tracked via .id
-  }, [currentWorkspace?.id, isLoading, epics, workspaces.length])
+  }, [workspaceId, isLoading, epics, workspaces.length])
 
   // Fire app_workspace_load_timeout if issues haven't rendered WORKSPACE_LOAD_TIMEOUT_MS
   // after workspace open. When the timeout fires and no error has been set yet,
@@ -345,10 +424,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   // Mac workspaces legitimately takes >10s; paired with app_workspace_load_succeeded
   // telemetry, we can now measure the real distribution instead of false-alarming.
   useEffect(() => {
-    if (!currentWorkspace) return
-    const wsId = currentWorkspace.id
+    if (!workspaceId) return
+    const wsId = workspaceId
     const capturedSource = workspaceSourceRef.current
-    const capturedWsCount = workspaces.length
+    const capturedWsCount = workspacesRef.current.length
 
     const timer = setTimeout(() => {
       // Analytics: fire timeout event if issues haven't rendered yet.
@@ -377,7 +456,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       // first connections, e.g. server workspaces with setup overhead).
       if (
         !hasExistingDataRef.current &&
-        appHealthRef.current.status === "healthy" &&
+        isHealthReady(appHealthRef) &&
         !loadInProgressRef.current
       ) {
         setIsLoading(false)
@@ -398,41 +477,31 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     }, WORKSPACE_LOAD_TIMEOUT_MS)
 
     return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs (appHealthRef, loadInProgressRef, hasExistingDataRef) and workspaces.length are intentionally excluded to avoid resetting the timer on unrelated state changes
-  }, [currentWorkspace?.id, setHealthError])
+  }, [workspaceId, appHealthRef, setHealthError])
 
   // Refresh workspace list on workspace change (picks up newly added workspaces)
   useEffect(() => {
+    const selected = currentWorkspaceRef.current
+    if (!selected || !workspaceId) return
+    const selectedWorkspace = selected
+    let active = true
     async function refreshWorkspaces() {
-      const ws = await rpc.workspaces.getWorkspaces(currentWorkspace?.databasePath)
+      const ws = await rpc.workspaces.getWorkspaces(workspaceDbPath)
+      if (!active) return
       // Preserve the current workspace if it was resolved via cookie fallback
       // but isn't in the registry (unregistered workspace loaded via direct link).
-      if (currentWorkspace && !ws.some((w) => w.id === currentWorkspace.id)) {
-        ws.push(currentWorkspace)
+      if (!ws.some((w) => w.id === selectedWorkspace.id)) {
+        ws.push(selectedWorkspace)
       }
       setWorkspaces(ws)
     }
-    if (currentWorkspace) {
-      refreshWorkspaces()
+    void refreshWorkspaces()
+    return () => {
+      active = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentWorkspace tracked via .id; full object reference would cause infinite loop
-  }, [currentWorkspace?.id])
+  }, [workspaceId, workspaceDbPath])
 
   // Handle workspace removal (unregister from registry, not delete data)
-  // If removing the active workspace, show confirmation first
-  const handleRemoveWorkspace = useCallback(
-    (workspace: Workspace) => {
-      if (!workspace.databasePath || removingWorkspaceId) return
-      if (currentWorkspace && workspace.id === currentWorkspace.id) {
-        setRemoveConfirm(workspace)
-        return
-      }
-      doRemoveWorkspace(workspace)
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- doRemoveWorkspace is defined below; adding it would create a circular dependency
-    },
-    [currentWorkspace, removingWorkspaceId],
-  )
-
   const doRemoveWorkspace = useCallback(
     async (workspace: Workspace) => {
       if (!workspace.databasePath || removingWorkspaceId) return
@@ -452,7 +521,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         if (!currentWorkspace || workspace.id !== currentWorkspace.id) return
         const next = remaining[0]
         if (!next) {
-          router.push("/workspaces")
+          navigate({ to: "/workspaces" })
           return
         }
         setCurrentWorkspace(next)
@@ -462,7 +531,20 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         setRemoveConfirm(null)
       }
     },
-    [currentWorkspace, router, removingWorkspaceId],
+    [currentWorkspace, navigate, removingWorkspaceId],
+  )
+
+  // If removing the active workspace, show confirmation first.
+  const handleRemoveWorkspace = useCallback(
+    (workspace: Workspace) => {
+      if (!workspace.databasePath || removingWorkspaceId) return
+      if (currentWorkspace && workspace.id === currentWorkspace.id) {
+        setRemoveConfirm(workspace)
+        return
+      }
+      void doRemoveWorkspace(workspace)
+    },
+    [currentWorkspace, removingWorkspaceId, doRemoveWorkspace],
   )
 
   // bb-fe03.7: loadEpics was a 109-NLOC anonymous useCallback at CCN 27 —
@@ -473,9 +555,9 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
 
   // Success branch: persist epics, clear flock contention, hydrate read state.
   const handleEpicsSuccess = useCallback(
-    (result: { epics: Epic[]; workspaceId?: string }) => {
+    (result: { epics: Epic[]; workspaceId?: string; includeSystem: boolean }) => {
       setEpics(result.epics)
-      epicsWorkspaceIdRef.current = result.workspaceId ?? null
+      epicsWorkspaceIdRef.current = treeCacheKey(result.workspaceId, result.includeSystem) ?? null
       hasExistingDataRef.current = true
       setHealthy()
       // Clear flock contention state on success
@@ -596,9 +678,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     recordLoadEpicsPhase("start", gen, dbPathForStamp)
     const workspaceId = currentWorkspace?.id
     try {
-      const dbPath = currentWorkspace?.databasePath
       const getEpicsStart = Date.now()
-      const result = await rpc.epics.getEpics(dbPath)
+      const result = await rpc.epics.getEpics(workspaceId, includeSystem)
       if (gen !== loadGenRef.current) {
         recordLoadEpicsPhase("stale", gen, dbPathForStamp, {
           epicsLength: result.success ? result.epics.length : undefined,
@@ -611,8 +692,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         })
         // Remember the tree so a switch back to this workspace paints
         // instantly instead of flashing the skeleton.
-        sessionEpics.set(workspaceId, result.epics)
-        handleEpicsSuccess({ epics: result.epics, workspaceId })
+        sessionEpics.set(treeCacheKey(workspaceId, includeSystem), result.epics)
+        handleEpicsSuccess({ epics: result.epics, workspaceId, includeSystem })
       } else {
         recordLoadEpicsPhase("error", gen, dbPathForStamp, {
           errorMessage: result.bdLoadError.message,
@@ -642,6 +723,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     }
   }, [
     currentWorkspace?.databasePath,
+    currentWorkspace?.id,
+    includeSystem,
     handleEpicsSuccess,
     handleEpicsError,
     handleEpicsCatch,
@@ -705,8 +788,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     return () => {
       clearAutoRetry()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- appHealthRef is a stable ref
-  }, [loadError, appHealth, loadEpics, clearAutoRetry, setHealthError])
+  }, [loadError, loadEpics, clearAutoRetry])
 
   // Manual retry handler: resets backoff and retries immediately
   const handleManualRetry = useCallback(() => {
@@ -727,30 +809,84 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     }
   }, [loadEpics, isRefreshing, clearAutoRetry])
 
+  const fetchAvailableTypes = useCallback(async (requestedWorkspaceId: string, retry = false) => {
+    const request = ++typeCatalogRequestRef.current
+    setTypeCatalog((previous) => ({
+      workspaceId: requestedWorkspaceId,
+      status: retry ? "retrying" : "loading",
+      message:
+        retry && previous?.workspaceId === requestedWorkspaceId ? previous.message : undefined,
+    }))
+    if (!retry) setAvailableTypes([])
+    try {
+      const types = await rpc.beads.getAvailableTypes(requestedWorkspaceId)
+      if (typeCatalogRequestRef.current !== request) return
+      setAvailableTypes(types)
+      setTypeCatalog({ workspaceId: requestedWorkspaceId, status: "ready" })
+    } catch (error) {
+      if (typeCatalogRequestRef.current !== request) return
+      setAvailableTypes([])
+      setTypeCatalog({
+        workspaceId: requestedWorkspaceId,
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [])
+
+  const retryAvailableTypes = useCallback(() => {
+    if (!workspaceId || typeCatalogRetrying) return
+    void fetchAvailableTypes(workspaceId, true)
+  }, [workspaceId, typeCatalogRetrying, fetchAvailableTypes])
+
+  // A load callback can change when health or contention state changes. Keep
+  // the latest callback without turning those changes into duplicate loads.
+  const loadEpicsRef = useRef(loadEpics)
   useEffect(() => {
-    if (currentWorkspace) {
-      loadEpics()
+    loadEpicsRef.current = loadEpics
+  }, [loadEpics])
+
+  const treeLoadKey = workspaceId
+    ? JSON.stringify([workspaceId, workspaceDbPath, includeSystem])
+    : null
+  useEffect(() => {
+    if (treeLoadKey) void loadEpicsRef.current()
+  }, [treeLoadKey])
+
+  useEffect(() => {
+    if (workspaceId) {
+      let active = true
       // Fetch available statuses for this workspace
-      rpc.beads.getAvailableStatuses(currentWorkspace.databasePath).then(setAvailableStatuses)
+      rpc.beads
+        .getAvailableStatuses(workspaceId)
+        .then((statuses) => {
+          if (active) setAvailableStatuses(statuses)
+        })
+        .catch(() => {
+          if (active)
+            toast.error("Could not load workspace statuses", { id: "workspace-status-error" })
+        })
       // beadbox-3qo: also fetch the ordered status.custom chain for the
       // workflow advancement button (pm/spec §4.3). Empty array = button hidden.
-      rpc.beads.getCustomStatusList(currentWorkspace.databasePath).then(setCustomStatusChain)
+      rpc.beads
+        .getCustomStatusList(workspaceId)
+        .then((chain) => {
+          if (active) setCustomStatusChain(chain)
+        })
+        .catch(() => {
+          if (active)
+            toast.error("Could not load workspace statuses", { id: "workspace-status-error" })
+        })
+      void fetchAvailableTypes(workspaceId)
       // Expose db path for console commands
       const beadbox = ensureBeadboxStamp()
-      if (beadbox) beadbox.db = currentWorkspace.databasePath
+      if (beadbox) beadbox.db = workspaceDbPath
+      return () => {
+        active = false
+        typeCatalogRequestRef.current++
+      }
     }
-    // bb-fvw2 defensive: depend on the workspace id and the dbPath
-    // primitives, not the whole `currentWorkspace` object reference. If a
-    // parent ever re-renders with a fresh-but-equivalent workspace object,
-    // the wider dep would re-fire loadEpics and queue another kkrpc
-    // getEpics + getAvailableStatuses pair every render — saturating the
-    // sidecar channel under bb-3pqz's 30s timeout. Matches the narrower
-    // [currentWorkspace?.id] pattern used at line 276 (bb-1xi2). loadEpics
-    // dropped from deps for the same reason: its identity changes when
-    // flockContention toggles and this effect should only refetch on real
-    // workspace switches.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional narrowing per bb-fvw2
-  }, [currentWorkspace?.id, currentWorkspace?.databasePath])
+  }, [workspaceId, workspaceDbPath, fetchAvailableTypes])
 
   // Refetch available statuses (e.g. after user edits custom statuses in the
   // Settings → Workflow tab). Ported from v0.24 hooks/use-workspace-lifecycle
@@ -758,8 +894,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const refreshAvailableStatuses = useCallback(async () => {
     if (!currentWorkspace) return
     const [next, chain] = await Promise.all([
-      rpc.beads.getAvailableStatuses(currentWorkspace.databasePath),
-      rpc.beads.getCustomStatusList(currentWorkspace.databasePath),
+      rpc.beads.getAvailableStatuses(currentWorkspace.id),
+      rpc.beads.getCustomStatusList(currentWorkspace.id),
     ])
     setAvailableStatuses(next)
     setCustomStatusChain(chain)
@@ -780,6 +916,13 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   return {
     workspaces,
     currentWorkspace,
+    includeSystem,
+    setIncludeSystem,
+    availableTypes,
+    typeCatalogReady,
+    typeCatalogError,
+    typeCatalogRetrying,
+    retryAvailableTypes,
     epics,
     setEpics,
     isLoading,

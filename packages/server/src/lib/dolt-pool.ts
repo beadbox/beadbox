@@ -4,9 +4,16 @@
 import { readFileSync } from "fs"
 import { readFile } from "fs/promises"
 import mysql from "mysql2/promise"
-import { basename, dirname, join } from "path"
-import { getWorkspacePassword } from "./bd"
-import { parseServerUri } from "./workspace-registry"
+import { basename, dirname, join, resolve } from "path"
+import { getWorkspacePassword } from "./credential-provider"
+import {
+  findExternalWorkspaceByDbPath,
+  findWorkspace,
+  findWorkspaceByDbPath,
+  getServerOwnership,
+  parseServerUri,
+  readRegistry,
+} from "./workspace-registry"
 
 /** Thrown when dolt-server.port doesn't exist yet (server not started). */
 export class PortFileMissingError extends Error {
@@ -91,29 +98,57 @@ async function readDoltDatabase(dbPath: string): Promise<string> {
 
 interface CachedPool {
   pool: mysql.Pool
-  port: number
+  endpoint: string
 }
 
 const poolCache = new Map<string, CachedPool>()
 
-export async function getPool(dbPath: string): Promise<mysql.Pool> {
-  const key = dbPath.startsWith("server://") ? dbPath : normalizeDbPath(dbPath)
+export async function getPool(dbPath: string, workspaceId?: string): Promise<mysql.Pool> {
+  const key = workspaceId ?? (dbPath.startsWith("server://") ? dbPath : normalizeDbPath(dbPath))
   const cached = poolCache.get(key)
 
-  // Server-only workspace: parse connection from URI
-  const server = parseServerUri(dbPath)
+  // The UUID preserves the full connection identity when multiple records
+  // share a legacy server:// address but differ in user or TLS settings.
+  const parsedServer = parseServerUri(dbPath)
+  const registry = await readRegistry()
+  const registryEntry = workspaceId
+    ? findWorkspace(registry, workspaceId)
+    : parsedServer
+      ? findWorkspaceByDbPath(registry, dbPath)
+      : null
+  if (workspaceId && !registryEntry) throw new Error(`Workspace not found: ${workspaceId}`)
+  if (workspaceId && registryEntry) {
+    const local = registryEntry.local?.path
+    const expectedUri =
+      registryEntry.server &&
+      `server://${registryEntry.server.host}:${registryEntry.server.port}/${registryEntry.server.database}`
+    const samePath = local
+      ? [local, join(local, "beads.db"), join(local, "dolt")].some(
+          (path) => resolve(dbPath) === resolve(path),
+        )
+      : dbPath === expectedUri
+    if (!samePath) throw new Error(`Workspace database path changed: ${workspaceId}`)
+  }
+  const server =
+    registryEntry && getServerOwnership(registryEntry) === "managed"
+      ? null
+      : (registryEntry?.server ?? parsedServer)
+  const external = server ? null : findExternalWorkspaceByDbPath(dbPath)?.server
   let host: string
   let port: number
   let database: string
   let user: string
   let password: string | undefined
+  let tls = false
 
-  if (server) {
-    host = server.host
-    port = server.port
-    database = server.database
-    user = server.user
-    const serverKey = `${server.host}:${server.port}/${server.database}`
+  if (server || external) {
+    const connection = server ?? external!
+    host = connection.host
+    port = connection.port
+    database = connection.database
+    user = connection.user
+    tls = connection.tls
+    const serverKey = `${host}:${port}/${database}/${user}`
     password = getWorkspacePassword(serverKey)
   } else {
     host = "127.0.0.1"
@@ -124,14 +159,14 @@ export async function getPool(dbPath: string): Promise<mysql.Pool> {
     password = wsPath ? getWorkspacePassword(wsPath) : undefined
   }
 
-  // Return cached pool if port hasn't changed
+  const endpoint = `${host}:${port}/${database}/${user}/${tls}`
+  // External connections may change host, database, or user without changing port.
   if (cached) {
-    if (cached.port === port) {
+    if (cached.endpoint === endpoint) {
       return cached.pool
     }
-    // Port drift detected: drain stale pool and create a new one
     console.log(
-      `[dolt-pool] port drift detected for ${key}: cached=${cached.port} current=${port}, draining stale pool`,
+      `[dolt-pool] endpoint changed for ${key}: cached=${cached.endpoint} current=${endpoint}, draining stale pool`,
     )
     poolCache.delete(key)
     cached.pool.end().catch(() => {})
@@ -147,6 +182,7 @@ export async function getPool(dbPath: string): Promise<mysql.Pool> {
     database,
     user,
     password: password || undefined,
+    ssl: tls ? {} : undefined,
     connectionLimit: 2,
     waitForConnections: true,
     connectTimeout: 5000,
@@ -169,7 +205,7 @@ export async function getPool(dbPath: string): Promise<mysql.Pool> {
 
     // For local workspaces, check if port changed (server restarted on new port).
     // Re-read the port file; if it's different, retry once with the new port.
-    if (!server && isConnectionError(code, errno)) {
+    if (!server && !external && isConnectionError(code, errno)) {
       try {
         const freshPort = readDoltPort(dbPath)
         if (freshPort !== port) {
@@ -182,6 +218,7 @@ export async function getPool(dbPath: string): Promise<mysql.Pool> {
             database,
             user,
             password: password || undefined,
+            ssl: tls ? {} : undefined,
             connectionLimit: 2,
             waitForConnections: true,
             connectTimeout: 5000,
@@ -191,7 +228,10 @@ export async function getPool(dbPath: string): Promise<mysql.Pool> {
           try {
             await retryPool.query("SELECT 1")
             console.log(`[dolt-pool] health check passed on new port ${freshPort}`)
-            poolCache.set(key, { pool: retryPool, port: freshPort })
+            poolCache.set(key, {
+              pool: retryPool,
+              endpoint: `${host}:${freshPort}/${database}/${user}/${tls}`,
+            })
             return retryPool
           } catch {
             await retryPool.end().catch(() => {})
@@ -205,7 +245,7 @@ export async function getPool(dbPath: string): Promise<mysql.Pool> {
     throw new Error(`Pool health check failed for ${key}: ${errObj.message}`)
   }
 
-  poolCache.set(key, { pool, port })
+  poolCache.set(key, { pool, endpoint })
   return pool
 }
 
@@ -219,8 +259,8 @@ function isConnectionError(code: string | undefined, errno: number | undefined):
   )
 }
 
-export async function drainPool(dbPath: string): Promise<void> {
-  const key = dbPath.startsWith("server://") ? dbPath : normalizeDbPath(dbPath)
+export async function drainPool(dbPath: string, workspaceId?: string): Promise<void> {
+  const key = workspaceId ?? (dbPath.startsWith("server://") ? dbPath : normalizeDbPath(dbPath))
   const cached = poolCache.get(key)
   if (!cached) return
   poolCache.delete(key)

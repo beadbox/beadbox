@@ -20,7 +20,7 @@
 // THIS TEST: mounts ChangeSubscriptionMount with workspaces=[A, B] inside a
 // real WorkspaceGateContext.Provider, asserts subscribe.start fires for A
 // (workspaces[0] fallback when cookie unset), then calls setWorkspaceCookie
-// with B's id and asserts subscribe.start fires again for B's databasePath.
+// with B's id and asserts subscribe.start fires again for B's id.
 //
 // Pre-fix the second assertion fails because the effect never re-fires.
 // Post-fix it passes because the EventTarget pub/sub triggers resolve().
@@ -168,7 +168,7 @@ describe("ChangeSubscriptionMount (bb-onv3.2 regression)", () => {
     const workspaces = [workspaceA, workspaceB]
 
     // Initial mount: cookie unset; ChangeSubscriptionMount falls back to
-    // workspaces[0].databasePath = /tmp/alpha/.beads.
+    // workspaces[0].id is the subscription target.
     await act(async () => {
       root.render(
         createElement(GateProvider, { workspaces }, createElement(ChangeSubscriptionMount)),
@@ -177,7 +177,7 @@ describe("ChangeSubscriptionMount (bb-onv3.2 regression)", () => {
     await act(async () => {
       await flushMicrotasks()
     })
-    expect(startCalls.map((c) => c.workspacePath)).toEqual([workspaceA.databasePath])
+    expect(startCalls.map((c) => c.workspacePath)).toEqual([workspaceA.id])
 
     // Switch active workspace via setWorkspaceCookie. workspaces array
     // reference is unchanged; only the cookie does. Pre-fix the effect
@@ -192,10 +192,10 @@ describe("ChangeSubscriptionMount (bb-onv3.2 regression)", () => {
     })
 
     const paths = startCalls.map((c) => c.workspacePath)
-    expect(paths).toContain(workspaceA.databasePath)
-    expect(paths).toContain(workspaceB.databasePath)
+    expect(paths).toContain(workspaceA.id)
+    expect(paths).toContain(workspaceB.id)
     // Beta path is the LAST start (most recent subscription).
-    expect(paths[paths.length - 1]).toBe(workspaceB.databasePath)
+    expect(paths[paths.length - 1]).toBe(workspaceB.id)
     // Cleanup of the Alpha id should have run.
     expect(stopCalls.length).toBeGreaterThanOrEqual(1)
   })

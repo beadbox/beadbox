@@ -8,10 +8,11 @@
 // The old action keeps running. P3 will switch call sites to this handler;
 // P6 will delete the action.
 
-import { constants, existsSync, readdirSync } from "fs"
-import { access, mkdir, readFile, stat, writeFile } from "fs/promises"
-import { homedir, tmpdir } from "os"
-import { basename, dirname, isAbsolute, join, parse, relative, resolve } from "path"
+import { randomUUID } from "node:crypto"
+import { constants, existsSync, readdirSync } from "node:fs"
+import { access, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { homedir, tmpdir } from "node:os"
+import { basename, dirname, isAbsolute, join, parse, relative, resolve } from "node:path"
 import {
   discoverServerDatabases as bdDiscoverServerDatabases,
   initWorkspace as bdInit,
@@ -19,6 +20,8 @@ import {
   getWorkspaceStatus,
   initServerScaffold,
 } from "../lib/bd"
+import { drainPool } from "../lib/dolt-pool"
+import { ensureExternalScaffold } from "../lib/external-scaffold"
 import { expandHome, isValidWorkspaceDir } from "../lib/path-validation"
 import { scanPorts } from "../lib/port-scan"
 import { getPostHogNode } from "../lib/posthog-node"
@@ -28,9 +31,11 @@ import {
   findWorkspace,
   findWorkspaceByDbPath,
   getBeadboxRegistryPath,
+  getServerOwnership,
   projectDirFromDatabasePath,
   type RegistryEntry,
   readRegistry,
+  readWorkspacePortFile,
   addWorkspace as registryAddWorkspace,
   replaceWorkspace as registryReplaceWorkspace,
   setActiveWorkspace as registrySetActiveWorkspace,
@@ -40,6 +45,7 @@ import {
   updateWorkspaceLocal,
   updateWorkspaceServer,
 } from "../lib/workspace-registry"
+import { workspaceTransition } from "../lib/workspace-transition"
 
 // Server-side workspace logging. Prints to the Next.js terminal.
 function wsLog(fn: string, ...args: unknown[]) {
@@ -87,7 +93,10 @@ async function inlineReadWorkspaceMode(beadsDir: string): Promise<InlineWorkspac
       return {
         mode: "server",
         serverHost: typeof meta.dolt_server_host === "string" ? meta.dolt_server_host : "127.0.0.1",
-        serverPort: typeof meta.dolt_server_port === "number" ? meta.dolt_server_port : 3307,
+        serverPort:
+          typeof meta.dolt_server_port === "number"
+            ? meta.dolt_server_port
+            : ((await readWorkspacePortFile(beadsDir)) ?? 3307),
         serverDatabase: typeof meta.dolt_database === "string" ? meta.dolt_database : "beads",
         serverUser: typeof meta.dolt_server_user === "string" ? meta.dolt_server_user : "root",
         serverTls: meta.dolt_server_tls === true,
@@ -194,7 +203,17 @@ async function resolveLocalEntry(entry: RegistryEntry): Promise<InlineWorkspace>
   dbPath = await migrateStaleDbPath(dbPath, beadsDir)
 
   const projectDir = projectDirFromDatabasePath(dbPath)
-  const modeInfo = await inlineReadWorkspaceMode(beadsDir)
+  const modeInfo =
+    getServerOwnership(entry) === "external" && entry.server
+      ? {
+          mode: "server" as const,
+          serverHost: entry.server.host,
+          serverPort: entry.server.port,
+          serverDatabase: entry.server.database,
+          serverUser: entry.server.user,
+          serverTls: entry.server.tls,
+        }
+      : await inlineReadWorkspaceMode(beadsDir)
   wsLog("resolve", formatResolveLog(entry.name, dbPath, modeInfo))
   return {
     id: entry.id,
@@ -327,7 +346,7 @@ async function inlineFindNearestBeadsDir(startPath: string): Promise<string | nu
           if (isValidWorkspacePath(beadsDir)) return beadsDir
         }
         // Fall back to SQLite
-        const { readdir } = await import("fs/promises")
+        const { readdir } = await import("node:fs/promises")
         const files = await readdir(beadsDir)
         const dbFile = files.find((f) => f.endsWith(".db") && !f.includes("/") && !f.includes("\\"))
         if (dbFile) {
@@ -666,7 +685,7 @@ async function ensureMetadataPort(dir: string, initOutput: string): Promise<void
     const port = parseInt(match[1], 10)
     if (port > 0 && port <= 65535) {
       meta.dolt_server_port = port
-      await writeFile(metaPath, JSON.stringify(meta, null, 2) + "\n")
+      await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`)
     }
   } catch {
     // Non-critical: workspace may still work via CWD auto-discovery
@@ -709,6 +728,9 @@ export async function initializeWorkspace(
   }
 
   try {
+    // bd init can observe the installed version and advance schemas. Drain old
+    // serve processes before invoking the binary, even for a new directory.
+    await workspaceTransition.preflightBdBinary()
     // Race bdInit against a timeout so the UI never hangs indefinitely.
     // The pre-flight Dolt check in the dialog catches the common case (Dolt missing),
     // but bd init can also hang if Dolt exists but the server never starts.
@@ -788,7 +810,11 @@ export async function removeWorkspace(
     return { success: false, error: "Workspace not found in registry." }
   }
   const credentialKey = entry.credentialKey
-  const removed = await removeWorkspaceFromRegistry(entry.id)
+  const removed = await workspaceTransition.runWorkspaceTransition(
+    entry.id,
+    () => removeWorkspaceFromRegistry(entry.id),
+    { remove: true },
+  )
   if (!removed) {
     return { success: false, error: "Workspace not found in registry." }
   }
@@ -812,7 +838,7 @@ export async function discoverServerDatabases(
       }
     }
     return { success: true, databases }
-  } catch (error) {
+  } catch {
     return {
       success: false,
       error:
@@ -863,11 +889,13 @@ export async function addServerWorkspace(
   const scaffoldDir = join(registryDir, "workspaces", workspaceId)
   let localBeadsPath: string | null = null
   try {
-    await mkdir(scaffoldDir, { recursive: true })
-    await initServerScaffold(scaffoldDir, { host, port, database: databaseName, user }, password)
-    localBeadsPath = join(scaffoldDir, ".beads")
-    // Update the registry entry with the local scaffold path
-    await updateWorkspaceLocal(workspaceId, localBeadsPath)
+    await workspaceTransition.preflightBdBinary()
+    await workspaceTransition.runWorkspaceTransition(workspaceId, async () => {
+      await mkdir(scaffoldDir, { recursive: true })
+      await initServerScaffold(scaffoldDir, { host, port, database: databaseName, user }, password)
+      localBeadsPath = join(scaffoldDir, ".beads")
+      await updateWorkspaceLocal(workspaceId, localBeadsPath)
+    })
     console.log(`[workspace-server] created scaffold at ${scaffoldDir}`)
   } catch (err) {
     console.warn(
@@ -917,7 +945,7 @@ export async function scanForDoltServers(): Promise<ScanActionResult> {
     const workspaces = await inlineGetRegisteredWorkspaces()
     for (const ws of workspaces) {
       // Server-only workspaces: use port from server connection, no port file
-      if (ws.serverOnly && ws.serverPort) {
+      if (ws.serverPort && (ws.serverOnly || (ws.registered && ws.mode === "server"))) {
         ports.push(ws.serverPort)
         continue
       }
@@ -1162,7 +1190,11 @@ export async function replaceLocalWithServer(
   const name = databaseName.startsWith("beads_")
     ? databaseName.slice("beads_".length)
     : databaseName
-  const newId = await registryReplaceWorkspace(localWorkspaceId, name, server)
+  const newId = await workspaceTransition.runWorkspaceTransition(
+    localWorkspaceId,
+    () => registryReplaceWorkspace(localWorkspaceId, name, server),
+    { remove: true },
+  )
 
   if (!newId) {
     return { success: false, error: "Local workspace not found in registry." }
@@ -1189,6 +1221,80 @@ export async function replaceLocalWithServer(
 
 // Update an existing server workspace's connection details.
 // Validates the connection before saving. Returns updated workspace card on success.
+async function writeAtomic(path: string, content: string): Promise<void> {
+  const tempPath = `${path}.${randomUUID()}.tmp`
+  try {
+    const mode = await stat(path)
+      .then((file) => file.mode & 0o777)
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return 0o600
+        throw error
+      })
+    await writeFile(tempPath, content, { flag: "wx", mode })
+    await rename(tempPath, path)
+  } finally {
+    await rm(tempPath, { force: true }).catch(() => {})
+  }
+}
+
+async function syncExternalPortFile(beadsDir: string, port: number): Promise<void> {
+  const portPath = join(beadsDir, "dolt-server.port")
+  await writeAtomic(portPath, `${port}\n`)
+}
+
+async function saveServerConnection(
+  workspaceId: string,
+  entry: RegistryEntry,
+  newServer: ServerConnection,
+  password: string,
+): Promise<{ success: true } | { success: false; error: string }> {
+  if (password) {
+    const serverKey = `${newServer.host}:${newServer.port}/${newServer.database}`
+    bdSetWorkspacePassword(serverKey, password)
+  }
+  const externalScaffold =
+    getServerOwnership(entry) === "external" && entry.local ? entry.local.path : null
+  let restoreScaffold: (() => Promise<void>) | null = null
+  try {
+    if (externalScaffold) {
+      const metaPath = join(externalScaffold, "metadata.json")
+      const configPath = join(externalScaffold, "config.yaml")
+      const [originalMeta, originalConfig] = await Promise.all([
+        readFile(metaPath, "utf-8"),
+        readFile(configPath, "utf-8"),
+      ])
+      const originalPort = await readFile(
+        join(externalScaffold, "dolt-server.port"),
+        "utf-8",
+      ).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null
+        throw error
+      })
+      restoreScaffold = async () => {
+        await writeAtomic(metaPath, originalMeta)
+        await writeAtomic(configPath, originalConfig)
+        const portPath = join(externalScaffold, "dolt-server.port")
+        if (originalPort === null) await rm(portPath, { force: true })
+        else await writeAtomic(portPath, originalPort)
+      }
+      await ensureExternalScaffold(externalScaffold, newServer)
+      await syncExternalPortFile(externalScaffold, newServer.port)
+    }
+    await updateWorkspaceServer(workspaceId, newServer)
+  } catch (error) {
+    if (restoreScaffold) await restoreScaffold().catch(() => {})
+    return { success: false, error: `Could not save server connection: ${String(error)}` }
+  }
+
+  if (entry.local) {
+    // Evict old endpoint connections before resuming paused subscriptions.
+    await drainPool(entry.local.path).catch((error) =>
+      console.warn(`[workspaces] pool drain failed: ${error}`),
+    )
+  }
+  return { success: true }
+}
+
 export async function updateServerConnection(
   workspaceId: string,
   host: string,
@@ -1226,14 +1332,10 @@ export async function updateServerConnection(
     }
   }
 
-  // Update registry
-  await updateWorkspaceServer(workspaceId, newServer)
-
-  // Store password in process memory
-  const serverKey = `${host}:${port}/${database}`
-  if (password) {
-    bdSetWorkspacePassword(serverKey, password)
-  }
+  const connectionUpdate = await workspaceTransition.runWorkspaceTransition(workspaceId, () =>
+    saveServerConnection(workspaceId, entry, newServer, password),
+  )
+  if (!connectionUpdate.success) return connectionUpdate
 
   // Express the updated entry in the shape resolveRegistryEntry would produce
   // so the reply goes through the one mapper. The hand-built card here used to

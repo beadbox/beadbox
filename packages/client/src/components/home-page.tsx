@@ -3,16 +3,10 @@ import { toast } from "sonner"
 import { BeadDetailPanel } from "@/components/bead-detail-panel"
 import { BeadTable } from "@/components/bead-table"
 import { BeadTableBulkToolbar } from "@/components/bead-table-bulk-toolbar"
+import { DevConsole } from "@/components/dev-console"
 import { EpicTree } from "@/components/epic-tree"
 import { FilterBar, type Filters } from "@/components/filter-bar"
 import { Header } from "@/components/header"
-import { getAnalyticsEnabled, markAllBeadsRead, markBeadRead } from "@/lib/local-storage"
-import { safeCapture } from "@/lib/posthog-safe"
-import { rpc } from "@/lib/rpc"
-import { sortEpics } from "@/lib/sort"
-import { useSubscriptionChangeSignal } from "@/lib/subscribe"
-
-import { DevConsole } from "@/components/dev-console"
 import { useBdHealth, useWorkspaceGate } from "@/components/startup-gate"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { useAppHealth } from "@/hooks/use-app-health"
@@ -25,9 +19,63 @@ import { usePreferences } from "@/hooks/use-preferences"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { useViewport } from "@/hooks/use-viewport"
 import { useWorkspaceLifecycle } from "@/hooks/use-workspace-lifecycle"
+import { getAnalyticsEnabled, markAllBeadsRead, markBeadRead } from "@/lib/local-storage"
+import { isMoleculePresentation } from "@/lib/molecule-presentation"
+import { safeCapture } from "@/lib/posthog-safe"
+import { rpc } from "@/lib/rpc"
+import { sortEpics } from "@/lib/sort"
+import { useSubscriptionChangeSignal } from "@/lib/subscribe"
 import type { Bead, Epic } from "@/lib/types"
 
 const getBlocksDependencies = rpc.epics.getBlocksDependencies
+
+function readTypeFilter(workspaceId: string): string {
+  try {
+    return localStorage.getItem(`beadbox:issue-type:${workspaceId}`) || "all"
+  } catch {
+    return "all"
+  }
+}
+
+const isBacklogged = (bead: Bead) => bead.priority === "backlog"
+const isArchived = (bead: Bead) => Boolean(bead.labels?.includes("archived"))
+
+export function partitionInactiveEpics(roots: Epic[]): {
+  backlogEpics: Epic[]
+  archivedEpics: Epic[]
+} {
+  return {
+    backlogEpics: roots.filter((epic) => isBacklogged(epic) && !isArchived(epic)),
+    archivedEpics: roots.filter(isArchived),
+  }
+}
+
+export function filterActiveEpicTree(epic: Epic): Epic {
+  const filterBeads = (beads: Bead[]): Bead[] =>
+    beads
+      .filter((bead) => !isBacklogged(bead) && !isArchived(bead))
+      .map((bead) => (bead.children ? { ...bead, children: filterBeads(bead.children) } : bead))
+  return {
+    ...epic,
+    children: filterBeads(epic.children ?? []),
+    childEpics: epic.childEpics?.map(filterActiveEpicTree),
+  }
+}
+
+export function collectGroupedVisibleBeads(
+  active: Epic[],
+  inactive: Epic[],
+  backlogBeads: Bead[],
+  archivedBeads: Bead[],
+  matches: (bead: Bead) => boolean = () => true,
+): Bead[] {
+  const all = flattenEpicsToBeads([...active, ...inactive])
+  return [
+    ...new Map(
+      [...all, ...backlogBeads, ...archivedBeads].filter(matches).map((bead) => [bead.id, bead]),
+    ).values(),
+  ]
+}
 
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react"
 import { EpicTreeSkeleton } from "@/components/epic-tree-skeleton"
@@ -53,6 +101,7 @@ import {
   filterEpics,
   flattenEpicsToBeads,
   groupBeadsByStatus,
+  matchesBead,
 } from "@/lib/epic-tree-utils"
 import { getVersionStatus } from "@/lib/version-requirements"
 
@@ -141,8 +190,14 @@ function BeadsEpicsViewer() {
     setFatal,
   })
   const {
-    workspaces,
     currentWorkspace,
+    includeSystem,
+    setIncludeSystem,
+    availableTypes,
+    typeCatalogReady,
+    typeCatalogError,
+    typeCatalogRetrying,
+    retryAvailableTypes,
     epics,
     setEpics,
     isLoading,
@@ -162,15 +217,10 @@ function BeadsEpicsViewer() {
     availableStatuses,
     customStatusChain,
     refreshAvailableStatuses,
-    loadInProgressRef,
-    lastLoadCompletedRef,
-    pendingRefreshRef,
     hasExistingDataRef,
-    workspaceSourceRef,
     loadEpics,
     handleManualRetry,
     handleRefresh,
-    handleRemoveWorkspace,
     doRemoveWorkspace,
   } = lifecycle
 
@@ -194,15 +244,25 @@ function BeadsEpicsViewer() {
 
   const assignees = useMemo(() => extractAssignees(epics), [epics])
   const rigNames = useMemo(() => extractRigNames(epics), [epics])
+  const [typesByWorkspace, setTypesByWorkspace] = useState<Record<string, string>>({})
+  const selectedType = currentWorkspace
+    ? (typesByWorkspace[currentWorkspace.id] ?? readTypeFilter(currentWorkspace.id))
+    : "all"
+  const typeOptions = useMemo(
+    () => [
+      ...new Set([
+        ...availableTypes,
+        ...epics.map((epic) => epic.type),
+        ...flattenEpicsToBeads(epics).map((bead) => bead.type),
+      ]),
+    ],
+    [availableTypes, epics],
+  )
   const filteredEpics = useMemo(
-    () => filterEpics(epics, filters, rigNames),
-    [epics, filters, rigNames],
+    () => filterEpics(epics, { ...filters, type: selectedType, includeSystem }, rigNames),
+    [epics, filters, rigNames, selectedType, includeSystem],
   )
   const sortedEpics = useMemo(() => sortEpics(filteredEpics, sort), [filteredEpics, sort])
-
-  // Helper to check if a bead is backlogged or archived
-  const isBacklogged = useCallback((b: Bead) => b.priority === "backlog", [])
-  const isArchived = useCallback((b: Bead) => b.labels?.includes("archived"), [])
 
   // Split epics into active, backlog, and archived
   // Archived takes precedence over backlog (if both labels exist, show in archived)
@@ -211,32 +271,36 @@ function BeadsEpicsViewer() {
       sortedEpics.filter(
         (e) =>
           e.type !== "convoy" &&
-          e.type !== "molecule" &&
+          e.type !== "milestone" &&
+          !isMoleculePresentation(e) &&
           !e.labels?.includes("archived") &&
           !isBacklogged(e),
       ),
-    [sortedEpics, isBacklogged],
+    [sortedEpics],
+  )
+  const activeMilestones = useMemo(
+    () =>
+      sortedEpics.filter(
+        (e) => e.type === "milestone" && !e.labels?.includes("archived") && !isBacklogged(e),
+      ),
+    [sortedEpics],
   )
   const activeConvoys = useMemo(
     () =>
       sortedEpics.filter(
         (e) => e.type === "convoy" && !e.labels?.includes("archived") && !isBacklogged(e),
       ),
-    [sortedEpics, isBacklogged],
+    [sortedEpics],
   )
   const activeMolecules = useMemo(
     () =>
       sortedEpics.filter(
-        (e) => e.type === "molecule" && !e.labels?.includes("archived") && !isBacklogged(e),
+        (e) => isMoleculePresentation(e) && !e.labels?.includes("archived") && !isBacklogged(e),
       ),
-    [sortedEpics, isBacklogged],
+    [sortedEpics],
   )
-  const backlogEpics = useMemo(
-    () => sortedEpics.filter((e) => isBacklogged(e) && !e.labels?.includes("archived")),
-    [sortedEpics, isBacklogged],
-  )
-  const archivedEpics = useMemo(
-    () => sortedEpics.filter((e) => e.labels?.includes("archived")),
+  const { backlogEpics, archivedEpics } = useMemo(
+    () => partitionInactiveEpics(sortedEpics),
     [sortedEpics],
   )
 
@@ -268,7 +332,7 @@ function BeadsEpicsViewer() {
     sortedEpics.forEach(extractFromEpic)
 
     return result
-  }, [sortedEpics, isBacklogged, isArchived])
+  }, [sortedEpics])
 
   // Extract ALL archived beads from anywhere in the tree (mirrors backlogBeads pattern)
   const archivedBeads = useMemo(() => {
@@ -298,64 +362,25 @@ function BeadsEpicsViewer() {
     sortedEpics.forEach(extractFromEpic)
 
     return result
-  }, [sortedEpics, isArchived])
+  }, [sortedEpics])
 
-  // Filter out backlogged and archived beads from ALL epics in active view
-  const activeEpicsWithFilteredStandalone = useMemo(() => {
-    function filterBeads(beads: Bead[]): Bead[] {
-      return beads
-        .filter((b) => !isBacklogged(b) && !isArchived(b))
-        .map((b) => (b.children ? { ...b, children: filterBeads(b.children) } : b))
-    }
-
-    function filterEpic(epic: Epic): Epic {
-      return {
-        ...epic,
-        children: filterBeads(epic.children ?? []),
-        childEpics: epic.childEpics?.map(filterEpic),
-      }
-    }
-
-    return activeEpics.map(filterEpic)
-  }, [activeEpics, isBacklogged, isArchived])
-
-  // Apply same backlog/archive child filtering to convoys
-  const activeConvoysFiltered = useMemo(() => {
-    function filterBeads(beads: Bead[]): Bead[] {
-      return beads
-        .filter((b) => !isBacklogged(b) && !isArchived(b))
-        .map((b) => (b.children ? { ...b, children: filterBeads(b.children) } : b))
-    }
-
-    function filterConvoy(convoy: Epic): Epic {
-      return {
-        ...convoy,
-        children: filterBeads(convoy.children ?? []),
-        childEpics: convoy.childEpics?.map(filterConvoy),
-      }
-    }
-
-    return activeConvoys.map(filterConvoy)
-  }, [activeConvoys, isBacklogged, isArchived])
-
-  // Apply same backlog/archive child filtering to molecules
-  const activeMoleculesFiltered = useMemo(() => {
-    function filterBeads(beads: Bead[]): Bead[] {
-      return beads
-        .filter((b) => !isBacklogged(b) && !isArchived(b))
-        .map((b) => (b.children ? { ...b, children: filterBeads(b.children) } : b))
-    }
-
-    function filterMolecule(molecule: Epic): Epic {
-      return {
-        ...molecule,
-        children: filterBeads(molecule.children ?? []),
-        childEpics: molecule.childEpics?.map(filterMolecule),
-      }
-    }
-
-    return activeMolecules.map(filterMolecule)
-  }, [activeMolecules, isBacklogged, isArchived])
+  // Child epics stay under their parent even when backlogged or archived.
+  const activeEpicsWithFilteredStandalone = useMemo(
+    () => activeEpics.map(filterActiveEpicTree),
+    [activeEpics],
+  )
+  const activeMilestonesFiltered = useMemo(
+    () => activeMilestones.map(filterActiveEpicTree),
+    [activeMilestones],
+  )
+  const activeConvoysFiltered = useMemo(
+    () => activeConvoys.map(filterActiveEpicTree),
+    [activeConvoys],
+  )
+  const activeMoleculesFiltered = useMemo(
+    () => activeMolecules.map(filterActiveEpicTree),
+    [activeMolecules],
+  )
 
   // Detect workspaces with no real epics/convoys (e.g. Gastown).
   // Uses raw epics (pre-filter) so the layout mode is stable regardless of
@@ -402,6 +427,7 @@ function BeadsEpicsViewer() {
     },
     updateBeadInEpicsRef,
     activeEpicsFiltered: activeEpicsWithFilteredStandalone,
+    activeMilestonesFiltered,
     activeConvoysFiltered,
     activeMoleculesFiltered,
     backlogBeads,
@@ -450,8 +476,7 @@ function BeadsEpicsViewer() {
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.search])
+  }, [filters.search, filteredEpics])
 
   // beadbox-s5z: bead-list auto-refresh on subscription change.
   // bb-pgb0.1 (delete useWebSocket shim, commit 5580928) claimed real-time
@@ -480,12 +505,13 @@ function BeadsEpicsViewer() {
     setEpicEpoch((prev) => prev + 1)
   }, [subscriptionSignal, currentWorkspace?.databasePath, loadEpics])
   useEffect(() => {
+    void epicEpoch
     if (isLoading || !currentWorkspace?.databasePath || epics.length === 0) return
 
     const loadId = ++blocksLoadIdRef.current
-    const dbPath = currentWorkspace.databasePath
+    const workspaceId = currentWorkspace.id
 
-    getBlocksDependencies(dbPath).then((blocksMap) => {
+    getBlocksDependencies(workspaceId).then((blocksMap) => {
       if (blocksLoadIdRef.current !== loadId) return // stale
       if (Object.keys(blocksMap).length === 0) return
 
@@ -540,8 +566,14 @@ function BeadsEpicsViewer() {
         return patched.some((e, i) => e !== prev[i]) ? patched : prev
       })
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- setEpics is a stable setState, epics.length tracks structural changes
-  }, [isLoading, currentWorkspace?.databasePath, epics.length, epicEpoch])
+  }, [
+    isLoading,
+    currentWorkspace?.databasePath,
+    currentWorkspace?.id,
+    epics.length,
+    epicEpoch,
+    setEpics,
+  ])
 
   // bb-pgb0.1: deleted ~130 lines of dead WebSocket-shim plumbing
   // (handleSSEChange + bdCmdHandlerRef + lifecycleHandlerRef +
@@ -644,7 +676,7 @@ function BeadsEpicsViewer() {
     if (ids.length === 0) return
     setIsBulkArchiving(true)
     try {
-      const result = await rpc.beads.archiveBeads(ids, currentWorkspace?.databasePath)
+      const result = await rpc.beads.archiveBeads(ids, currentWorkspace?.id)
       const failed = result.results.filter((r) => !r.success)
       if (failed.length > 0) {
         toast.error(
@@ -661,32 +693,81 @@ function BeadsEpicsViewer() {
     } finally {
       setIsBulkArchiving(false)
     }
-  }, [beadSelection, currentWorkspace?.databasePath, loadEpics])
+  }, [beadSelection, currentWorkspace?.id, loadEpics])
 
   // bb-y729: prune selection on filter change so beads that filter out drop
   // from the selection set (per spec: 'filter change → selection prunes to
   // remaining-visible rows'). Filter-bar already triggers re-render of
   // activeEpicsWithFilteredStandalone, so we walk those + flatBeads.
   useEffect(() => {
+    void filters
     if (beadSelection.selectedIds.size === 0) return
     const visible = new Set<string>()
-    const collect = (items: { id: string; children?: { id: string }[] }[]) => {
+    const collect = (items: (Bead | Epic)[]) => {
       for (const it of items) {
         visible.add(it.id)
-        if (it.children) collect(it.children as { id: string; children?: { id: string }[] }[])
+        if (it.children) collect(it.children)
+        if ("childEpics" in it && it.childEpics) collect(it.childEpics)
       }
     }
-    collect(flatBeads as { id: string; children?: { id: string }[] }[])
-    collect(
-      activeEpicsWithFilteredStandalone as unknown as {
-        id: string
-        children?: { id: string }[]
-      }[],
-    )
+    collect(flatBeads)
+    collect(activeEpicsWithFilteredStandalone)
+    collect(activeMilestonesFiltered)
+    collect(activeConvoysFiltered)
+    collect(activeMoleculesFiltered)
+    collect(backlogEpics)
+    collect(backlogBeads)
+    collect(archivedEpics)
+    collect(archivedBeads)
     beadSelection.pruneTo(Array.from(visible))
-    // pruneTo is stable; we only want to run when filters change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, flatBeads, activeEpicsWithFilteredStandalone])
+  }, [
+    filters,
+    beadSelection.selectedIds.size,
+    beadSelection.pruneTo,
+    flatBeads,
+    activeEpicsWithFilteredStandalone,
+    activeMilestonesFiltered,
+    activeConvoysFiltered,
+    activeMoleculesFiltered,
+    backlogEpics,
+    backlogBeads,
+    archivedEpics,
+    archivedBeads,
+  ])
+
+  const groupedBeads = useMemo(() => {
+    const groupedFilters: Filters = {
+      ...filters,
+      type: selectedType,
+      includeSystem,
+      rig: filters.rig !== "all" && rigNames.length === 0 ? "all" : filters.rig,
+    }
+    return collectGroupedVisibleBeads(
+      [
+        ...activeEpicsWithFilteredStandalone,
+        ...activeMilestonesFiltered,
+        ...activeMoleculesFiltered,
+        ...activeConvoysFiltered,
+      ],
+      [...backlogEpics, ...archivedEpics],
+      backlogBeads,
+      archivedBeads,
+      (bead) => matchesBead(bead, groupedFilters),
+    )
+  }, [
+    activeEpicsWithFilteredStandalone,
+    activeMilestonesFiltered,
+    activeMoleculesFiltered,
+    activeConvoysFiltered,
+    backlogEpics,
+    archivedEpics,
+    backlogBeads,
+    archivedBeads,
+    filters,
+    selectedType,
+    includeSystem,
+    rigNames,
+  ])
 
   // Drag and drop handlers
   const handleDragStart = useCallback((beadId: string) => {
@@ -789,6 +870,24 @@ function BeadsEpicsViewer() {
         className="flex-1 flex flex-col px-3 md:px-6 py-4 min-h-0"
         style={devConsole.open ? { marginBottom: devConsole.height } : undefined}
       >
+        {typeCatalogError && (
+          <div
+            role="alert"
+            className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+          >
+            <span>
+              Could not load issue types: {typeCatalogError}. Type changes are unavailable.
+            </span>
+            <button
+              type="button"
+              onClick={retryAvailableTypes}
+              disabled={typeCatalogRetrying}
+              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-60"
+            >
+              {typeCatalogRetrying ? "Retrying…" : "Retry"}
+            </button>
+          </div>
+        )}
         {/* Filter bar: hidden on mobile when viewing bead detail, or when toggled off via Cmd+F */}
         {filterBarVisible && !(isMobileLayout && beadIdParam) && (
           <div className="mb-4">
@@ -798,6 +897,19 @@ function BeadsEpicsViewer() {
               assignees={assignees}
               rigNames={rigNames}
               availableStatuses={availableStatuses}
+              availableTypes={typeOptions}
+              selectedType={selectedType}
+              onTypeChange={(type) => {
+                if (!currentWorkspace) return
+                try {
+                  localStorage.setItem(`beadbox:issue-type:${currentWorkspace.id}`, type)
+                } catch {
+                  /* storage may be unavailable */
+                }
+                setTypesByWorkspace((current) => ({ ...current, [currentWorkspace.id]: type }))
+              }}
+              includeSystem={includeSystem}
+              onIncludeSystemChange={setIncludeSystem}
               sort={sort}
               onSortChange={setSort}
             />
@@ -827,9 +939,11 @@ function BeadsEpicsViewer() {
                   onDelete={setDeleteConfirmId}
                   onBeadNavigate={handleBeadNavigate}
                   parentPath={parentPath}
-                  dbPath={currentWorkspace?.databasePath}
+                  dbPath={currentWorkspace?.id}
                   assignees={assignees}
                   availableStatuses={availableStatuses}
+                  availableTypes={typeOptions}
+                  typeCatalogReady={typeCatalogReady}
                   customStatusChain={customStatusChain}
                   isLoadingBead={isLoadingBead}
                   isFocused={focusedPanel === "right"}
@@ -848,115 +962,117 @@ function BeadsEpicsViewer() {
                 isPending={isBulkArchiving}
               />
               <div ref={treeContainerRef} className="flex-1 overflow-y-auto hide-scrollbar">
-              {/* beadbox-dme: gate skeleton on first-ever-load, not "currently
+                {/* beadbox-dme: gate skeleton on first-ever-load, not "currently
                   loading + empty". beadbox-s5z's loadEpics wiring flips
                   isLoading on every subscription tick; on empty workspaces
                   that triggered a skeleton flash every ~1s. hasExistingDataRef
                   is true once we've successfully loaded at least one set of
                   epics (even an empty one), so subsequent refetches keep the
                   existing rendered state until the fresh data lands. */}
-              {isLoading && !hasExistingDataRef.current ? (
-                <EpicTreeSkeleton isSlowLoad={isSlowLoad} />
-              ) : !hasRealEpics &&
-                flatBeads.length > 0 &&
-                archivedBeads.length === 0 &&
-                backlogBeads.length === 0 ? (
-                /* Flat table for workspaces with no epics (e.g. Gastown).
+                {isLoading && !hasExistingDataRef.current ? (
+                  <EpicTreeSkeleton isSlowLoad={isSlowLoad} />
+                ) : !hasRealEpics &&
+                  flatBeads.length > 0 &&
+                  archivedBeads.length === 0 &&
+                  backlogBeads.length === 0 ? (
+                  /* Flat table for workspaces with no epics (e.g. Gastown).
                    beadbox-brg: when filters.grouped is on, render via the
                    shared status-grouped helper instead of a single table. */
-                filters.grouped ? (
-                  renderGroupedFlatView(flatBeads)
-                ) : (
-                  <div className="space-y-1">
-                    <BeadTable
-                      beads={flatBeads}
-                      epicId="_flat"
+                  filters.grouped ? (
+                    renderGroupedFlatView(flatBeads)
+                  ) : (
+                    <div className="space-y-1">
+                      <BeadTable
+                        beads={flatBeads}
+                        epicId="_flat"
+                        onBeadClick={handleBeadClick}
+                        onArchive={handleArchiveBead}
+                        onDelete={setDeleteConfirmId}
+                        expandedBeads={expandedBeads}
+                        onToggleBead={handleToggleBead}
+                        focusedItemId={focusedItemId}
+                        onFocusItem={setFocusedItemId}
+                        onDragStart={handleDragStart}
+                        onDragEnd={handleDragEnd}
+                        draggedBeadId={draggedBeadId}
+                        selectedBeadId={beadIdParam}
+                        showWaves={filters.showWaves}
+                        readState={readState}
+                        selectedIds={beadSelection.selectedIds}
+                        onToggleSelect={beadSelection.toggle}
+                        onToggleSelectAll={beadSelection.toggleAll}
+                      />
+                    </div>
+                  )
+                ) : activeEpicsWithFilteredStandalone.some(
+                    (e) => e.id !== "_standalone" || (e.children?.length ?? 0) > 0,
+                  ) ||
+                  activeMilestonesFiltered.length > 0 ||
+                  activeConvoys.length > 0 ||
+                  activeMolecules.length > 0 ||
+                  backlogEpics.length > 0 ||
+                  backlogBeads.length > 0 ||
+                  archivedEpics.length > 0 ||
+                  archivedBeads.length > 0 ? (
+                  filters.grouped ? (
+                    renderGroupedFlatView(groupedBeads)
+                  ) : (
+                    <EpicTree
+                      epics={activeEpicsWithFilteredStandalone}
+                      milestones={activeMilestonesFiltered}
+                      convoys={activeConvoysFiltered}
+                      molecules={activeMoleculesFiltered}
+                      archivedEpics={archivedEpics}
+                      archivedBeads={archivedBeads}
+                      backlogEpics={backlogEpics}
+                      backlogBeads={backlogBeads}
+                      expandedEpics={expandedEpics}
+                      onToggleEpic={handleToggleEpic}
+                      onSetExpandedEpics={handleSetExpandedEpics}
                       onBeadClick={handleBeadClick}
-                      onArchive={handleArchiveBead}
                       onDelete={setDeleteConfirmId}
+                      onBeadMove={handleBeadMove}
+                      canMoveEpic={canMoveEpic}
+                      dragOverEpicId={dragOverEpicId}
+                      onDragOver={handleDragOver}
+                      onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
+                      draggedBeadId={draggedBeadId}
                       expandedBeads={expandedBeads}
                       onToggleBead={handleToggleBead}
                       focusedItemId={focusedItemId}
                       onFocusItem={setFocusedItemId}
-                      onDragStart={handleDragStart}
-                      onDragEnd={handleDragEnd}
-                      draggedBeadId={draggedBeadId}
-                      selectedBeadId={beadIdParam}
-                      showWaves={filters.showWaves}
-                      readState={readState}
+                      onArchive={handleArchive}
+                      onBacklog={handleBacklog}
                       selectedIds={beadSelection.selectedIds}
                       onToggleSelect={beadSelection.toggle}
                       onToggleSelectAll={beadSelection.toggleAll}
+                      selectedBeadId={beadIdParam}
+                      showWaves={filters.showWaves}
+                      readState={readState}
                     />
+                  )
+                ) : epics.length === 0 && loadError && loadError.category !== "flock-contention" ? (
+                  <LoadErrorEmpty
+                    error={loadError}
+                    onRetry={handleManualRetry}
+                    isRetrying={isLoading}
+                    databasePath={currentWorkspace?.databasePath ?? ""}
+                    autoRetryCountdown={autoRetryCountdown}
+                  />
+                ) : epics.length === 0 && flockContention ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+                    <RefreshCw className="h-5 w-5 animate-spin" />
+                    <span className="text-sm">Workspace busy, loading data...</span>
                   </div>
-                )
-              ) : activeEpicsWithFilteredStandalone.some(
-                  (e) => e.id !== "_standalone" || (e.children?.length ?? 0) > 0,
-                ) ||
-                activeConvoys.length > 0 ||
-                activeMolecules.length > 0 ||
-                backlogEpics.length > 0 ||
-                backlogBeads.length > 0 ||
-                archivedEpics.length > 0 ||
-                archivedBeads.length > 0 ? (
-                filters.grouped ? (
-                  renderGroupedFlatView(flattenEpicsToBeads(activeEpicsWithFilteredStandalone))
+                ) : epics.length === 0 ? (
+                  <OnboardingHero />
                 ) : (
-                <EpicTree
-                  epics={activeEpicsWithFilteredStandalone}
-                  convoys={activeConvoysFiltered}
-                  molecules={activeMoleculesFiltered}
-                  archivedEpics={archivedEpics}
-                  archivedBeads={archivedBeads}
-                  backlogEpics={backlogEpics}
-                  backlogBeads={backlogBeads}
-                  expandedEpics={expandedEpics}
-                  onToggleEpic={handleToggleEpic}
-                  onSetExpandedEpics={handleSetExpandedEpics}
-                  onBeadClick={handleBeadClick}
-                  onDelete={setDeleteConfirmId}
-                  onBeadMove={handleBeadMove}
-                  canMoveEpic={canMoveEpic}
-                  dragOverEpicId={dragOverEpicId}
-                  onDragOver={handleDragOver}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                  draggedBeadId={draggedBeadId}
-                  expandedBeads={expandedBeads}
-                  onToggleBead={handleToggleBead}
-                  focusedItemId={focusedItemId}
-                  onFocusItem={setFocusedItemId}
-                  onArchive={handleArchive}
-                  onBacklog={handleBacklog}
-                  selectedIds={beadSelection.selectedIds}
-                  onToggleSelect={beadSelection.toggle}
-                  onToggleSelectAll={beadSelection.toggleAll}
-                  selectedBeadId={beadIdParam}
-                  showWaves={filters.showWaves}
-                  readState={readState}
-                />
-                )
-              ) : epics.length === 0 && loadError && loadError.category !== "flock-contention" ? (
-                <LoadErrorEmpty
-                  error={loadError}
-                  onRetry={handleManualRetry}
-                  isRetrying={isLoading}
-                  databasePath={currentWorkspace?.databasePath ?? ""}
-                  autoRetryCountdown={autoRetryCountdown}
-                />
-              ) : epics.length === 0 && flockContention ? (
-                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
-                  <RefreshCw className="h-5 w-5 animate-spin" />
-                  <span className="text-sm">Workspace busy, loading data...</span>
-                </div>
-              ) : epics.length === 0 ? (
-                <OnboardingHero />
-              ) : (
-                <div className="text-center py-12 text-muted-foreground">
-                  No epics or beads match your filters
-                </div>
-              )}
-            </div>
+                  <div className="text-center py-12 text-muted-foreground">
+                    No epics or beads match your filters
+                  </div>
+                )}
+              </div>
             </>
           )
         ) : (
@@ -987,28 +1103,33 @@ function BeadsEpicsViewer() {
                   archivedBeads.length === 0 &&
                   backlogBeads.length === 0 ? (
                   /* Flat table for workspaces with no epics (e.g. Gastown) */
-                  <div className="space-y-1">
-                    <BeadTable
-                      beads={flatBeads}
-                      epicId="_flat"
-                      onBeadClick={handleBeadClick}
-                      onArchive={handleArchiveBead}
-                      onDelete={setDeleteConfirmId}
-                      expandedBeads={expandedBeads}
-                      onToggleBead={handleToggleBead}
-                      focusedItemId={focusedItemId}
-                      onFocusItem={setFocusedItemId}
-                      onDragStart={handleDragStart}
-                      onDragEnd={handleDragEnd}
-                      draggedBeadId={draggedBeadId}
-                      selectedBeadId={beadIdParam}
-                      showWaves={filters.showWaves}
-                      readState={readState}
-                    />
-                  </div>
+                  filters.grouped ? (
+                    renderGroupedFlatView(flatBeads)
+                  ) : (
+                    <div className="space-y-1">
+                      <BeadTable
+                        beads={flatBeads}
+                        epicId="_flat"
+                        onBeadClick={handleBeadClick}
+                        onArchive={handleArchiveBead}
+                        onDelete={setDeleteConfirmId}
+                        expandedBeads={expandedBeads}
+                        onToggleBead={handleToggleBead}
+                        focusedItemId={focusedItemId}
+                        onFocusItem={setFocusedItemId}
+                        onDragStart={handleDragStart}
+                        onDragEnd={handleDragEnd}
+                        draggedBeadId={draggedBeadId}
+                        selectedBeadId={beadIdParam}
+                        showWaves={filters.showWaves}
+                        readState={readState}
+                      />
+                    </div>
+                  )
                 ) : activeEpicsWithFilteredStandalone.some(
                     (e) => e.id !== "_standalone" || (e.children?.length ?? 0) > 0,
                   ) ||
+                  activeMilestonesFiltered.length > 0 ||
                   activeConvoys.length > 0 ||
                   activeMolecules.length > 0 ||
                   backlogEpics.length > 0 ||
@@ -1016,41 +1137,42 @@ function BeadsEpicsViewer() {
                   archivedEpics.length > 0 ||
                   archivedBeads.length > 0 ? (
                   filters.grouped ? (
-                    renderGroupedFlatView(flattenEpicsToBeads(activeEpicsWithFilteredStandalone))
+                    renderGroupedFlatView(groupedBeads)
                   ) : (
-                  <EpicTree
-                    epics={activeEpicsWithFilteredStandalone}
-                    convoys={activeConvoysFiltered}
-                    molecules={activeMoleculesFiltered}
-                    archivedEpics={archivedEpics}
-                    archivedBeads={archivedBeads}
-                    backlogEpics={backlogEpics}
-                    backlogBeads={backlogBeads}
-                    expandedEpics={expandedEpics}
-                    onToggleEpic={handleToggleEpic}
-                    onSetExpandedEpics={handleSetExpandedEpics}
-                    onBeadClick={handleBeadClick}
-                    onDelete={setDeleteConfirmId}
-                    onBeadMove={handleBeadMove}
-                    canMoveEpic={canMoveEpic}
-                    dragOverEpicId={dragOverEpicId}
-                    onDragOver={handleDragOver}
-                    onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
-                    draggedBeadId={draggedBeadId}
-                    expandedBeads={expandedBeads}
-                    onToggleBead={handleToggleBead}
-                    focusedItemId={focusedItemId}
-                    onFocusItem={setFocusedItemId}
-                    onArchive={handleArchive}
-                    onBacklog={handleBacklog}
-                    selectedBeadId={beadIdParam}
-                    showWaves={filters.showWaves}
-                    readState={readState}
-                    selectedIds={beadSelection.selectedIds}
-                    onToggleSelect={beadSelection.toggle}
-                    onToggleSelectAll={beadSelection.toggleAll}
-                  />
+                    <EpicTree
+                      epics={activeEpicsWithFilteredStandalone}
+                      milestones={activeMilestonesFiltered}
+                      convoys={activeConvoysFiltered}
+                      molecules={activeMoleculesFiltered}
+                      archivedEpics={archivedEpics}
+                      archivedBeads={archivedBeads}
+                      backlogEpics={backlogEpics}
+                      backlogBeads={backlogBeads}
+                      expandedEpics={expandedEpics}
+                      onToggleEpic={handleToggleEpic}
+                      onSetExpandedEpics={handleSetExpandedEpics}
+                      onBeadClick={handleBeadClick}
+                      onDelete={setDeleteConfirmId}
+                      onBeadMove={handleBeadMove}
+                      canMoveEpic={canMoveEpic}
+                      dragOverEpicId={dragOverEpicId}
+                      onDragOver={handleDragOver}
+                      onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
+                      draggedBeadId={draggedBeadId}
+                      expandedBeads={expandedBeads}
+                      onToggleBead={handleToggleBead}
+                      focusedItemId={focusedItemId}
+                      onFocusItem={setFocusedItemId}
+                      onArchive={handleArchive}
+                      onBacklog={handleBacklog}
+                      selectedBeadId={beadIdParam}
+                      showWaves={filters.showWaves}
+                      readState={readState}
+                      selectedIds={beadSelection.selectedIds}
+                      onToggleSelect={beadSelection.toggle}
+                      onToggleSelectAll={beadSelection.toggleAll}
+                    />
                   )
                 ) : epics.length === 0 && loadError && loadError.category !== "flock-contention" ? (
                   <LoadErrorEmpty
@@ -1089,9 +1211,11 @@ function BeadsEpicsViewer() {
                   onDelete={setDeleteConfirmId}
                   onBeadNavigate={handleBeadNavigate}
                   parentPath={parentPath}
-                  dbPath={currentWorkspace?.databasePath}
+                  dbPath={currentWorkspace?.id}
                   assignees={assignees}
                   availableStatuses={availableStatuses}
+                  availableTypes={typeOptions}
+                  typeCatalogReady={typeCatalogReady}
                   customStatusChain={customStatusChain}
                   isLoadingBead={isLoadingBead}
                   isFocused={focusedPanel === "right"}
@@ -1111,6 +1235,7 @@ function BeadsEpicsViewer() {
         zoomLevel={zoomLevel}
         onZoomChange={handleZoomChange}
         databasePath={currentWorkspace?.databasePath}
+        workspaceId={currentWorkspace?.id}
         vimNavigationEnabled={vimEnabled}
         onVimNavigationChange={handleVimNavigationChange}
         updateCheckEnabled={updateCheckEnabled}

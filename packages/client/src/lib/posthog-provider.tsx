@@ -41,6 +41,7 @@ const POSTHOG_HOST = POSTHOG_HOST_RAW || DEFAULT_POSTHOG_HOST
 // `host` is the EFFECTIVE host (post-fallback), `host_from_env` is the raw
 // env value so an operator can tell whether the fallback fired.
 import { ensureBeadboxStamp } from "./window-globals"
+
 {
   const stamp = ensureBeadboxStamp()
   if (stamp) {
@@ -113,8 +114,11 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
     // Migration: posthog.alias(newId, oldId) once per upgrade so PostHog
     // merges historical events from the bare-hash person into the new
     // prefixed person. Idempotent via localStorage gate.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tauriInternals = (window as any).__TAURI_INTERNALS__
+    const tauriInternals = (
+      window as unknown as {
+        __TAURI_INTERNALS__?: { invoke: (command: string) => Promise<string> }
+      }
+    ).__TAURI_INTERNALS__
     if (tauriInternals?.invoke) {
       Promise.all([
         tauriInternals.invoke("get_stable_id").catch(() => "") as Promise<string>,

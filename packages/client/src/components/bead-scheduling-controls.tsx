@@ -53,7 +53,7 @@ export function SchedulingControls({
   const handleEstimateSave = useCallback(() => {
     setIsEditingEstimate(false)
     const num = parseInt(editEstimateValue, 10)
-    onSaveEstimate(isNaN(num) ? 0 : num)
+    onSaveEstimate(Number.isNaN(num) ? 0 : num)
   }, [editEstimateValue, onSaveEstimate])
 
   return (

@@ -59,9 +59,40 @@ bun run dev
 bun run tauri:build
 ```
 
+To build and install a separate, locally signed macOS app without replacing
+`/Applications/Beadbox.app`, run:
+
+```sh
+bash scripts/build-install-local-macos.sh
+```
+
+This installs or updates `/Applications/Beadbox Local.app` with its own bundle
+identifier. The local signature is ad hoc; this build is not notarized. Launch
+it with the normal Beadbox workspace registry (`~/.beadbox/registry.json`):
+
+```sh
+open -n -a "/Applications/Beadbox Local.app"
+```
+
+The local app uses the same registered Beads workspaces and installed `bd` as
+the production app. Both apps can read and write those workspaces, so avoid
+editing the same issue from both windows at once.
+
 ## Architecture (short version)
 
-Beadbox is a Tauri v2 app. The Rust shell spawns a Bun sidecar process and talks to it over stdio (kkrpc) — the app opens no network ports. All issue data flows through the `bd` CLI; Beadbox never touches the database behind `bd`'s back. Live updates come from watching the workspace filesystem (local) or polling Dolt table hashes (server workspaces).
+Beadbox is a Tauri v2 app. The Rust shell spawns a Bun sidecar process and talks to it over stdio (kkrpc). The app itself opens no network listener. The sidecar uses the `bd` CLI for writes and operations without an HTTP equivalent, and reads Dolt table hashes through SQL for server workspaces. Live updates come from watching the workspace filesystem (embedded) or polling Dolt table hashes in a separate worker (server workspaces).
+
+An opt-in read pilot uses Beads 1.3.0 or newer to start one authenticated `bd serve` child for each actively used SQL-server workspace. Set `bdServeReads` in `~/.beadbox/config.json` (beside `registry.json`):
+
+```json
+{
+  "bdServeReads": true
+}
+```
+
+The setting is read on each operation; absent or invalid values leave the pilot off. `BEADBOX_BD_SERVE_READS=1` or `=0` overrides the file when explicitly set. Each child listens only on an ephemeral loopback port and is stopped with the sidecar; embedded workspaces remain on the CLI. Keep the pilot disabled until the performance and parity checks in the [workspace serve design](docs/design/bd-serve-per-workspace.md) have been run for the target environment.
+
+For diagnosing `bd serve` failures, add `"bdServeStderrLog": true` to the same config file. This opt-in setting is checked when a `bd serve` child starts. Its stderr goes to a separate owner-only file under `~/Library/Logs/Beadbox/bd-serve/` on macOS (or the sidecar log directory on other platforms), never to the general sidecar log. Each workspace file rotates at 2 MiB with two backups; logs from stopped sidecar processes are pruned to the two most recent process runs. Beadbox masks the configured host, port, database, user, password, HTTP token, and common credential fields before writing. An existing child needs to stop and start before a changed setting takes effect.
 
 ## Contributing
 

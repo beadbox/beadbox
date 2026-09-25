@@ -72,6 +72,8 @@ export function HelpFab() {
 
   // Auto-scroll as response streams in
   useEffect(() => {
+    // The streamed response changes the scroll height without replacing the element.
+    void response
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }

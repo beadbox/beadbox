@@ -252,7 +252,7 @@ export function TrainsPage() {
 
   const dbPath = currentWorkspace?.databasePath
 
-  const { trainsQuery, readyQuery, couplerQuery, trains, ready, couplers } = useTrainsData(dbPath)
+  const { trainsQuery, readyQuery, couplerQuery, trains, ready, couplers } = useTrainsData(currentWorkspace?.id)
   const selected = trains.find((train) => train.name === selectedName) ?? trains[0] ?? null
   const readyForSelected = ready.filter((row) => row.train === selected?.name)
   const openBead = (bead: string) => {
@@ -309,6 +309,7 @@ export function TrainsPage() {
         zoomLevel={prefs.zoomLevel}
         onZoomChange={prefs.handleZoomChange}
         databasePath={dbPath}
+        workspaceId={currentWorkspace?.id}
         vimNavigationEnabled={prefs.vimEnabled}
         onVimNavigationChange={prefs.handleVimNavigationChange}
         updateCheckEnabled={prefs.updateCheckEnabled}

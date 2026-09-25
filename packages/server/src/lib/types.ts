@@ -1,18 +1,4 @@
-export type BeadType =
-  | "bug"
-  | "task"
-  | "feature"
-  | "epic"
-  | "chore"
-  | "message"
-  | "gate"
-  | "merge-request"
-  | "molecule"
-  | "agent"
-  | "role"
-  | "rig"
-  | "convoy"
-  | "event"
+export type BeadType = string
 
 // Core statuses that always exist
 type CoreStatus = "open" | "in_progress" | "closed"
@@ -64,7 +50,6 @@ export interface Bead {
 }
 
 export interface Epic extends Bead {
-  type: "epic" | "convoy" | "molecule"
   children: Bead[]
   childEpics?: Epic[]
 }

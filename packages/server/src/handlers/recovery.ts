@@ -6,11 +6,15 @@
 // no auto-confirm in the sidecar.
 
 import { execFile } from "node:child_process"
+import { readFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import { promisify } from "node:util"
-import { getBdPath } from "../lib/bd"
+import { buildEnv, getBdPath } from "../lib/bd"
 import { isValidDbPath } from "../lib/path-validation"
+import { findWorkspaceByDbPath, getBeadboxRegistryPath, getServerOwnership, type WorkspaceRegistry } from "../lib/workspace-registry"
+import { resolveWorkspaceTarget } from "../lib/workspace-resolver"
+import { workspaceTransition } from "../lib/workspace-transition"
 
 const execFileAsync = promisify(execFile)
 
@@ -43,6 +47,23 @@ function projectRootFromDb(dbPath: string): string | undefined {
   return undefined
 }
 
+function isExternallyManaged(databasePath: string): boolean {
+  let registry: WorkspaceRegistry
+  try {
+    registry = JSON.parse(readFileSync(getBeadboxRegistryPath(), "utf-8")) as WorkspaceRegistry
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false
+    throw error
+  }
+  const beadsDir = databasePath.startsWith("server://")
+    ? databasePath
+    : basename(databasePath) === ".beads"
+      ? databasePath
+      : dirname(databasePath)
+  const entry = findWorkspaceByDbPath(registry, beadsDir)
+  return !!entry?.server && getServerOwnership(entry) !== "managed"
+}
+
 export async function runRecoveryCommand(
   command: string,
   databasePath: string,
@@ -59,6 +80,30 @@ export async function runRecoveryCommand(
     }
   }
 
+  if (isExternallyManaged(databasePath)) {
+    return { success: false, error: "Recovery commands are unavailable for an externally managed Dolt server" }
+  }
+
+  let targetId: string
+  try {
+    targetId = (await resolveWorkspaceTarget(databasePath)).id
+    await workspaceTransition.preflightBdBinary()
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+  try {
+    return await workspaceTransition.runStorageTransition(targetId, () =>
+      executeRecoveryCommand(args, databasePath),
+    )
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function executeRecoveryCommand(
+  args: string[],
+  databasePath: string,
+): Promise<{ success: boolean; output?: string; error?: string }> {
   const bdPath = getBdPath()
   const normalizedDb = normalizeDbPath(databasePath)
   const cwd = projectRootFromDb(databasePath)
@@ -67,6 +112,7 @@ export async function runRecoveryCommand(
     const { stdout } = await execFileAsync(bdPath, [...args, "--db", normalizedDb], {
       timeout: 30_000,
       cwd,
+      env: buildEnv({ db: databasePath }),
     })
     return { success: true, output: stdout.trim() }
   } catch (error: unknown) {
@@ -121,9 +167,9 @@ export async function migrateToServerMode(
     }
   }
 
-  const bdPath = getBdPath()
-  const normalizedDb = normalizeDbPath(databasePath)
-  const cwd = projectRootFromDb(databasePath)
+  if (isExternallyManaged(databasePath)) {
+    return { success: false, error: "Migration is unavailable for an externally managed Dolt server" }
+  }
 
   let prefix: string
   try {
@@ -135,6 +181,30 @@ export async function migrateToServerMode(
       error: "Could not read workspace prefix from metadata.json",
     }
   }
+
+  let targetId: string
+  try {
+    targetId = (await resolveWorkspaceTarget(databasePath)).id
+    await workspaceTransition.preflightBdBinary()
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+  try {
+    return await workspaceTransition.runStorageTransition(targetId, () =>
+      executeMigration(databasePath, prefix),
+    )
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function executeMigration(
+  databasePath: string,
+  prefix: string,
+): Promise<{ success: boolean; failedStep?: MigrationStep; error?: string }> {
+  const bdPath = getBdPath()
+  const normalizedDb = normalizeDbPath(databasePath)
+  const cwd = projectRootFromDb(databasePath)
 
   const run = async (args: string[], timeoutMs = 60_000) => {
     const { stdout, stderr } = await execFileAsync(bdPath, [...args, "--db", normalizedDb], {

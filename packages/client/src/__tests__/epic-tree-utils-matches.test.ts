@@ -51,6 +51,12 @@ const baseFilters = (over: Partial<Filters> = {}): Filters => ({
 })
 
 describe("matchesBead", () => {
+  test("filters custom types by their exact value", () => {
+    expect(matchesBead(baseBead({ type: "decision" }), baseFilters({ type: "decision" }))).toBe(
+      true,
+    )
+    expect(matchesBead(baseBead({ type: "task" }), baseFilters({ type: "decision" }))).toBe(false)
+  })
   test("returns true with default filters for a normal task bead", () => {
     expect(matchesBead(baseBead(), baseFilters())).toBe(true)
   })
@@ -61,8 +67,17 @@ describe("matchesBead", () => {
 
   test("includes 'message' beads when showMessages=true", () => {
     expect(
-      matchesBead(baseBead({ type: "message" } as Partial<Bead>), baseFilters({ showMessages: true })),
+      matchesBead(
+        baseBead({ type: "message" } as Partial<Bead>),
+        baseFilters({ showMessages: true }),
+      ),
     ).toBe(true)
+  })
+
+  test("explicit message type and full system view include messages", () => {
+    const message = baseBead({ type: "message" })
+    expect(matchesBead(message, baseFilters({ type: "message" }))).toBe(true)
+    expect(matchesBead(message, baseFilters({ includeSystem: true }))).toBe(true)
   })
 
   test("status filter excludes mismatched beads", () => {
@@ -87,13 +102,21 @@ describe("matchesBead", () => {
   })
 
   test("priority filter excludes mismatched beads", () => {
-    expect(matchesBead(baseBead({ priority: "critical" }), baseFilters({ priority: "high" }))).toBe(false)
-    expect(matchesBead(baseBead({ priority: "high" }), baseFilters({ priority: "high" }))).toBe(true)
+    expect(matchesBead(baseBead({ priority: "critical" }), baseFilters({ priority: "high" }))).toBe(
+      false,
+    )
+    expect(matchesBead(baseBead({ priority: "high" }), baseFilters({ priority: "high" }))).toBe(
+      true,
+    )
   })
 
   test("assignee filter excludes mismatched beads", () => {
-    expect(matchesBead(baseBead({ assignee: "eng1" }), baseFilters({ assignee: "eng2" }))).toBe(false)
-    expect(matchesBead(baseBead({ assignee: "eng2" }), baseFilters({ assignee: "eng2" }))).toBe(true)
+    expect(matchesBead(baseBead({ assignee: "eng1" }), baseFilters({ assignee: "eng2" }))).toBe(
+      false,
+    )
+    expect(matchesBead(baseBead({ assignee: "eng2" }), baseFilters({ assignee: "eng2" }))).toBe(
+      true,
+    )
   })
 
   test("hasSpec filter requires specId to be set", () => {
@@ -102,8 +125,12 @@ describe("matchesBead", () => {
   })
 
   test("hasDeadline filter requires dueAt to be set", () => {
-    expect(matchesBead(baseBead({ dueAt: undefined }), baseFilters({ hasDeadline: true }))).toBe(false)
-    expect(matchesBead(baseBead({ dueAt: new Date("2026-01-01") }), baseFilters({ hasDeadline: true }))).toBe(true)
+    expect(matchesBead(baseBead({ dueAt: undefined }), baseFilters({ hasDeadline: true }))).toBe(
+      false,
+    )
+    expect(
+      matchesBead(baseBead({ dueAt: new Date("2026-01-01") }), baseFilters({ hasDeadline: true })),
+    ).toBe(true)
   })
 
   test("rig filter excludes mismatched beads", () => {
@@ -112,8 +139,12 @@ describe("matchesBead", () => {
   })
 
   test("search matches title (case-insensitive)", () => {
-    expect(matchesBead(baseBead({ title: "Hello WORLD" }), baseFilters({ search: "world" }))).toBe(true)
-    expect(matchesBead(baseBead({ title: "unrelated" }), baseFilters({ search: "world" }))).toBe(false)
+    expect(matchesBead(baseBead({ title: "Hello WORLD" }), baseFilters({ search: "world" }))).toBe(
+      true,
+    )
+    expect(matchesBead(baseBead({ title: "unrelated" }), baseFilters({ search: "world" }))).toBe(
+      false,
+    )
   })
 
   test("search matches id (case-insensitive)", () => {

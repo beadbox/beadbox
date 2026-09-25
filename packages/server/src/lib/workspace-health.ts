@@ -8,11 +8,15 @@ import { basename, dirname, join } from "path"
 import { getWorkspacePassword, initServerScaffold, stripBdWarnings } from "./bd"
 import { resolveBdPath } from "./bd-paths"
 import { drainPool } from "./dolt-pool"
+import { ensureExternalScaffold } from "./external-scaffold"
 import { execFileAsync } from "./exec"
 import type { HealthError } from "./startup-machine"
 import { compareVersions, MIN_BD_VERSION } from "./version-requirements"
+import { workspaceTransition } from "./workspace-transition"
 import {
   getBeadboxRegistryPath,
+  getServerOwnership,
+  isBeadboxScaffold,
   type RegistryEntry,
   resolveBdDbPath,
   updateWorkspaceLocal,
@@ -46,13 +50,18 @@ function normalizeDbPathForDolt(dbPath: string): string {
  *   Fallback chain: metadata.json dolt_server_port -> registry port.
  */
 export function resolvePort(workspace: RegistryEntry): number | null {
-  // Server-only: registry is the source of truth
-  if (workspace.local === null) {
+  if (workspace.local === null) return workspace.server?.port ?? null
+  // External connections always use the registry endpoint, including when a
+  // local scaffold exists. Its port file may refer to an old connection.
+  if (workspace.server && getServerOwnership(workspace) !== "managed") {
     return workspace.server?.port ?? null
   }
 
-  // Local workspace: workspace.local.path IS the .beads/ directory
-  const beadsDir = workspace.local.path
+  return resolveLocalPort(workspace.local.path) ?? workspace.server?.port ?? null
+}
+
+function resolveLocalPort(beadsDir: string): number | null {
+  // Local workspace: beadsDir IS the .beads/ directory
   const portFile = join(beadsDir, "dolt-server.port")
   try {
     const portStr = readFileSync(portFile, "utf-8").trim()
@@ -75,8 +84,7 @@ export function resolvePort(workspace: RegistryEntry): number | null {
     // metadata.json missing or unparseable
   }
 
-  // Last resort: stale registry port
-  return workspace.server?.port ?? null
+  return null
 }
 
 const BD_VERSION_RE = /(\d+\.\d+\.\d+)/
@@ -132,7 +140,19 @@ async function checkServerOnlyWorkspace(
   bdPath: string,
 ): Promise<HealthResult> {
   const s = workspace.server
-  const serverKey = `${s.host}:${s.port}/${s.database}`
+  if (isBeadboxScaffold(workspace)) {
+    try {
+      await ensureExternalScaffold(workspace.local!.path, s)
+    } catch (error) {
+      return {
+        ok: false,
+        error: { kind: "unknown", message: error instanceof Error ? error.message : String(error), bdOutput: "" },
+        bdVersion: bdResult.version,
+        bdPath,
+      }
+    }
+  }
+  const serverKey = `${s.host}:${s.port}/${s.database}/${s.user}`
   const password = getWorkspacePassword(serverKey)
   let conn: mysql.Connection | undefined
   try {
@@ -142,6 +162,7 @@ async function checkServerOnlyWorkspace(
       database: s.database,
       user: s.user,
       password: password || undefined,
+      ssl: s.tls ? {} : undefined,
       connectTimeout: 5000,
     })
     await conn.query("SELECT 1")
@@ -156,6 +177,8 @@ async function checkServerOnlyWorkspace(
   } finally {
     await conn?.end().catch(() => {})
   }
+
+  if (workspace.local) return { ok: true, bdVersion: bdResult.version, bdPath }
 
   // MySQL connection succeeded. Create a local .beads/ scaffold so bd CLI
   // commands (list, show, config) work for data loading. Without this,
@@ -187,10 +210,10 @@ async function checkServerOnlyWorkspace(
 
 function buildHealthEnv(workspace: RegistryEntry): NodeJS.ProcessEnv | undefined {
   // For server-backed workspaces (scaffolds), inject the password into bd's env.
-  // The password is stored under the server identity key (host:port/database),
+  // The password is stored under the server identity key (host:port/database/user),
   // not the scaffold project path.
   if (!workspace.server) return undefined
-  const serverKey = `${workspace.server.host}:${workspace.server.port}/${workspace.server.database}`
+  const serverKey = `${workspace.server.host}:${workspace.server.port}/${workspace.server.database}/${workspace.server.user}`
   const serverPassword = getWorkspacePassword(serverKey)
   if (!serverPassword) return undefined
   return { ...process.env, BEADS_DOLT_PASSWORD: serverPassword }
@@ -275,7 +298,7 @@ async function checkLocalWorkspace(
       `[ws:health] "${workspace.name}" → FAIL kind=${classified.kind} stderr=${stderr.slice(0, 200)} stdout=${stdout.slice(0, 200)}`,
     )
 
-    if (classified.kind === "server_unreachable" && workspace.local) {
+    if (classified.kind === "server_unreachable" && getServerOwnership(workspace) === "managed") {
       const recovered = await tryAutoRecoverDolt(workspace, bdPath, dbPath, healthEnv)
       if (recovered) return { ok: true, bdVersion: bdResult.version, bdPath }
     }
@@ -285,6 +308,38 @@ async function checkLocalWorkspace(
 }
 
 export async function checkHealth(workspace: RegistryEntry): Promise<HealthResult> {
+  try {
+    if (workspace.server && !workspace.local) {
+      await workspaceTransition.preflightBdBinary()
+      return await workspaceTransition.runStorageTransition(workspace.id, () =>
+        checkHealthUnscoped(workspace),
+      )
+    }
+    return await workspaceTransition.withOperation(workspace.id, async (lease) => {
+      const scoped = lease.workspace as RegistryEntry
+      const result = await checkHealthUnscoped(scoped)
+      workspace.local = scoped.local
+      return result
+    })
+  } catch (error) {
+    if (
+      (error as NodeJS.ErrnoException).code === "ENOENT" ||
+      (error instanceof Error && error.message.startsWith("bd executable "))
+    ) {
+      return { ok: false, error: { kind: "bd_missing" } }
+    }
+    return {
+      ok: false,
+      error: {
+        kind: "unknown",
+        message: error instanceof Error ? error.message : String(error),
+        bdOutput: "",
+      },
+    }
+  }
+}
+
+async function checkHealthUnscoped(workspace: RegistryEntry): Promise<HealthResult> {
   // bd v1.0.0+ embeds Dolt directly (go-mysql-server + doltcore as Go imports);
   // no standalone `dolt` binary is required at runtime. Only bd needs to be
   // present on PATH (bb-cu2n).
@@ -294,7 +349,7 @@ export async function checkHealth(workspace: RegistryEntry): Promise<HealthResul
   const versionFail = validateBdVersion(bdResult, bdPath)
   if (versionFail) return versionFail
 
-  if (workspace.local === null && workspace.server) {
+  if (workspace.server && getServerOwnership(workspace) !== "managed") {
     return checkServerOnlyWorkspace(
       workspace as RegistryEntry & { server: NonNullable<RegistryEntry["server"]> },
       bdResult,

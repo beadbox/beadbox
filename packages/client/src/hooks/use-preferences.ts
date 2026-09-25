@@ -2,7 +2,6 @@
 
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { safeCapture } from "../lib/posthog-safe"
 import {
   getAnalyticsEnabled,
   getFilterBarVisible,
@@ -24,6 +23,7 @@ import {
   type ThemeVariant,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
+import { safeCapture } from "../lib/posthog-safe"
 import type { Filters, SortOption } from "../lib/types"
 
 export function usePreferences() {
@@ -159,8 +159,7 @@ export function usePreferences() {
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
     setUpdateCheckFrequencyState(getUpdateCheckFrequency())
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const detected = !!(window as any).__TAURI_INTERNALS__
+    const detected = !!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
     isTauriRef.current = detected
     setIsTauri(detected)
     if (detected) {

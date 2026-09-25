@@ -1,8 +1,8 @@
 import { useNavigate } from "@tanstack/react-router"
-import { useHasTrains } from "@/hooks/use-has-trains"
 import { X } from "lucide-react"
 import posthog from "posthog-js"
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
+import { useHasTrains } from "@/hooks/use-has-trains"
 import { safeCapture } from "@/lib/posthog-safe"
 import { useActiveWorkspace } from "../hooks/use-active-workspace"
 import { useAppHealth } from "../hooks/use-app-health"
@@ -39,7 +39,7 @@ import { DevConsole } from "./dev-console"
 import { Header } from "./header"
 import { PipelineFlow } from "./pipeline-flow"
 import { SettingsDialog } from "./settings-dialog"
-import { useBdHealth, useWorkspaceGate } from "./startup-gate"
+import { useWorkspaceGate } from "./startup-gate"
 import { Badge } from "./ui/badge"
 import { UpdateDialog } from "./update-dialog"
 
@@ -55,7 +55,7 @@ function ActivityViewer() {
   // Cookie-resolved active workspace: the rail can switch projects without
   // remounting this route, so the resolution has to be subscribed.
   const [currentWorkspace, setCurrentWorkspace] = useActiveWorkspace(workspaces)
-  const hasTrains = useHasTrains(currentWorkspace?.databasePath)
+  const hasTrains = useHasTrains(currentWorkspace?.id)
   const [loadingWorkspaceId, setLoadingWorkspaceId] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   // Manual refresh signal (handleRefresh below) + subscription-driven signal
@@ -113,7 +113,7 @@ function ActivityViewer() {
   const [updateCheckEnabled, setUpdateCheckEnabledState] = useState(true)
   const [updateCheckFrequency, setUpdateCheckFrequencyState] =
     useState<UpdateCheckFrequency>(3600000)
-  const { health: appHealth, healthRef: appHealthRef, setHealthy, setDegraded } = useAppHealth()
+  const { health: appHealth, setHealthy, setDegraded } = useAppHealth()
   const [showRcVersion, setShowRcVersion] = useState(false)
 
   const {
@@ -127,14 +127,15 @@ function ActivityViewer() {
     frequency: updateCheckFrequency,
   })
 
-  // Track activity page view once per mount
+  // Track the workspace mode present when this page mounts.
+  const initialWorkspaceModeRef = useRef(currentWorkspace?.mode || "unknown")
   useEffect(() => {
     if (getAnalyticsEnabled()) {
       safeCapture("app_activity_viewed", {
-        workspace_mode: currentWorkspace?.mode || "unknown",
+        workspace_mode: initialWorkspaceModeRef.current,
       })
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // Scroll depth tracking for activity feed engagement
   const scrollMilestonesRef = useRef(new Set<number>())
@@ -165,8 +166,8 @@ function ActivityViewer() {
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
     setUpdateCheckFrequencyState(getUpdateCheckFrequency())
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    isTauriRef.current = !!(window as any).__TAURI_INTERNALS__
+    isTauriRef.current = !!(window as Window & { __TAURI_INTERNALS__?: unknown })
+      .__TAURI_INTERNALS__
     if (isTauriRef.current) {
       setZoomLevelState(getZoomLevel())
     }
@@ -240,7 +241,7 @@ function ActivityViewer() {
         setLoadingWorkspaceId(null)
       })
     },
-    [currentWorkspaceId, setHealthy],
+    [currentWorkspaceId, setHealthy, setCurrentWorkspace],
   )
   // Reserved for the workspace switcher in <Header>; legacy code passed it
   // through Header props that this page port doesn't yet wire up.
@@ -322,7 +323,7 @@ function ActivityViewer() {
       }
 
       try {
-        const result = await rpc.activity.listBeadsByStatus(databasePath)
+        const result = await rpc.activity.listBeadsByStatus(currentWorkspaceId)
         // beadbox-8k3: pass the workspace's pipeline chain so the tile set
         // reflects status.custom per pm/spec.md §4.9. Empty status.custom →
         // just the 3 built-in tiles via composePipelineChain.
@@ -367,7 +368,7 @@ function ActivityViewer() {
       }
       setPipelineLoading(false)
     },
-    [databasePath, currentWorkspaceId, currentWorkspace, setDegraded, pipelineChain],
+    [databasePath, currentWorkspaceId, currentWorkspace, setDegraded, pipelineChain, setHealthy],
   )
 
   // beadbox-8k3: load the workspace's custom status chain so the pipeline
@@ -378,10 +379,11 @@ function ActivityViewer() {
   // status.custom ...` CLI write from outside reflects within ~2s per
   // spec §5).
   useEffect(() => {
+    void changeSignal
     if (!databasePath) return
     let cancelled = false
     rpc.beads
-      .getCustomStatusList(databasePath)
+      .getCustomStatusList(currentWorkspace?.id)
       .then((chain) => {
         if (cancelled) return
         setCustomStatusChain(chain)
@@ -395,7 +397,7 @@ function ActivityViewer() {
     return () => {
       cancelled = true
     }
-  }, [databasePath, changeSignal])
+  }, [databasePath, changeSignal, currentWorkspace?.id])
 
   // Initial pipeline fetch (served from the session cache inside the TTL)
   useEffect(() => {
@@ -472,7 +474,7 @@ function ActivityViewer() {
   // Navigate from feed item to bead detail on main page.
   const handleBeadNavigate = useCallback(
     async (beadId: string): Promise<boolean> => {
-      const exists = await rpc.beads.checkBeadExists(beadId, databasePath)
+      const exists = await rpc.beads.checkBeadExists(beadId, currentWorkspace?.id)
       if (!exists) return false
 
       setStoredSelectedBead(beadId)
@@ -480,7 +482,7 @@ function ActivityViewer() {
       navigate({ to: "/" })
       return true
     },
-    [databasePath, navigate],
+    [currentWorkspace?.id, navigate],
   )
 
   // Cross-filter chip label
@@ -509,7 +511,10 @@ function ActivityViewer() {
       }
 
       // Cmd+1/Cmd+2/Cmd+3: view switching (always active)
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4")) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4")
+      ) {
         e.preventDefault()
         if (e.key === "1") {
           navigate({ to: "/" })
@@ -586,7 +591,7 @@ function ActivityViewer() {
       // visible tile set. If the chain is shorter than 5 (e.g., empty
       // status.custom → 3 tiles), keys past the chain length are no-ops.
       if (!e.metaKey && !e.ctrlKey && !e.altKey) {
-        const stageIndex = parseInt(e.key) - 1
+        const stageIndex = parseInt(e.key, 10) - 1
         if (stageIndex >= 0 && stageIndex < pipelineChain.length) {
           handleStageClick(pipelineChain[stageIndex])
           if (agentFocusMode) setAgentFocusMode(false)
@@ -740,6 +745,7 @@ function ActivityViewer() {
         zoomLevel={zoomLevel}
         onZoomChange={handleZoomChange}
         databasePath={currentWorkspace?.databasePath}
+        workspaceId={currentWorkspace?.id}
         vimNavigationEnabled={vimEnabled}
         onVimNavigationChange={handleVimNavigationChange}
         updateCheckEnabled={updateCheckEnabled}

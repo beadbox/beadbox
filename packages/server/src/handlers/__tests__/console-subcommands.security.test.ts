@@ -28,10 +28,20 @@ mock.module("../../lib/exec", () => ({
 }))
 mock.module("../../lib/bd-paths", () => ({
   resolveBdPath: () => "/fake/bin/bd",
+  COMMON_BD_PATHS: [],
+  resetPathCaches: () => {},
   __resetBdPathCache: () => {},
 }))
 
-const { run } = await import("../console")
+mock.module("../../lib/workspace-resolver", () => ({
+  resolveWorkspaceTarget: async () => ({ id: "console-test", cliDbPath: "/projects/foo/.beads" }),
+}))
+mock.module("../../lib/workspace-transition", () => ({
+  workspaceTransition: { withOperation: async (_id: string, run: () => Promise<unknown>) => run() },
+}))
+
+const { run: rawRun } = await import("../console")
+const run = (opts: Parameters<typeof rawRun>[0]) => rawRun({ db: "/projects/foo/.beads", ...opts })
 
 beforeAll(() => {
   execCalls.length = 0

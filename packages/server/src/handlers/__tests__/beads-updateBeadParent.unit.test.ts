@@ -12,7 +12,10 @@
 // exists". This file mocks ../lib/bd at the module boundary so the
 // handler closes over an updateParent that throws on demand.
 
-import { describe, expect, mock, test } from "bun:test"
+import { afterAll, describe, expect, mock, test } from "bun:test"
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 // Replace the lib/bd import surface with mock-controlled versions. Only
 // updateParent is exercised by these tests; everything else is a no-op
@@ -38,6 +41,7 @@ mock.module("../../lib/bd", () => {
     deleteBead: stub("deleteBead"),
     deleteComment: stub("deleteComment"),
     getCustomStatuses: stub("getCustomStatuses"),
+    getAvailableTypes: stub("getAvailableTypes"),
     removeDependency: stub("removeDependency"),
     removeLabel: stub("removeLabel"),
     // beadbox-xl8: re-export setCustomStatuses to match the lib/bd surface
@@ -55,17 +59,22 @@ mock.module("../../lib/bd", () => {
     updateSpecId: stub("updateSpecId"),
     updateStatus: stub("updateStatus"),
     updateTitle: stub("updateTitle"),
+    updateTextField: stub("updateTextField"),
     updateType: stub("updateType"),
     unmapPriority: (p: string) => p,
   }
 })
 
 const { updateBeadParent } = await import("../beads")
+const workspace = mkdtempSync(join(tmpdir(), "beadbox-parent-unit-"))
+const dbPath = join(workspace, ".beads")
+mkdirSync(dbPath)
+afterAll(() => rmSync(workspace, { recursive: true, force: true }))
 
 describe("updateBeadParent — bb-ijuq guard (bb-qyxr port)", () => {
   test("happy path: bd succeeds → { success: true }, no alreadyLinked flag", async () => {
     nextUpdateParentBehavior = () => {}
-    const result = await updateBeadParent("bb-5", "bb-epic", "/db/path/.beads")
+    const result = await updateBeadParent("bb-5", "bb-epic", dbPath)
     expect(result.success).toBe(true)
     expect(result.alreadyLinked).toBeUndefined()
     expect(result.error).toBeUndefined()
@@ -75,7 +84,7 @@ describe("updateBeadParent — bb-ijuq guard (bb-qyxr port)", () => {
     nextUpdateParentBehavior = () => {
       throw new Error("dependency bb-5 -> bb-epic already exists")
     }
-    const result = await updateBeadParent("bb-5", "bb-epic", "/db/path/.beads")
+    const result = await updateBeadParent("bb-5", "bb-epic", dbPath)
     expect(result.success).toBe(true)
     expect(result.alreadyLinked).toBe(true)
     expect(result.error).toBeUndefined()
@@ -85,13 +94,13 @@ describe("updateBeadParent — bb-ijuq guard (bb-qyxr port)", () => {
     nextUpdateParentBehavior = () => {
       throw new Error("ALREADY EXISTS")
     }
-    let result = await updateBeadParent("bb-5", "bb-epic", "/db/path/.beads")
+    let result = await updateBeadParent("bb-5", "bb-epic", dbPath)
     expect(result).toEqual({ success: true, alreadyLinked: true })
 
     nextUpdateParentBehavior = () => {
       throw new Error("Already Exists")
     }
-    result = await updateBeadParent("bb-5", "bb-epic", "/db/path/.beads")
+    result = await updateBeadParent("bb-5", "bb-epic", dbPath)
     expect(result).toEqual({ success: true, alreadyLinked: true })
   })
 
@@ -99,7 +108,7 @@ describe("updateBeadParent — bb-ijuq guard (bb-qyxr port)", () => {
     nextUpdateParentBehavior = () => {
       throw new Error("bd not found")
     }
-    const result = await updateBeadParent("bb-5", "bb-epic", "/db/path/.beads")
+    const result = await updateBeadParent("bb-5", "bb-epic", dbPath)
     expect(result.success).toBe(false)
     expect(result.alreadyLinked).toBeUndefined()
     expect(result.error).toContain("bd not found")
@@ -113,7 +122,7 @@ describe("updateBeadParent — bb-ijuq guard (bb-qyxr port)", () => {
     nextUpdateParentBehavior = () => {
       throw new Error("the file exists already so we skipped it")
     }
-    const result = await updateBeadParent("bb-5", "bb-epic", "/db/path/.beads")
+    const result = await updateBeadParent("bb-5", "bb-epic", dbPath)
     // "exists already" matches /already/ AND /exists/ but the actual
     // regex is /already exists/i which requires the two words adjacent.
     // This input does NOT contain "already exists" as a substring, so
@@ -126,7 +135,7 @@ describe("updateBeadParent — bb-ijuq guard (bb-qyxr port)", () => {
     nextUpdateParentBehavior = () => {
       throw new Error("dependency bb-5 -> null already exists")
     }
-    const result = await updateBeadParent("bb-5", null, "/db/path/.beads")
+    const result = await updateBeadParent("bb-5", null, dbPath)
     expect(result).toEqual({ success: true, alreadyLinked: true })
   })
 

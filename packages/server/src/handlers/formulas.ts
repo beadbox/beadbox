@@ -8,7 +8,6 @@
 // ../lib/console-discipline (loaded first via index.ts).
 
 import {
-  type BdOptions,
   cookFormula,
   getMoleculeProgress,
   getMoleculeStructureRaw,
@@ -26,6 +25,7 @@ import type {
   MolProgress,
   StepOverlay,
 } from "../lib/types"
+import { workspaceTargetOptions } from "./workspace-target-options"
 
 type Success<T> = { success: true; data: T }
 type Failure = { success: false; error: string }
@@ -35,7 +35,7 @@ function extractError(error: unknown): string {
 }
 
 export async function loadFormulas(dbPath?: string): Promise<Success<FormulaSummary[]> | Failure> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  const { options } = await workspaceTargetOptions(dbPath)
   try {
     const data = await listFormulas(options)
     return { success: true, data }
@@ -48,7 +48,7 @@ export async function loadFormulaDetail(
   name: string,
   dbPath?: string,
 ): Promise<Success<FormulaDetail> | Failure> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  const { options } = await workspaceTargetOptions(dbPath)
   try {
     const data = await showFormula(name, options)
     return { success: true, data }
@@ -62,7 +62,7 @@ export async function previewFormula(
   vars?: Record<string, string>,
   dbPath?: string,
 ): Promise<Success<CookedFormula> | Failure> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  const { options } = await workspaceTargetOptions(dbPath)
   try {
     const data = await cookFormula(name, vars, options)
     return { success: true, data }
@@ -77,7 +77,7 @@ export async function pourFormulaAction(
   assignee?: string,
   dbPath?: string,
 ): Promise<{ success: true } | Failure> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  const { options } = await workspaceTargetOptions(dbPath)
   try {
     await pourMolecule(formula, vars, assignee, options)
     return { success: true }
@@ -91,7 +91,7 @@ export async function loadMoleculeProgress(
   id: string,
   dbPath?: string,
 ): Promise<Success<MolProgress> | Failure> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  const { options } = await workspaceTargetOptions(dbPath)
   try {
     const data = await getMoleculeProgress(id, options)
     return { success: true, data }
@@ -105,7 +105,7 @@ export async function loadFormulaMolecules(
   formulaName: string,
   dbPath?: string,
 ): Promise<Success<Array<MoleculeCard & { progress: MolProgress }>> | Failure> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  const { options } = await workspaceTargetOptions(dbPath)
   try {
     const cards = await listMoleculesForFormula(formulaName, options)
     const withProgress = await Promise.all(
@@ -143,7 +143,7 @@ export async function loadMoleculeOverlay(
   formulaSteps: FormulaStep[],
   dbPath?: string,
 ): Promise<Success<Record<string, StepOverlay>> | Failure> {
-  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  const { options } = await workspaceTargetOptions(dbPath)
   try {
     const molData = await getMoleculeStructureRaw(molId, options)
     const rootId = molData.root.id

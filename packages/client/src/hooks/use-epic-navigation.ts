@@ -1,10 +1,9 @@
 import { useNavigate } from "@tanstack/react-router"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import type { Filters } from "@/components/filter-bar"
-import { dispatchKeyDown, type KeyNavContext } from "@/lib/epic-navigation-keys"
 import { useHasTrains } from "@/hooks/use-has-trains"
+import { dispatchKeyDown, type KeyNavContext } from "@/lib/epic-navigation-keys"
 import { countAllBeads, findBeadById, findParentPath } from "@/lib/epic-tree-utils"
-import { safeCapture } from "@/lib/posthog-safe"
 import {
   getAnalyticsEnabled,
   getExpandedBeads as getStoredExpandedBeads,
@@ -14,6 +13,8 @@ import {
   setExpandedEpics as setStoredExpandedEpics,
   setSelectedBead as setStoredSelectedBead,
 } from "@/lib/local-storage"
+import { toastError } from "@/lib/notifications"
+import { safeCapture } from "@/lib/posthog-safe"
 import { rpc } from "@/lib/rpc"
 import type { Bead, Epic, Workspace } from "@/lib/types"
 
@@ -38,6 +39,7 @@ interface UseEpicNavigationOpts {
   onMarkAllRead: (beads: Bead[]) => void
   updateBeadInEpicsRef: React.RefObject<(beadId: string, fn: (bead: Bead) => Bead) => void>
   activeEpicsFiltered: Epic[]
+  activeMilestonesFiltered: Epic[]
   activeConvoysFiltered: Epic[]
   activeMoleculesFiltered: Epic[]
   backlogBeads: Bead[]
@@ -69,6 +71,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     onMarkAllRead,
     updateBeadInEpicsRef,
     activeEpicsFiltered,
+    activeMilestonesFiltered,
     activeConvoysFiltered,
     activeMoleculesFiltered,
     backlogBeads,
@@ -81,15 +84,18 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
   } = opts
 
   // beadbox-if6: Cmd/Ctrl+4 exists only when the workspace has .beadtrain files.
-  const hasTrains = useHasTrains(currentWorkspace?.databasePath)
+  const hasTrains = useHasTrains(currentWorkspace?.id)
   const hasTrainsRef = useRef(hasTrains)
   hasTrainsRef.current = hasTrains
 
   const navigate = useNavigate()
-  const router = {
-    push: (to: string) => navigate({ to: to as never }),
-    back: () => window.history.back(),
-  }
+  const router = useMemo(
+    () => ({
+      push: (to: string) => navigate({ to: to as never }),
+      back: () => window.history.back(),
+    }),
+    [navigate],
+  )
 
   // Session-scoped expanded state for epics
   const [expandedEpics, setExpandedEpicsState] = useState<Set<string>>(new Set())
@@ -110,6 +116,10 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
   }, [])
 
   const [selectedBead, setSelectedBead] = useState<Bead | null>(null)
+  const getSelectedBead = useEffectEvent(() => selectedBead)
+  const updateBeadInEpics = useEffectEvent((bead: Bead) => {
+    updateBeadInEpicsRef.current(bead.id, () => bead)
+  })
   const [isLoadingBead, setIsLoadingBead] = useState(false)
 
   // Keyboard navigation focus state (separate from URL-based selection)
@@ -167,25 +177,28 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
       // Skip background refetch if selectedBead already has comments populated
       // from a previous getBeadDetail call AND commentCount hasn't changed.
       // The server-side cache will also short-circuit, but this avoids the round-trip entirely.
+      const currentBead = getSelectedBead()
       if (
-        selectedBead &&
-        selectedBead.id === beadIdParam &&
-        selectedBead.comments.length > 0 &&
-        selectedBead.commentCount === cachedBead.commentCount
+        currentBead &&
+        currentBead.id === beadIdParam &&
+        currentBead.comments.length > 0 &&
+        currentBead.commentCount === cachedBead.commentCount
       ) {
         return
       }
       // Data may have changed (new comments, etc.) - refetch
-      getBeadDetail(beadIdParam, currentWorkspace?.databasePath).then((fullBead) => {
-        if (!fullBead) return
-        setSelectedBead((prev) => {
-          if (!prev || prev.id !== beadIdParam) return prev
-          if (fullBead.comments.length > prev.comments.length) {
-            setTimeout(() => detailPanelRef.current?.scrollToLatestComment(), 50)
-          }
-          return { ...prev, ...fullBead }
+      getBeadDetail(beadIdParam, currentWorkspace?.id)
+        .then((fullBead) => {
+          if (!fullBead) return
+          setSelectedBead((prev) => {
+            if (!prev || prev.id !== beadIdParam) return prev
+            if (fullBead.comments.length > prev.comments.length) {
+              setTimeout(() => detailPanelRef.current?.scrollToLatestComment(), 50)
+            }
+            return { ...prev, ...fullBead }
+          })
         })
-      })
+        .catch(() => toastError("Failed to load issue details"))
       return
     }
 
@@ -194,7 +207,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     setSelectedBead(cachedBead)
     setIsLoadingBead(true)
 
-    getBeadDetail(beadIdParam, currentWorkspace?.databasePath)
+    getBeadDetail(beadIdParam, currentWorkspace?.id)
       .then((fullBead) => {
         if (fullBead) {
           setSelectedBead(fullBead)
@@ -204,15 +217,15 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
             fullBead.priority !== cachedBead.priority ||
             fullBead.title !== cachedBead.title
           if (hasChanges) {
-            updateBeadInEpicsRef.current(fullBead.id, () => fullBead)
+            updateBeadInEpics(fullBead)
           }
         }
       })
+      .catch(() => toastError("Failed to load issue details"))
       .finally(() => {
         setIsLoadingBead(false)
       })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedBead and updateBeadInEpicsRef are refs/derived; re-running on their change would cause loops
-  }, [beadIdParam, epics, currentWorkspace?.databasePath])
+  }, [beadIdParam, epics, currentWorkspace?.id])
 
   const parentPath = useMemo(() => {
     if (!beadIdParam) return []
@@ -280,6 +293,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     if (!hasRealEpics && flatBeads.length > 0) {
       flatBeads.forEach(addBead)
     } else {
+      activeMilestonesFiltered.forEach(addEpic)
       activeEpicsFiltered.forEach(addEpic)
       activeMoleculesFiltered.forEach(addEpic)
       activeConvoysFiltered.forEach(addEpic)
@@ -295,6 +309,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     hasRealEpics,
     flatBeads,
     activeEpicsFiltered,
+    activeMilestonesFiltered,
     activeMoleculesFiltered,
     activeConvoysFiltered,
     backlogBeads,
@@ -472,6 +487,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
   // Keyboard navigation handler. Body lifted to lib/epic-navigation-keys.ts
   // (bb-fe03.3 — was 309 NLOC at CCN 112). The hook now just builds the
   // KeyNavContext from current closure state and dispatches.
+  const isTauri = !!isTauriRef.current
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
       const ctx: KeyNavContext = {
@@ -487,7 +503,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
         filterBarVisible,
         vimEnabled,
         zoomLevel,
-        isTauri: !!isTauriRef.current,
+        isTauri,
         hasTrains: hasTrainsRef.current,
         setFocusedItemId,
         setFocusedPanel,
@@ -515,7 +531,6 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleZoomChange, isTauriRef, onMarkAllRead, onOpenSettings, zoomLevel are stable refs/callbacks that don't need to trigger re-registration
   }, [
     focusedItemId,
     navigableItems,
@@ -532,9 +547,14 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     handleBeadClick,
     handleCloseDetail,
     handleRefresh,
+    handleZoomChange,
     router,
     filterBarVisible,
     onToggleFilterBar,
+    onMarkAllRead,
+    onOpenSettings,
+    zoomLevel,
+    isTauri,
     captureShortcut,
   ])
 
@@ -547,12 +567,15 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
   }, [handleRefresh])
 
   // Scroll focused item into view
-  useEffect(() => {
-    if (focusedItemId && treeContainerRef.current) {
-      const element = treeContainerRef.current.querySelector(`[data-item-id="${focusedItemId}"]`)
+  const scrollFocusedItemIntoView = useEffectEvent((itemId: string) => {
+    const container = treeContainerRef.current
+    if (container) {
+      const element = container.querySelector(`[data-item-id="${itemId}"]`)
       element?.scrollIntoView({ block: "nearest", behavior: "smooth" })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- treeContainerRef is a stable ref passed from parent
+  })
+  useEffect(() => {
+    if (focusedItemId) scrollFocusedItemIntoView(focusedItemId)
   }, [focusedItemId])
 
   return {

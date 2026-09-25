@@ -49,7 +49,7 @@ export function EditConnectionDialog({
     if (!workspace) return
 
     const portNum = parseInt(port, 10)
-    if (!host.trim() || isNaN(portNum) || portNum < 1 || portNum > 65535) {
+    if (!host.trim() || Number.isNaN(portNum) || portNum < 1 || portNum > 65535) {
       setError("Invalid host or port.")
       return
     }

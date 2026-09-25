@@ -32,6 +32,7 @@ import { existsSync } from "node:fs"
 // Spy that captures every (file, args, options) tuple the handler tries
 // to spawn during a test. Reset per-test inside describe blocks.
 const execCalls: Array<{ file: string; args: string[]; options: unknown }> = []
+const scopedIds: string[] = []
 
 // Mock execFileAsync to return an empty success without ever spawning a
 // child process. This makes "allowlist accepts" tests fast + hermetic
@@ -55,9 +56,23 @@ mock.module("../../lib/bd-paths", () => ({
   __resetBdPathCache: () => {},
 }))
 
+mock.module("../../lib/workspace-resolver", () => ({
+  resolveWorkspaceTarget: async () => ({ id: "console-test", cliDbPath: "/projects/foo/.beads" }),
+}))
+mock.module("../../lib/workspace-transition", () => ({
+  workspaceTransition: {
+    withOperation: async (id: string, run: () => Promise<unknown>) => {
+      scopedIds.push(id)
+      return run()
+    },
+  },
+}))
+
 // Import AFTER mocks are registered so the handler closes over the
 // mocked references.
-const { ALLOWED_COMMANDS, run } = await import("../console")
+const { ALLOWED_COMMANDS, run: rawRun } = await import("../console")
+const CONSOLE_DB = "/projects/foo/.beads"
+const run = (opts: Parameters<typeof rawRun>[0]) => rawRun({ db: CONSOLE_DB, ...opts })
 
 beforeAll(() => {
   execCalls.length = 0
@@ -72,7 +87,7 @@ describe("console.run — allowlist", () => {
       expect(result.exitCode).toBe(0)
       expect(execCalls).toHaveLength(1)
       expect(execCalls[0]!.file).toBe("/fake/bin/bd")
-      expect(execCalls[0]!.args).toEqual([cmd])
+      expect(execCalls[0]!.args).toEqual(cmd === "help" ? [cmd] : ["--db", CONSOLE_DB, cmd])
     }
   })
 
@@ -143,7 +158,7 @@ describe("console.run — shell metacharacter sanitizer", () => {
     const result = await run({ args: ["list", "--limit", "10", "bd-abc.123"] })
     expect(result.error).toBeNull()
     expect(execCalls).toHaveLength(1)
-    expect(execCalls[0]!.args).toEqual(["list", "--limit", "10", "bd-abc.123"])
+    expect(execCalls[0]!.args).toEqual(["--db", CONSOLE_DB, "list", "--limit", "10", "bd-abc.123"])
   })
 })
 
@@ -164,10 +179,19 @@ describe("console.run — --db flag rejection", () => {
 })
 
 describe("console.run — db parameter validation", () => {
+  test("rejects DB commands without a registered workspace", async () => {
+    execCalls.length = 0
+    const result = await rawRun({ args: ["list"] })
+    expect(result.error).toBe("Select a registered workspace for this command")
+    expect(execCalls).toHaveLength(0)
+  })
+
   test("accepts a valid .beads directory path", async () => {
     execCalls.length = 0
+    scopedIds.length = 0
     const result = await run({ args: ["list"], db: "/projects/foo/.beads" })
     expect(result.error).toBeNull()
+    expect(scopedIds).toEqual(["console-test"])
     expect(execCalls).toHaveLength(1)
     // --db is prepended BEFORE the user's args, with the value the
     // caller supplied (after isValidDbPath approval).
@@ -224,7 +248,7 @@ describe("console.run — child-process invocation contract", () => {
   test("preserves user args verbatim — no joining, no flag rewriting", async () => {
     execCalls.length = 0
     await run({ args: ["search", "needle in haystack"] })
-    expect(execCalls[0]!.args).toEqual(["search", "needle in haystack"])
+    expect(execCalls[0]!.args).toEqual(["--db", CONSOLE_DB, "search", "needle in haystack"])
   })
 
   test("passes a 10s timeout + 10MB maxBuffer in options", async () => {
@@ -252,7 +276,7 @@ describe("console.run — child-process invocation contract", () => {
 
     // Re-import the handler so it picks up the new mock.
     const mod = await import("../console")
-    const result = await mod.run({ args: ["list"] })
+    const result = await mod.run({ args: ["list"], db: CONSOLE_DB })
     expect(result.exitCode).toBe(7)
     expect(result.stdout).toBe("partial")
     expect(result.stderr).toBe("boom")

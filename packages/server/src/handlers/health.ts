@@ -18,6 +18,8 @@ import {
   resolveBdDbPath,
 } from "../lib/workspace-registry"
 import { prefetchEpicData } from "./epics"
+import { resolveWorkspaceTarget } from "../lib/workspace-resolver"
+import { workspaceTransition } from "../lib/workspace-transition"
 
 // ---------------------------------------------------------------------------
 // checkBdHealth - used by workspaces page, mid-session checks
@@ -155,7 +157,13 @@ export async function removeActiveWorkspace(
   const registry = await readRegistry()
   const entry = registry.workspaces.find((w) => w.id === workspaceId)
   const credentialKey = entry?.credentialKey
-  const removed = await removeWorkspaceFromRegistry(workspaceId)
+  const removed = entry
+    ? await workspaceTransition.runWorkspaceTransition(
+        workspaceId,
+        () => removeWorkspaceFromRegistry(workspaceId),
+        { remove: true },
+      )
+    : false
   return { removed, credentialKey }
 }
 
@@ -180,14 +188,17 @@ export async function runWorkspaceMigration(workspacePath: string): Promise<Migr
   if (!workspacePath) {
     return { ok: false, error: "Missing workspace path" }
   }
-  const bdPath = resolveBdPath()
   try {
-    const { stdout, stderr } = await execFileAsync(
-      bdPath,
-      ["migrate", "--db", workspacePath, "--yes"],
-      { timeout: 60_000 },
-    )
-    return { ok: true, stdout, stderr }
+    const target = await resolveWorkspaceTarget(workspacePath)
+    await workspaceTransition.preflightBdBinary()
+    return await workspaceTransition.runStorageTransition(target.id, async () => {
+      const { stdout, stderr } = await execFileAsync(
+        resolveBdPath(),
+        ["migrate", "--db", target.cliDbPath, "--yes"],
+        { timeout: 60_000 },
+      )
+      return { ok: true, stdout, stderr }
+    })
   } catch (err: unknown) {
     const e = err as { stdout?: string; stderr?: string; message?: string }
     return {

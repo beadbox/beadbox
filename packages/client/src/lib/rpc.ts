@@ -17,7 +17,7 @@
 // same in-flight promise.
 
 import type { handlers as serverHandlers } from "@beadbox/server/handlers"
-import { createChannel, spawn } from "tauri-plugin-js-api"
+import { createChannel, kill, onExit, spawn } from "tauri-plugin-js-api"
 import type { BdCommandEvent } from "./console-types"
 
 /**
@@ -83,22 +83,107 @@ function summarizeResult(result: unknown): string | null {
   return String(result)
 }
 
-let channelPromise: Promise<RemoteApi> | null = null
-
-async function getRemoteApi(): Promise<RemoteApi> {
-  if (!channelPromise) {
-    channelPromise = (async () => {
-      await spawn(SIDECAR_NAME, { sidecar: SIDECAR_NAME })
-      const { api } = await createChannel<Record<string, never>, RemoteApi>(SIDECAR_NAME)
-      return api
-    })().catch((err: unknown) => {
-      // Reset so a transient spawn failure can be retried.
-      channelPromise = null
-      throw err
-    })
-  }
-  return channelPromise
+interface SidecarSession {
+  api: RemoteApi
+  destroy: () => void
 }
+
+interface SidecarRuntime {
+  onExit: (callback: (code: number | null) => void) => Promise<unknown>
+  spawn: () => Promise<unknown>
+  kill: () => Promise<unknown>
+  connect: () => Promise<SidecarSession>
+}
+
+// Keep the exit listener alive across reconnects. Destroying kkrpc rejects
+// pending requests, so a sidecar crash cannot leave the loading spinner
+// waiting forever for a reply that will never arrive.
+export function createSidecarManager(runtime: SidecarRuntime, onExitUnexpected?: () => void) {
+  let channelPromise: Promise<RemoteApi> | null = null
+  let session: SidecarSession | null = null
+  let listenerPromise: Promise<unknown> | null = null
+  let generation = 0
+
+  function ensureExitListener(): Promise<unknown> {
+    listenerPromise ??= runtime
+      .onExit(() => {
+        generation++
+        const oldSession = session
+        session = null
+        channelPromise = null
+        try {
+          oldSession?.destroy()
+        } finally {
+          onExitUnexpected?.()
+        }
+      })
+      .catch((error: unknown) => {
+        listenerPromise = null
+        throw error
+      })
+    return listenerPromise
+  }
+
+  function getRemoteApi(): Promise<RemoteApi> {
+    if (channelPromise) return channelPromise
+    const expectedGeneration = generation
+    let initializing: Promise<RemoteApi>
+    initializing = (async () => {
+      await ensureExitListener()
+      if (generation !== expectedGeneration) throw new Error("Sidecar exited during startup")
+      await runtime.spawn()
+      if (generation !== expectedGeneration) throw new Error("Sidecar exited during startup")
+      let nextSession: SidecarSession
+      try {
+        nextSession = await runtime.connect()
+      } catch (error) {
+        // A failed channel handshake can leave a live process registered by
+        // tauri-plugin-js; remove it so the next attempt may spawn again.
+        if (generation === expectedGeneration) await runtime.kill().catch(() => {})
+        throw error
+      }
+      if (generation !== expectedGeneration) {
+        nextSession.destroy()
+        throw new Error("Sidecar exited during startup")
+      }
+      session = nextSession
+      return nextSession.api
+    })().catch((error: unknown) => {
+      if (channelPromise === initializing) channelPromise = null
+      throw error
+    })
+    channelPromise = initializing
+    return initializing
+  }
+
+  return { getRemoteApi }
+}
+
+const sidecarManager = createSidecarManager(
+  {
+    onExit: (callback) => onExit(SIDECAR_NAME, callback),
+    spawn: () => spawn(SIDECAR_NAME, { sidecar: SIDECAR_NAME }),
+    kill: () => kill(SIDECAR_NAME),
+    connect: async () => {
+      const { api, channel, io } = await createChannel<Record<string, never>, RemoteApi>(
+        SIDECAR_NAME,
+      )
+      return {
+        api,
+        destroy: () => {
+          try {
+            void Promise.resolve(channel.destroy()).catch(() => {})
+          } finally {
+            void io.destroy().catch(() => {})
+          }
+        },
+      }
+    },
+  },
+  () => window.dispatchEvent(new Event("beadbox:sidecar-exit")),
+)
+
+const getRemoteApi = sidecarManager.getRemoteApi
 
 /**
  * Build a Proxy that routes `rpc.<namespace>.<method>(...args)` to the

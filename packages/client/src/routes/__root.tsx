@@ -110,7 +110,7 @@ export function ChangeSubscriptionMount() {
     const resolve = () => {
       const cookieId = getWorkspaceCookie()
       const cookieMatch = cookieId ? workspaces.find((w) => w.id === cookieId) : undefined
-      const next = cookieMatch?.databasePath ?? workspaces[0]?.databasePath ?? null
+      const next = cookieMatch?.id ?? workspaces[0]?.id ?? null
       if (next) setActivePath(next)
     }
     resolve()

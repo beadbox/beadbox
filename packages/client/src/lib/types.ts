@@ -1,18 +1,5 @@
-export type BeadType =
-  | "bug"
-  | "task"
-  | "feature"
-  | "epic"
-  | "chore"
-  | "message"
-  | "gate"
-  | "merge-request"
-  | "molecule"
-  | "agent"
-  | "role"
-  | "rig"
-  | "convoy"
-  | "event"
+// Beads permits workspace-defined types. Preserve the exact value from bd.
+export type BeadType = string
 
 // Core statuses that always exist
 type CoreStatus = "open" | "in_progress" | "closed"
@@ -64,7 +51,6 @@ export interface Bead {
 }
 
 export interface Epic extends Bead {
-  type: "epic" | "convoy" | "molecule"
   children: Bead[]
   childEpics?: Epic[]
 }
@@ -278,6 +264,10 @@ export interface SortOption {
 }
 
 export interface Filters {
+  /** Optional workspace type filter. Omitted means all types. */
+  type?: string
+  /** Full view includes infrastructure messages even when the legacy message toggle is off. */
+  includeSystem?: boolean
   // beadbox-brg: status filter is multi-select. Empty array = no filter
   // (formerly 'all'); non-empty = bead matches if its status is in the list.
   status: BeadStatus[]

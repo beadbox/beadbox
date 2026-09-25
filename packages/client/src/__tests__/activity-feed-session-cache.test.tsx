@@ -26,15 +26,15 @@ function event(issueId: string, message: string): ActivityEvent {
   }
 }
 
-const EVENTS_BY_DB: Record<string, ActivityEvent[]> = {
-  "/tmp/alpha/.beads": [event("demo-alpha-1", "created alpha bead")],
-  "/tmp/beta/.beads": [event("demo-beta-1", "created beta bead")],
+const EVENTS_BY_WORKSPACE: Record<string, ActivityEvent[]> = {
+  [ALPHA_ID]: [event("demo-alpha-1", "created alpha bead")],
+  [BETA_ID]: [event("demo-beta-1", "created beta bead")],
 }
 
 function installRpc(options: { defer?: boolean } = {}) {
   const pending: Array<() => void> = []
-  const getActivityEvents = mock((dbPath?: string) => {
-    const payload = { events: EVENTS_BY_DB[dbPath ?? ""] ?? [], error: undefined }
+  const getActivityEvents = mock((workspaceId?: string) => {
+    const payload = { events: EVENTS_BY_WORKSPACE[workspaceId ?? ""] ?? [], error: undefined }
     if (!options.defer) return Promise.resolve(payload)
     return new Promise<typeof payload>((resolve) => {
       pending.push(() => resolve(payload))

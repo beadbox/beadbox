@@ -24,10 +24,10 @@ import {
   Settings,
   TrainFront,
 } from "lucide-react"
-import { safeCapture } from "@/lib/posthog-safe"
 import { Fragment, useCallback, useEffect, useState } from "react"
-import type { AppHealth } from "../hooks/use-app-health"
 import { useHasTrains } from "@/hooks/use-has-trains"
+import { safeCapture } from "@/lib/posthog-safe"
+import type { AppHealth } from "../hooks/use-app-health"
 import { useViewport } from "../hooks/use-viewport"
 import { ERROR_CATEGORY_TITLES } from "../lib/epic-tree-utils"
 import {
@@ -35,6 +35,7 @@ import {
   getWorkspaceHintDismissed,
   setWorkspaceHintDismissed,
 } from "../lib/local-storage"
+import { isTauriRuntime } from "../lib/rpc"
 import type { Workspace } from "../lib/types"
 import type { UpdateInfo } from "../lib/update-checker"
 import { cn } from "../lib/utils"
@@ -167,7 +168,7 @@ export function Header({
   const { isMobile, isTablet } = useViewport()
   const [showHint, setShowHint] = useState(false)
   const [healthDetailsOpen, setHealthDetailsOpen] = useState(false)
-  const hasTrains = useHasTrains(currentWorkspace.databasePath)
+  const hasTrains = useHasTrains(currentWorkspace.id)
 
   const navigateTo = useCallback(
     (destination: string, source: "tab" | "dropdown") => {
@@ -331,23 +332,23 @@ export function Header({
                 <TooltipContent>Formulas \u2318\u0033</TooltipContent>
               </Tooltip>
               {hasTrains && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => navigateTo("trains", "tab")}
-                    className={cn(
-                      "px-2.5 py-1.5 text-sm font-medium rounded-md transition-colors inline-flex items-center gap-1.5",
-                      pathname === "/trains"
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-                    )}
-                  >
-                    <TrainFront className="h-3.5 w-3.5" />
-                    Trains
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Trains ⌘4</TooltipContent>
-              </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => navigateTo("trains", "tab")}
+                      className={cn(
+                        "px-2.5 py-1.5 text-sm font-medium rounded-md transition-colors inline-flex items-center gap-1.5",
+                        pathname === "/trains"
+                          ? "bg-accent text-foreground"
+                          : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                      )}
+                    >
+                      <TrainFront className="h-3.5 w-3.5" />
+                      Trains
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Trains ⌘4</TooltipContent>
+                </Tooltip>
               )}
             </div>
           )}
@@ -446,8 +447,7 @@ export function Header({
               <button
                 onClick={() => {
                   const url = "https://buy.stripe.com/cNifZgdeAaFF1ou5ry6Na00"
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  if ((window as any).__TAURI_INTERNALS__) {
+                  if (isTauriRuntime()) {
                     // Tauri WebView: navigate current window; Rust on_navigation
                     // handler intercepts external URLs and opens in system browser.
                     window.location.href = url

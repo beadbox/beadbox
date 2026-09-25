@@ -346,7 +346,7 @@ function ServerTab({
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     const p = parseInt(port, 10)
-    if (host.trim() && !isNaN(p) && p > 0 && p <= 65535) {
+    if (host.trim() && !Number.isNaN(p) && p > 0 && p <= 65535) {
       handleDiscover(host.trim(), p, user.trim() || "root", password, tls)
     }
   }
@@ -506,7 +506,7 @@ function ServerTab({
             const overlap = overlaps[db.databaseName]
             if (overlap) {
               const displayPath = overlap.localPath.startsWith("/Users/")
-                ? "~" + overlap.localPath.slice(overlap.localPath.indexOf("/", 1))
+                ? `~${overlap.localPath.slice(overlap.localPath.indexOf("/", 1))}`
                 : overlap.localPath
               return (
                 <div

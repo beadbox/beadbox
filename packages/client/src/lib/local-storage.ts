@@ -93,8 +93,7 @@ export function getFiltersPreference(): Filters {
       // status (e.g. 'open') becomes a single-element whitelist. Existing
       // array form passes through. Anything malformed → canonical default.
       if (typeof parsed.status === "string") {
-        parsed.status =
-          parsed.status === "all" ? [...DEFAULT_STATUSES] : [parsed.status]
+        parsed.status = parsed.status === "all" ? [...DEFAULT_STATUSES] : [parsed.status]
       } else if (!Array.isArray(parsed.status)) {
         parsed.status = [...DEFAULT_STATUSES]
       }
@@ -179,7 +178,7 @@ export function getZoomLevel(): number {
     const stored = localStorage.getItem(ZOOM_KEY)
     if (stored) {
       const level = parseInt(stored, 10)
-      if (!isNaN(level) && level >= MIN_ZOOM && level <= MAX_ZOOM) {
+      if (!Number.isNaN(level) && level >= MIN_ZOOM && level <= MAX_ZOOM) {
         return level
       }
     }
