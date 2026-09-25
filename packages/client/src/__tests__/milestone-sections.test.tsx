@@ -104,7 +104,11 @@ test("milestone drag keeps its type and cannot become a loose bead or its own de
   expect(onBeadMove).toHaveBeenCalledWith("task", nested.id)
 })
 
-test("nested backlogged and archived epics stay under their milestone", () => {
+// beadbox-51m (inverts #48's original test): an ARCHIVED epic nested under a
+// milestone leaves the main tree for the Archived section, like any other
+// archived epic. BACKLOGGED nested epics keep #48's placement under their
+// milestone (deferred work still belongs to the milestone's plan).
+test("a nested archived epic goes to Archived; a nested backlogged epic stays under its milestone", () => {
   const milestone = issue("milestone", "Release milestone", "milestone")
   const backlog = issue("backlog-epic", "Backlog epic", "epic")
   backlog.priority = "backlog"
@@ -115,10 +119,9 @@ test("nested backlogged and archived epics stay under their milestone", () => {
 
   const sections = partitionInactiveEpics([milestone])
   expect(sections.backlogEpics).toEqual([])
-  expect(sections.archivedEpics).toEqual([])
+  expect(sections.archivedEpics.map((epic) => epic.id)).toEqual([archived.id])
   expect(filterActiveEpicTree(milestone).childEpics?.map((epic) => epic.id)).toEqual([
     backlog.id,
-    archived.id,
     active.id,
   ])
 
@@ -128,19 +131,71 @@ test("nested backlogged and archived epics stay under their milestone", () => {
     [backlog],
     [archived],
   )
-  expect(grouped.map((bead) => bead.id)).toEqual([milestone.id, backlog.id, archived.id, active.id])
-
-  const onlyEpics = collectGroupedVisibleBeads(
-    [filterActiveEpicTree(milestone)],
-    [],
-    [],
-    [],
-    (bead) => bead.type === "epic",
-  )
-  expect(onlyEpics.map((bead) => bead.id)).toEqual([backlog.id, archived.id, active.id])
+  expect(grouped.map((bead) => bead.id)).toEqual([milestone.id, backlog.id, active.id, archived.id])
 })
 
-test("nested inactive epics can be restored in place", () => {
+test("archived epics nested deeper, under an archived root, and at the top level are each listed once", () => {
+  const milestone = issue("milestone", "Release milestone", "milestone")
+  const epic = issue("epic", "Live epic", "epic")
+  const deep = issue("deep", "Deep archived epic", "epic")
+  deep.labels = ["archived"]
+  epic.childEpics = [deep]
+  milestone.childEpics = [epic]
+
+  const archivedMilestone = issue("old-milestone", "Old milestone", "milestone")
+  archivedMilestone.labels = ["archived"]
+  const insideArchived = issue("inside", "Archived inside archived", "epic")
+  insideArchived.labels = ["archived"]
+  archivedMilestone.childEpics = [insideArchived]
+
+  const topArchived = issue("top", "Top-level archived epic", "epic")
+  topArchived.labels = ["archived"]
+
+  const sections = partitionInactiveEpics([milestone, archivedMilestone, topArchived])
+  expect(sections.archivedEpics.map((e) => e.id).sort()).toEqual(
+    [deep.id, archivedMilestone.id, topArchived.id].sort(),
+  )
+  expect(filterActiveEpicTree(milestone).childEpics?.[0].childEpics).toEqual([])
+})
+
+test("unarchiving puts the epic back under its milestone", () => {
+  const milestone = issue("milestone", "Release milestone", "milestone")
+  const epic = issue("was-archived", "Was archived", "epic")
+  epic.labels = ["archived"]
+  milestone.childEpics = [epic]
+  expect(partitionInactiveEpics([milestone]).archivedEpics.map((e) => e.id)).toEqual([epic.id])
+
+  // What the next tree load returns after `bd label remove <id> archived`.
+  epic.labels = []
+  expect(partitionInactiveEpics([milestone]).archivedEpics).toEqual([])
+  expect(filterActiveEpicTree(milestone).childEpics?.map((e) => e.id)).toEqual([epic.id])
+})
+
+test("a milestone whose only child epic is archived still shows, with nothing archived under it", () => {
+  const milestone = issue("milestone", "Release milestone", "milestone")
+  const archived = issue("archived-epic", "Archived epic", "epic")
+  archived.labels = ["archived"]
+  milestone.childEpics = [archived]
+  const onArchive = mock(() => {})
+
+  render(
+    <EpicTree
+      epics={[]}
+      milestones={[filterActiveEpicTree(milestone)]}
+      archivedEpics={partitionInactiveEpics([milestone]).archivedEpics}
+      expandedEpics={new Set([milestone.id])}
+      onToggleEpic={mock(() => {})}
+      onBeadClick={mock(() => {})}
+      onArchive={onArchive}
+    />,
+  )
+  expect(screen.getByText("Release milestone")).toBeTruthy()
+  // The archived epic is not rendered under the milestone; it's in Archived.
+  expect(screen.queryByText("Archived epic")).toBeNull()
+  expect(screen.getByText("Archived")).toBeTruthy()
+})
+
+test("a nested backlogged epic restores in place; an archived one unarchives from the Archived section", () => {
   const milestone = issue("milestone", "Release milestone", "milestone")
   const backlog = issue("backlog-epic", "Backlog epic", "epic")
   backlog.priority = "backlog"
@@ -153,7 +208,8 @@ test("nested inactive epics can be restored in place", () => {
   render(
     <EpicTree
       epics={[]}
-      milestones={[milestone]}
+      milestones={[filterActiveEpicTree(milestone)]}
+      archivedEpics={partitionInactiveEpics([milestone]).archivedEpics}
       expandedEpics={new Set([milestone.id])}
       onToggleEpic={mock(() => {})}
       onBeadClick={mock(() => {})}
@@ -163,9 +219,9 @@ test("nested inactive epics can be restored in place", () => {
   )
 
   fireEvent.click(screen.getByLabelText("Restore epic from backlog: Backlog epic"))
-  fireEvent.click(screen.getByLabelText("Unarchive epic: Archived epic"))
   expect(onBacklog).toHaveBeenCalledWith(backlog.id, false)
+  // The Archived section starts collapsed; open it, then unarchive from there.
+  fireEvent.click(screen.getByText("Archived"))
+  fireEvent.click(screen.getByLabelText("Unarchive epic: Archived epic"))
   expect(onArchive).toHaveBeenCalledWith(archived.id, false)
-  expect(screen.queryByText("Backlog")).toBeNull()
-  expect(screen.queryByText("Archived")).toBeNull()
 })

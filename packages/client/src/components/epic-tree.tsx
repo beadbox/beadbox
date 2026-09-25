@@ -21,6 +21,7 @@ import { MoleculePhaseView } from "@/components/molecule-phase-view"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useViewport } from "@/hooks/use-viewport"
 import { getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
+import { getArchiveExpanded, setArchiveExpanded } from "@/lib/local-storage"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import type { Bead, Epic, ReadState } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -132,7 +133,12 @@ export function EpicTree({
   const [isMoleculesExpanded, setIsMoleculesExpanded] = useState(true)
   const [isConvoysExpanded, setIsConvoysExpanded] = useState(true)
   const [isBacklogExpanded, setIsBacklogExpanded] = useState(false)
-  const [isArchiveExpanded, setIsArchiveExpanded] = useState(false)
+  // beadbox-51m: persisted, so hiding the Archived group sticks.
+  const [isArchiveExpanded, setIsArchiveExpandedState] = useState(getArchiveExpanded)
+  const setIsArchiveExpanded = (expanded: boolean) => {
+    setIsArchiveExpandedState(expanded)
+    setArchiveExpanded(expanded)
+  }
 
   // Wrapper: converts EpicTree's onArchive(id, bool) to BeadTable's onArchive(id) => Promise
   const archiveBeadHandler = useMemo(

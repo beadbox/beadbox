@@ -16,6 +16,7 @@ const ARCHIVE_HINT_KEY = "beadbox-archive-hint-shown"
 const READ_STATE_KEY = "beadbox_read_state"
 const COMMENT_SORT_KEY = "beadbox_comment_sort"
 const FILTER_BAR_VISIBLE_KEY = "beadbox_filter_bar_visible"
+const ARCHIVE_EXPANDED_KEY = "beadbox_archive_expanded"
 const SELECTED_FORMULA_KEY = "beadbox_selected_formula"
 const FORMULA_VIEW_MODE_KEY = "beadbox_formula_view_mode"
 const WORKSPACE_RAIL_WIDTH_KEY = "beadbox_workspace_rail_width"
@@ -707,6 +708,27 @@ export function setFormulaViewMode(mode: FormulaViewMode): void {
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(FORMULA_VIEW_MODE_KEY, mode)
+  } catch {
+    // localStorage might be full or disabled
+  }
+}
+
+// beadbox-51m: whether the Archived group is expanded. Default COLLAPSED, so
+// archived items stay hidden until the user opens the group, and the choice
+// sticks across remounts, workspace switches and relaunches.
+export function getArchiveExpanded(): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    return localStorage.getItem(ARCHIVE_EXPANDED_KEY) === "true"
+  } catch {
+    return false
+  }
+}
+
+export function setArchiveExpanded(expanded: boolean): void {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(ARCHIVE_EXPANDED_KEY, String(expanded))
   } catch {
     // localStorage might be full or disabled
   }

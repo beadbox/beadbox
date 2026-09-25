@@ -6,7 +6,13 @@ import { BeadTableBulkToolbar } from "@/components/bead-table-bulk-toolbar"
 import { EpicTree } from "@/components/epic-tree"
 import { FilterBar, type Filters } from "@/components/filter-bar"
 import { Header } from "@/components/header"
-import { getAnalyticsEnabled, markAllBeadsRead, markBeadRead } from "@/lib/local-storage"
+import {
+  getAnalyticsEnabled,
+  getArchiveExpanded,
+  markAllBeadsRead,
+  markBeadRead,
+  setArchiveExpanded,
+} from "@/lib/local-storage"
 import { safeCapture } from "@/lib/posthog-safe"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import { rpc } from "@/lib/rpc"
@@ -44,14 +50,69 @@ function readTypeFilter(workspaceId: string): string {
 const isBacklogged = (bead: Bead) => bead.priority === "backlog"
 const isArchived = (bead: Bead) => Boolean(bead.labels?.includes("archived"))
 
+// beadbox-51m: archived epics go to the Archived section wherever they sit,
+// including nested under a milestone (#48 kept them in place). An archived
+// epic takes its whole subtree with it, so nothing is listed twice. Backlogged
+// epics are different: only ROOT ones go to the Backlog section; nested ones
+// stay under their milestone as part of its plan.
+function collectNestedArchivedEpics(epic: Epic, out: Epic[]): void {
+  for (const child of epic.childEpics ?? []) {
+    if (isArchived(child)) out.push(child)
+    else collectNestedArchivedEpics(child, out)
+  }
+}
+
 export function partitionInactiveEpics(roots: Epic[]): {
   backlogEpics: Epic[]
   archivedEpics: Epic[]
 } {
-  return {
-    backlogEpics: roots.filter((epic) => isBacklogged(epic) && !isArchived(epic)),
-    archivedEpics: roots.filter(isArchived),
+  const archivedEpics: Epic[] = []
+  for (const root of roots) {
+    if (isArchived(root)) archivedEpics.push(root)
+    else collectNestedArchivedEpics(root, archivedEpics)
   }
+  return {
+    backlogEpics: roots
+      .filter((epic) => isBacklogged(epic) && !isArchived(epic))
+      .map(withoutArchived),
+    archivedEpics,
+  }
+}
+
+// beadbox-51m: the Backlog section shows backlogged work, never archived items
+// inside it (those are in Archived). Backlogged content is kept.
+function withoutArchived(epic: Epic): Epic {
+  const keep = (beads: Bead[]): Bead[] =>
+    beads
+      .filter((bead) => !isArchived(bead))
+      .map((bead) => (bead.children ? { ...bead, children: keep(bead.children) } : bead))
+  return {
+    ...epic,
+    children: keep(epic.children ?? []),
+    childEpics: epic.childEpics?.filter((child) => !isArchived(child)).map(withoutArchived),
+  }
+}
+
+/**
+ * beadbox-51m: the grouped (by-status) view's two parts. `live` feeds the
+ * status groups and never contains an archived item; `archived` is its own
+ * collapsible Archived group (archived epics with their contents, plus
+ * archived loose beads).
+ */
+export function splitGroupedBeads(
+  active: Epic[],
+  backlogEpics: Epic[],
+  archivedEpics: Epic[],
+  backlogBeads: Bead[],
+  archivedBeads: Bead[],
+  matches: (bead: Bead) => boolean = () => true,
+): { live: Bead[]; archived: Bead[] } {
+  const archived = collectGroupedVisibleBeads([], archivedEpics, [], archivedBeads, matches)
+  const archivedIds = new Set(archived.map((bead) => bead.id))
+  const live = collectGroupedVisibleBeads(active, backlogEpics, backlogBeads, [], matches).filter(
+    (bead) => !isArchived(bead) && !archivedIds.has(bead.id),
+  )
+  return { live, archived }
 }
 
 export function filterActiveEpicTree(epic: Epic): Epic {
@@ -62,7 +123,8 @@ export function filterActiveEpicTree(epic: Epic): Epic {
   return {
     ...epic,
     children: filterBeads(epic.children ?? []),
-    childEpics: epic.childEpics?.map(filterActiveEpicTree),
+    // beadbox-51m: archived child epics are shown in Archived instead.
+    childEpics: epic.childEpics?.filter((child) => !isArchived(child)).map(filterActiveEpicTree),
   }
 }
 
@@ -81,7 +143,7 @@ export function collectGroupedVisibleBeads(
   ]
 }
 
-import { ArrowLeft, Loader2, RefreshCw } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronRight, Loader2, RefreshCw } from "lucide-react"
 import { EpicTreeSkeleton } from "@/components/epic-tree-skeleton"
 import { IncompatibilityBanner } from "@/components/incompatibility-banner"
 import { LoadErrorEmpty } from "@/components/load-error-overlay"
@@ -749,19 +811,27 @@ function BeadsEpicsViewer() {
     archivedBeads,
   ])
 
+  // beadbox-51m: same persisted flag as the tree's Archived group.
+  const [isGroupedArchiveExpanded, setGroupedArchiveExpandedState] = useState(getArchiveExpanded)
+  const toggleGroupedArchive = (expanded: boolean) => {
+    setGroupedArchiveExpandedState(expanded)
+    setArchiveExpanded(expanded)
+  }
   const groupedBeads = useMemo(() => {
     const groupedFilters: Filters = {
       ...filters,
       rig: filters.rig !== "all" && rigNames.length === 0 ? "all" : filters.rig,
     }
-    return collectGroupedVisibleBeads(
+    // beadbox-51m: archived items get their own collapsible group, never a status group.
+    return splitGroupedBeads(
       [
         ...activeEpicsWithFilteredStandalone,
         ...activeMilestonesFiltered,
         ...activeMoleculesFiltered,
         ...activeConvoysFiltered,
       ],
-      [...backlogEpics, ...archivedEpics],
+      backlogEpics,
+      archivedEpics,
       backlogBeads,
       archivedBeads,
       (bead) => matchesBead(bead, groupedFilters),
@@ -800,7 +870,7 @@ function BeadsEpicsViewer() {
   // The status filter has already applied (filterEpics drops non-matching
   // beads), so the input here is the already-narrowed set; grouping is
   // purely layout.
-  const renderGroupedFlatView = (sourceBeads: Bead[]) => (
+  const renderGroupedFlatView = (sourceBeads: Bead[], archived: Bead[] = []) => (
     <div className="space-y-3">
       {groupBeadsByStatus(sourceBeads, customStatusChain).map((group) => (
         <div key={group.status} className="space-y-1">
@@ -829,6 +899,45 @@ function BeadsEpicsViewer() {
           />
         </div>
       ))}
+      {/* beadbox-51m: archived items, hidden by default; the state persists. */}
+      {archived.length > 0 && (
+        <div className="space-y-1 border-t border-border/40 pt-2">
+          <button
+            type="button"
+            onClick={() => toggleGroupedArchive(!isGroupedArchiveExpanded)}
+            className="flex items-center gap-2 px-3 pt-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+          >
+            {isGroupedArchiveExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" />
+            )}
+            Archived <span className="font-normal">({archived.length})</span>
+          </button>
+          {isGroupedArchiveExpanded && (
+            <BeadTable
+              beads={archived}
+              epicId="_grouped_archived"
+              onBeadClick={handleBeadClick}
+              onArchive={handleArchiveBead}
+              onDelete={setDeleteConfirmId}
+              expandedBeads={expandedBeads}
+              onToggleBead={handleToggleBead}
+              focusedItemId={focusedItemId}
+              onFocusItem={setFocusedItemId}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              draggedBeadId={draggedBeadId}
+              selectedBeadId={beadIdParam}
+              showWaves={filters.showWaves}
+              readState={readState}
+              selectedIds={beadSelection.selectedIds}
+              onToggleSelect={beadSelection.toggle}
+              onToggleSelectAll={beadSelection.toggleAll}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 
@@ -1028,7 +1137,7 @@ function BeadsEpicsViewer() {
                   archivedEpics.length > 0 ||
                   archivedBeads.length > 0 ? (
                   filters.grouped ? (
-                    renderGroupedFlatView(groupedBeads)
+                    renderGroupedFlatView(groupedBeads.live, groupedBeads.archived)
                   ) : (
                     <EpicTree
                       epics={activeEpicsWithFilteredStandalone}
@@ -1150,7 +1259,7 @@ function BeadsEpicsViewer() {
                   archivedEpics.length > 0 ||
                   archivedBeads.length > 0 ? (
                   filters.grouped ? (
-                    renderGroupedFlatView(groupedBeads)
+                    renderGroupedFlatView(groupedBeads.live, groupedBeads.archived)
                   ) : (
                     <EpicTree
                       epics={activeEpicsWithFilteredStandalone}
