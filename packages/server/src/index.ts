@@ -24,6 +24,7 @@ import { BunIo, RPCChannel } from "kkrpc"
 import { type HandlerRegistry, handlers } from "./handlers"
 import { closeLogFile } from "./lib/log-file"
 import { startParentDeathWatcherViaShell } from "./lib/parent-death-watcher"
+import { serializeWrites } from "./lib/serial-write"
 import { sweepServeDirsAtStartup } from "./lib/serve-reads"
 import { captureShutdownSource } from "./lib/shutdown-source"
 
@@ -44,7 +45,9 @@ const stopWatcher = startParentDeathWatcherViaShell()
 // tests fail. stdout is reserved for kkrpc frames, so this can't go there.
 process.stderr.write(`[beadbox-sidecar] starting pid=${process.pid} bun=${Bun.version}\n`)
 
-const io = new BunIo(Bun.stdin.stream())
+// Replies are written one frame at a time: concurrent large ones otherwise
+// interleave on the pipe and the client loses them (beadbox-hia).
+const io = serializeWrites(new BunIo(Bun.stdin.stream()))
 
 // RPCChannel listens in the background. We hold a reference so GC doesn't
 // reclaim it; Bun keeps the process alive until stdin closes.
