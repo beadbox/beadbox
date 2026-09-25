@@ -11,6 +11,7 @@ import {
   assertNumericId,
   assertSafeBeadId,
   assertSafeBeadIds,
+  assertSafeName,
   buildCommentArgs,
   buildUpdateArgs,
   flagArg,
@@ -956,12 +957,12 @@ export async function listDependencies(
   id: string,
   options: BdOptions = {},
 ): Promise<BdDependency[]> {
-  return bdExec<BdDependency[]>(["dep", "list", id], options)
+  return bdExec<BdDependency[]>(["dep", "list", assertSafeBeadId(id)], options)
 }
 
 // List dependents for a bead (beads that depend on this bead)
 export async function listDependents(id: string, options: BdOptions = {}): Promise<BdDependency[]> {
-  return bdExec<BdDependency[]>(["dep", "list", id, "--direction=up"], options)
+  return bdExec<BdDependency[]>(["dep", "list", assertSafeBeadId(id), "--direction=up"], options)
 }
 
 // Remove a dependency between two beads
@@ -970,12 +971,12 @@ export async function removeDependency(
   dependsOnId: string,
   options: BdOptions = {},
 ): Promise<void> {
-  await bdExecRaw(["dep", "remove", issueId, dependsOnId], options)
+  await bdExecRaw(["dep", "remove", ...assertSafeBeadIds([issueId, dependsOnId])], options)
 }
 
 // Add a label to a bead
 export async function addLabel(id: string, label: string, options: BdOptions = {}): Promise<void> {
-  await bdExecRaw(["update", id, "--add-label", label], options)
+  await bdExecRaw(buildUpdateArgs(id, "--add-label", label), options)
 }
 
 // Remove a label from a bead
@@ -984,7 +985,7 @@ export async function removeLabel(
   label: string,
   options: BdOptions = {},
 ): Promise<void> {
-  await bdExecRaw(["update", id, "--remove-label", label], options)
+  await bdExecRaw(buildUpdateArgs(id, "--remove-label", label), options)
 }
 
 // Convert a bd-style duration string ("2m", "1h", "30s") to an ISO date string.
@@ -1511,7 +1512,10 @@ export async function getMoleculeStructure(
   id: string,
   options: BdOptions = {},
 ): Promise<MoleculeGraph> {
-  const raw = await bdExec<{ dependencies: BdMolDependency[] }>(["mol", "show", id], options)
+  const raw = await bdExec<{ dependencies: BdMolDependency[] }>(
+    ["mol", "show", assertSafeBeadId(id)],
+    options,
+  )
   const deps = raw.dependencies || []
 
   // Collect unique node IDs
@@ -1552,7 +1556,16 @@ export async function listFormulas(options: BdOptions = {}): Promise<FormulaSumm
 }
 
 export async function showFormula(name: string, options: BdOptions = {}): Promise<FormulaDetail> {
-  return bdExec<FormulaDetail>(["formula", "show", name], options)
+  return bdExec<FormulaDetail>(["formula", "show", assertSafeName(name, "formula name")], options)
+}
+
+// Formula variables as single --var=<name>=<value> tokens. The value is free
+// text and stays inside the token; the name is validated so a variable cannot
+// be named like a flag (beadbox-c29).
+function varArgs(vars: Record<string, string> | undefined): string[] {
+  return Object.entries(vars ?? {}).map(([k, v]) =>
+    flagArg("--var", `${assertSafeName(k, "formula variable name")}=${v}`),
+  )
 }
 
 export async function cookFormula(
@@ -1560,12 +1573,7 @@ export async function cookFormula(
   vars?: Record<string, string>,
   options: BdOptions = {},
 ): Promise<CookedFormula> {
-  const args = ["cook", name]
-  if (vars) {
-    for (const [k, v] of Object.entries(vars)) {
-      args.push("--var", `${k}=${v}`)
-    }
-  }
+  const args = ["cook", assertSafeName(name, "formula name"), ...varArgs(vars)]
   return bdExec<CookedFormula>(args, options)
 }
 
@@ -1575,11 +1583,8 @@ export async function pourMolecule(
   assignee?: string,
   options: BdOptions = {},
 ): Promise<void> {
-  const args = ["mol", "pour", formula]
-  for (const [k, v] of Object.entries(vars)) {
-    args.push("--var", `${k}=${v}`)
-  }
-  if (assignee) args.push("--assignee", assignee)
+  const args = ["mol", "pour", assertSafeName(formula, "formula name"), ...varArgs(vars)]
+  if (assignee) args.push(flagArg("--assignee", assignee))
   await bdExecRaw(args, options)
 }
 
@@ -1587,7 +1592,7 @@ export async function getMoleculeProgress(
   id: string,
   options: BdOptions = {},
 ): Promise<MolProgress> {
-  const raw = await bdExec<MolProgressRaw>(["mol", "progress", id], options)
+  const raw = await bdExec<MolProgressRaw>(["mol", "progress", assertSafeBeadId(id)], options)
   return {
     id: raw.molecule_id,
     name: raw.molecule_title,
@@ -1642,5 +1647,5 @@ export async function getMoleculeStructureRaw(
   id: string,
   options: BdOptions = {},
 ): Promise<MolShowRaw> {
-  return bdExec<MolShowRaw>(["mol", "show", id], options)
+  return bdExec<MolShowRaw>(["mol", "show", assertSafeBeadId(id)], options)
 }

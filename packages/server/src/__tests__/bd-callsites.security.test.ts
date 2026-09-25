@@ -1,27 +1,18 @@
 // Call-site enforcement tests for the bd argv guards (beadbox-l5i.3, item 3).
 //
 // bd-argv.security.test.ts proves the guards are correct in isolation. This
-// file proves they are actually WIRED UP — that a hostile bead ID or title
-// reaching an exported lib/bd.ts function is stopped before it becomes argv.
-//
-// No bd process is spawned: validation throws ahead of execFile, so these
-// tests need no database and have no side effects. That is itself part of
-// the contract — a rejection must never reach the CLI.
+// file pins specific builder semantics and sec's reported shape (beadbox-c29).
+// Coverage of EVERY exported lib/bd.ts function is mechanical and lives in
+// bd-exports-argv.security.test.ts; every spawn outside lib/bd.ts is in the
+// census in bd-spawn-census.security.test.ts. A hand-written list of
+// functions here would pass vacuously for any function it forgot to name,
+// which is how beadbox-c29's six sites went uncaught.
 
-import { describe, expect, test } from "bun:test"
-import {
-  addComment,
-  closeBead,
-  deleteBead,
-  deleteComment,
-  getComments,
-  reopenBead,
-  setCustomStatuses,
-  showBead,
-  showBeads,
-  updateStatus,
-  updateTitle,
-} from "../lib/bd"
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { __resetBdPathCache, deleteComment, setCustomStatuses, showFormula } from "../lib/bd"
 import { BdArgvError, buildCommentArgs, buildUpdateArgs } from "../lib/bd-argv"
 
 const HOSTILE_ID = "--db=/tmp/evil"
@@ -66,24 +57,32 @@ describe("buildCommentArgs", () => {
   })
 })
 
-describe("exported bd functions reject flag-shaped bead IDs", () => {
-  const cases: Array<[string, () => Promise<unknown>]> = [
-    ["showBead", () => showBead(HOSTILE_ID)],
-    ["showBeads", () => showBeads(["bb-1", HOSTILE_ID])],
-    ["getComments", () => getComments(HOSTILE_ID)],
-    ["addComment", () => addComment(HOSTILE_ID, "text")],
-    ["updateStatus", () => updateStatus(HOSTILE_ID, "open")],
-    ["updateTitle", () => updateTitle(HOSTILE_ID, "x")],
-    ["closeBead", () => closeBead(HOSTILE_ID)],
-    ["reopenBead", () => reopenBead(HOSTILE_ID)],
-    ["deleteBead", () => deleteBead(HOSTILE_ID)],
-  ]
+describe("sec's reported shape (beadbox-c29): a formula name cannot retarget --db", () => {
+  const originalBdPath = process.env.BD_PATH
+  let root: string | undefined
 
-  for (const [name, invoke] of cases) {
-    test(`${name} throws before spawning bd`, async () => {
-      await expect(invoke()).rejects.toThrow(BdArgvError)
-    })
-  }
+  afterEach(async () => {
+    if (originalBdPath === undefined) delete process.env.BD_PATH
+    else process.env.BD_PATH = originalBdPath
+    __resetBdPathCache()
+    if (root) await rm(root, { recursive: true, force: true })
+    root = undefined
+  })
+
+  test("showFormula('--db=/tmp/evil') throws before bd is spawned", async () => {
+    root = await mkdtemp(join(tmpdir(), "beadbox-c29-shape-"))
+    const db = join(root, ".beads")
+    await mkdir(db)
+    const log = join(root, "argv.log")
+    const fakeBd = join(root, "bd")
+    await writeFile(fakeBd, `#!/bin/sh\necho "$*" >> "${log}"\necho '{}'\n`, { mode: 0o700 })
+    process.env.BD_PATH = fakeBd
+    __resetBdPathCache()
+
+    await expect(showFormula(HOSTILE_ID, { db })).rejects.toThrow(BdArgvError)
+    // The observable that matters: bd never saw the hostile token at all.
+    expect(await readFile(log, "utf-8").catch(() => "")).toBe("")
+  })
 })
 
 describe("deleteComment", () => {

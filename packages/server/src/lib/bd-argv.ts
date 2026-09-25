@@ -57,6 +57,33 @@ export function assertSafeBeadId(id: string): string {
   return id
 }
 
+// Names that bd resolves itself (formula names, formula variable names) take
+// the same shape as bead IDs. They are not machine-generated: formulas load
+// from <repo>/.beads/formulas/, so a cloned repository chooses them
+// (beadbox-c29). bd's own generator emits [a-z0-9-] with no leading '-'
+// (mol_distill.go sanitizeFormulaName), which this admits.
+const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const MAX_NAME_LENGTH = 128
+
+/** Validate a bd-resolved name destined for argv as a positional. Returns it unchanged. */
+export function assertSafeName(value: string, label: string): string {
+  if (typeof value !== "string") {
+    throw new BdArgvError(`Invalid ${label}: expected a string, got ${typeof value}`)
+  }
+  if (value.length === 0) {
+    throw new BdArgvError(`Invalid ${label}: empty`)
+  }
+  if (value.length > MAX_NAME_LENGTH) {
+    throw new BdArgvError(`Invalid ${label}: longer than ${MAX_NAME_LENGTH} characters`)
+  }
+  if (!NAME_PATTERN.test(value)) {
+    throw new BdArgvError(
+      `Invalid ${label}: ${value} (must start with a letter or digit and contain only letters, digits, '.', '-' and '_')`,
+    )
+  }
+  return value
+}
+
 /** Validate a batch of bead IDs. Rejects the whole batch if any one is unsafe. */
 export function assertSafeBeadIds(ids: string[]): string[] {
   for (const id of ids) assertSafeBeadId(id)
