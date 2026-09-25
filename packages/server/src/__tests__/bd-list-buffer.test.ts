@@ -57,6 +57,8 @@ describe("whole-workspace list output cap (beadbox-uk2)", () => {
     root = await mkdtemp(join(tmpdir(), "beadbox-uk2-"))
     db = join(root, ".beads")
     await mkdir(db)
+    // A genuine workspace marker: bd is never run on a .beads without one (beadbox-fdk).
+    await writeFile(join(db, "metadata.json"), "{}")
     fixture = join(root, "list.json")
     const fakeBd = join(root, "bd")
     await writeFile(

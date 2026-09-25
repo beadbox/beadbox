@@ -42,6 +42,7 @@ import type {
   ServerDatabase,
 } from "./types"
 import { readOnlyQuery } from "./read-only-query"
+import { isWorkspacePresent, workspaceMissingError } from "./workspace-presence"
 import {
   findExternalWorkspaceByDbPath,
   isBeadboxScaffoldPath,
@@ -305,6 +306,9 @@ function buildArgs(args: string[], options: BdOptions, includeJson: boolean): st
   const result: string[] = []
   const server = resolveServer(options)
   if (!server && options.db) {
+    // beadbox-fdk: never run bd against a vanished workspace. bd would write
+    // an embeddeddolt/ into it and then report an empty list at exit 0.
+    if (!isWorkspacePresent(options.db)) throw workspaceMissingError(options.db)
     // Local workspace: --db points to the .beads directory.
     // Server-only workspaces use env vars only (injected by buildEnv).
     result.push("--db", normalizeDbPath(options.db))
@@ -1131,6 +1135,7 @@ export async function listActivity(
   const args: string[] = []
   const server = resolveServer(options)
   if (options.db && !server) {
+    if (!isWorkspacePresent(options.db)) throw workspaceMissingError(options.db)
     args.push("--db", normalizeDbPath(options.db))
   }
   args.push("activity", "--limit", limit.toString())

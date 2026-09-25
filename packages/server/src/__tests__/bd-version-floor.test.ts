@@ -28,6 +28,9 @@ afterEach(async () => {
 async function workspaceWithBd(versionLine: string): Promise<RegistryEntry> {
   root = await mkdtemp(join(tmpdir(), "beadbox-bd-floor-"))
   await mkdir(join(root, ".beads"))
+  // local.path is root, so root is the workspace dir the presence check reads
+  // (beadbox-fdk): give it a genuine marker.
+  await writeFile(join(root, "metadata.json"), "{}")
   const bdPath = join(root, "bd")
   await writeFile(
     bdPath,

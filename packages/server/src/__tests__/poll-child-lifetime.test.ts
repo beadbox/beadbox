@@ -31,6 +31,9 @@ beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), `${RUN}-`))
   db = join(root, "ws", ".beads")
   await mkdir(db, { recursive: true })
+  // A genuine workspace marker: the loop refuses to run bd on a .beads
+  // without one (beadbox-fdk).
+  await writeFile(join(db, "metadata.json"), "{}")
   fakeBd = join(root, "bin-bd")
   // A bd whose `sql` never returns within the test: the loop is always
   // mid-call, which is exactly when an orphan does the most damage.

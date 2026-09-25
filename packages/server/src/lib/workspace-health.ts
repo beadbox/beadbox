@@ -1,6 +1,7 @@
 // Source-local copy of lib/workspace-health.ts (P1.3 / bb-vy13.3).
 // Rewrites: @/lib/* → ./* across the import block. Body unchanged.
 
+import { beadsDirOf, isWorkspacePresent } from "./workspace-presence"
 import { readFileSync } from "fs"
 import { mkdir } from "fs/promises"
 import mysql from "mysql2/promise"
@@ -308,6 +309,20 @@ async function checkLocalWorkspace(
   console.log(
     `[ws:health] "${workspace.name}" dbPath=${dbPath} server=${workspace.server ? `${workspace.server.host}:${resolvedPort ?? workspace.server.port}/${workspace.server.database}` : "none"}`,
   )
+
+  // beadbox-fdk: a vanished .beads is an error, never an init opportunity.
+  // Checked before any bd call, because bd would litter an embeddeddolt/ there
+  // and then answer an empty list at exit 0.
+  if (workspace.local && !isWorkspacePresent(dbPath)) {
+    const path = beadsDirOf(dbPath)
+    console.log(`[ws:health] "${workspace.name}" → FAIL kind=workspace_missing path=${path}`)
+    return {
+      ok: false,
+      error: { kind: "workspace_missing", path },
+      bdVersion: bdResult.version,
+      bdPath,
+    }
+  }
 
   const healthEnv = buildHealthEnv(workspace)
 

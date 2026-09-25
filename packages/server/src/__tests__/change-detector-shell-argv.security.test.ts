@@ -28,7 +28,9 @@ describe("buildPollShellArgs", () => {
     // The 5th positional is the per-poll bound in whole seconds (beadbox-01f.2),
     // derived in code, never from input. The 6th is the sidecar log path the
     // loop appends its lines to (beadbox-01f.4); empty when there is no log.
-    expect(args.slice(2)).toEqual(["--", "sub-1", "/tmp/ws/.beads", BD, "10", ""])
+    // The 7th is the .beads presence-check dir (beadbox-fdk); "" = nothing to
+    // check (server:// URIs).
+    expect(args.slice(2)).toEqual(["--", "sub-1", "/tmp/ws/.beads", BD, "10", "", ""])
   })
 
   test("the log path is a positional read through a quoted variable, never spliced", () => {
@@ -42,6 +44,19 @@ describe("buildPollShellArgs", () => {
     const uses = script.match(/\$LOG\b|"\$LOG"/g) ?? []
     expect(uses.length).toBeGreaterThan(0)
     expect(script).not.toMatch(/[^"]\$LOG[^"]/)
+  })
+
+  test("the presence-check dir is a positional read through a quoted variable, never spliced", () => {
+    // beadbox-fdk: the .beads path comes from the workspace the user added.
+    const hostile = "/tmp/ws; rm -rf ~ $(touch /tmp/pwned) `id`/.beads"
+    const args = buildPollShellArgs("sub-1", "/tmp/ws/.beads", BD, 10, "", hostile)
+    const script = args[1]
+    expect(args[8]).toBe(hostile)
+    expect(script).not.toContain(hostile)
+    expect(script).toContain('BEADSDIR="$6"')
+    const uses = script.match(/\$BEADSDIR\b|"\$BEADSDIR/g) ?? []
+    expect(uses.length).toBeGreaterThan(0)
+    expect(script).not.toMatch(/[^"]\$BEADSDIR/)
   })
 
   test("the poll bound is a positive integer however it is passed", () => {

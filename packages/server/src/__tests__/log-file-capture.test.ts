@@ -30,6 +30,9 @@ test("the poll child's change line reaches the log file; a credential never does
   const log = join(root, "sidecar.log")
   const beads = join(root, "ws", ".beads")
   mkdirSync(beads, { recursive: true })
+  // A genuine .beads carries metadata.json; without it the poll loop treats
+  // the workspace as vanished and never runs bd (beadbox-fdk).
+  writeFileSync(join(beads, "metadata.json"), "{}")
   const counter = join(root, "counter")
   writeFileSync(counter, "0")
   const secret = "S3cret-01f4-probe"

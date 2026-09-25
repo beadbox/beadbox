@@ -58,6 +58,7 @@ import { resolveBdPath } from "./bd-paths"
 import { beadsDirFromDatabasePath } from "./beadtrain-fs"
 import { drainPool, getPool, PortFileMissingError } from "./dolt-pool"
 import { getDoltDir, getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
+import { beadsDirOf, isWorkspacePresent } from "./workspace-presence"
 import { findExternalWorkspaceByDbPath, parseServerUri } from "./workspace-registry"
 import { activeLogPath } from "./log-file"
 
@@ -648,6 +649,9 @@ export function buildPollShellArgs(
   bdPath: string,
   timeoutS: number = POLL_TIMEOUT_S,
   logPath: string = "",
+  // beadbox-fdk: the workspace's .beads, checked before every bd call ("" =
+  // nothing local to check, e.g. server:// URIs).
+  beadsDir: string = "",
 ): string[] {
   const POLL_SQL = buildPollSql('"')
   // beadbox-db6: the loop must die with the sidecar however the sidecar dies
@@ -673,6 +677,7 @@ TMO="$4"
 # lines itself, which keeps live updates off its kkrpc-gated main thread.
 # $5 is empty when the log file sink is unavailable.
 LOG="$5"
+BEADSDIR="$6"
 emit() {
   printf '%s\\n' "$1" >&2
   if [ -n "$LOG" ]; then printf '%s\\n' "$1" >> "$LOG" 2>/dev/null; fi
@@ -681,6 +686,19 @@ LAST=""
 ERRS=0
 HB=0
 while true; do
+  # beadbox-fdk: never run bd on a vanished workspace (it would litter an
+  # embeddeddolt/ there). Same presence rule as lib/workspace-presence.ts; a
+  # missing workspace takes the ordinary poll-error path below.
+  if [ -n "$BEADSDIR" ] && [ ! -f "$BEADSDIR/metadata.json" ] && [ ! -f "$BEADSDIR/config.yaml" ]; then
+    ERRS=$((ERRS + 1))
+    if [ "$ERRS" = "3" ]; then
+      emit "$(printf '[SUBSCRIPTION:%s] {"type":"polling_error"}' "$ID")"
+    elif [ "$ERRS" -gt 3 ]; then
+      emit "$(printf '[SUBSCRIPTION:%s] {"type":"reconnecting","attempt_number":%s,"backoff_ms":5000}' "$ID" "$ERRS")"
+    fi
+    sleep 5
+    continue
+  fi
   # beadbox-01f.2: every poll is bounded. macOS has no timeout(1), so bd runs
   # in the background beside a watchdog that TERMs it after TMO seconds and
   # KILLs it 1s later (a SIGSTOPped bd leaves TERM pending). The watchdog's
@@ -750,6 +768,7 @@ done
     bdPath,
     String(Math.max(1, Math.floor(timeoutS))),
     logPath,
+    beadsDir,
   ]
 }
 
@@ -797,7 +816,9 @@ function startServerPollChild(state: DetectorState, id: string): void {
   // its own process group so that notice, and stop(), can take down the
   // whole group. Not on Windows, where detached opens a console window.
   const timeoutS = _testOverrides.pollTimeoutS ?? POLL_TIMEOUT_S
-  const child = spawn("/bin/sh", buildPollShellArgs(id, dbArg, resolveBdPath(), timeoutS, activeLogPath() ?? ""), {
+  const beadsDir = state.dbPath.startsWith("server://") ? "" : beadsDirOf(state.dbPath)
+  const pollArgs = buildPollShellArgs(id, dbArg, resolveBdPath(), timeoutS, activeLogPath() ?? "", beadsDir)
+  const child = spawn("/bin/sh", pollArgs, {
     stdio: ["pipe", "ignore", "inherit"],
     env,
     cwd,
@@ -938,7 +959,13 @@ export async function createChangeDetector(
     // main-thread timer gating). Falls back to scheduleServerPoll only if
     // the caller didn't supply an id (legacy test paths) — production
     // callers always provide one via the subscribe handler.
-    startServerPollChild(state, id)
+    if (isWorkspacePresent(workspacePath)) {
+      startServerPollChild(state, id)
+    } else {
+      // beadbox-fdk: a vanished workspace gets no poll loop (no bd runs).
+      process.stderr.write(`[change-detector] workspace missing, no poll child for ${workspacePath}\n`)
+      emit({ type: "polling_error" })
+    }
   } else {
     process.stderr.write(
       `[change-detector] WARN: server mode without id, falling back to in-process scheduleServerPoll for ${workspacePath} (subject to bb-xe8g BunIo gating bug)\n`,

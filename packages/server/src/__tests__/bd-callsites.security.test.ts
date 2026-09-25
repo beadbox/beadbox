@@ -93,6 +93,8 @@ describe("formula names (beadbox-c29): refuse what bd would lex as a flag, pass 
     root = await mkdtemp(join(tmpdir(), "beadbox-c29-shape-"))
     db = join(root, ".beads")
     await mkdir(db)
+    // A genuine workspace marker: bd is never run on a .beads without one (beadbox-fdk).
+    await writeFile(join(db, "metadata.json"), "{}")
     log = join(root, "argv.log")
     const fakeBd = join(root, "bd")
     // One record per invocation; tokens separated by \037 so names with
@@ -204,6 +206,8 @@ describe("deleteComment (beadbox-vav): UUID comment ids, refused before bd runs 
     root = await mkdtemp(join(tmpdir(), "beadbox-vav-"))
     db = join(root, ".beads")
     await mkdir(db)
+    // A genuine workspace marker: bd is never run on a .beads without one (beadbox-fdk).
+    await writeFile(join(db, "metadata.json"), "{}")
     // Server mode, so a valid id gets past the embedded-mode refusal and
     // actually reaches bd: the accepted case must be observed, not assumed.
     await writeFile(join(db, "metadata.json"), JSON.stringify({ dolt_mode: "server" }))

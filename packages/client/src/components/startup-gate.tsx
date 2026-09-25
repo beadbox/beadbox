@@ -468,6 +468,7 @@ interface ErrorScreenProps {
 
 const hasRecoveryActions = (kind: HealthError["kind"]) =>
   kind === "database_missing" ||
+  kind === "workspace_missing" ||
   kind === "server_unreachable" ||
   kind === "access_denied" ||
   kind === "project_identity_mismatch"
@@ -486,6 +487,8 @@ function errorTitle(error: HealthError): string {
       return "Database server unreachable"
     case "database_missing":
       return "Database not found"
+    case "workspace_missing":
+      return "Workspace folder not found"
     case "project_identity_mismatch":
       return "Workspace needs to reconnect"
     case "schema_migration_needed":
@@ -890,6 +893,23 @@ function ErrorGuidance({
           Database &ldquo;{error.database}&rdquo; does not exist on the server. This usually means
           the workspace entry is stale. You can remove it and choose a different workspace.
         </p>
+      )
+
+    // beadbox-fdk: never an empty workspace, never an init. bd was not run, so
+    // nothing was written into the project.
+    case "workspace_missing":
+      return (
+        <div className="text-sm text-muted-foreground text-center mb-2 space-y-2">
+          <p>
+            This workspace&rsquo;s <code className="font-mono">.beads</code> folder is missing:
+          </p>
+          <p className="font-mono text-xs text-foreground break-all">{error.path}</p>
+          <p>
+            It may have been moved or renamed, belong to a branch or worktree that doesn&rsquo;t
+            have it, or sit on a drive that isn&rsquo;t mounted. Beadbox didn&rsquo;t run bd, so
+            nothing was written. Restore the folder and retry, or remove this workspace.
+          </p>
+        </div>
       )
 
     // beadbox-287: a scaffold minted by Beadbox 0.26.x or earlier.

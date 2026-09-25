@@ -181,8 +181,9 @@ describe("handlers/beads (read-only return shape)", () => {
   })
 
   test("getAvailableTypes propagates unavailable workspace errors", async () => {
+    // beadbox-fdk: a vanished workspace is refused before bd runs.
     await expect(beads.getAvailableTypes("/nonexistent/path/.beads/dolt"))
-      .rejects.toThrow(/ENOENT|no such file/)
+      .rejects.toThrow(/Workspace folder not found/)
   })
 
   test("checkBeadExists returns boolean", async () => {

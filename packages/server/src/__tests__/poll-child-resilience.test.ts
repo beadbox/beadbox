@@ -174,6 +174,8 @@ describe("a dead poll child is replaced (AC2)", () => {
     const beads = join(root, "sup", ".beads")
     await mkdir(beads, { recursive: true })
     await writeFile(join(beads, "dolt-server.port"), "3999")
+    // A genuine workspace marker (beadbox-fdk presence check).
+    await writeFile(join(beads, "metadata.json"), "{}")
     const events: SubscriptionEvent[] = []
     const id = `${RUN}-sup`
     const d = await detector.createChangeDetector(beads, (e) => events.push(e), id)
