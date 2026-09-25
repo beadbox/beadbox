@@ -268,7 +268,7 @@ function InstalledContent({ platform }: { platform: string | null }) {
 }
 
 /** Footer actions that change based on download/install state */
-function DialogFooter({
+export function DialogFooter({
   status,
   progress,
   progressPercent,
@@ -411,13 +411,16 @@ function DialogFooter({
           </Button>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">
-        You can also update via{" "}
-        <code className="px-1 py-0.5 rounded bg-muted text-xs font-mono">
-          brew upgrade --cask beadbox
-        </code>{" "}
-        if installed with Homebrew.
-      </p>
+      {/* brew is macOS-only (beadbox-ag1): never outside this darwin branch. */}
+      {platform === "darwin" && (
+        <p className="text-xs text-muted-foreground">
+          You can also update via{" "}
+          <code className="px-1 py-0.5 rounded bg-muted text-xs font-mono">
+            brew upgrade --cask beadbox
+          </code>{" "}
+          if installed with Homebrew.
+        </p>
+      )}
     </div>
   )
 }

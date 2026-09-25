@@ -20,6 +20,7 @@
 // registry-only state on this route stays in sync the same way the Next.js
 // page did.
 
+import { BdInstallInstructions } from "@/components/bd-install-instructions"
 import { useRouter } from "@tanstack/react-router"
 import { Circle, ExternalLink, FolderOpen, HardDrive, Loader2, Plus, RefreshCw } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -81,7 +82,7 @@ const APP_VERSION = (import.meta.env.VITE_APP_VERSION as string | undefined) ?? 
 
 // ─── Bd Missing Screen ──────────────────────────────────────────────────────
 
-function BdMissingScreen({
+export function BdMissingScreen({
   onCheckAgain,
   feedback,
   platform,
@@ -91,6 +92,7 @@ function BdMissingScreen({
   platform: string
 }) {
   const [checking, setChecking] = useState(false)
+  const isMac = platform === "darwin"
   const isWindows = platform === "win32"
   const isLinux = platform === "linux"
 
@@ -116,40 +118,14 @@ function BdMissingScreen({
         <p className="text-sm text-muted-foreground text-center mb-6">
           To get started, install the bd command-line tool:
         </p>
-        {isWindows ? (
-          <>
-            <p className="text-sm text-muted-foreground text-center mb-4">
-              Download the latest Windows release from GitHub and add it to your PATH:
-            </p>
-            <div className="flex justify-center mb-6">
-              <a
-                href="https://github.com/steveyegge/beads/releases/latest"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-medium bg-muted/50 border border-border text-foreground hover:bg-accent transition-colors"
-              >
-                Download bd for Windows <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            </div>
-            <p className="text-xs text-muted-foreground text-center mb-6">
-              After installing, restart Beadbox for it to detect bd on your PATH.
-            </p>
-          </>
-        ) : isLinux ? (
-          <>
-            <div className="rounded-md bg-muted/50 border border-border px-4 py-3 mb-3 font-mono text-sm text-foreground select-all break-all">
-              go install github.com/steveyegge/beads/cmd/bd@latest
-            </div>
-            <div className="mb-6" />
-          </>
-        ) : (
-          <>
-            <div className="rounded-md bg-muted/50 border border-border px-4 py-3 mb-3 font-mono text-sm text-foreground select-all">
-              brew install beads
-            </div>
-            <div className="mb-6" />
-          </>
+        {/* beadbox-ag1: shared with the startup gate; brew only for macOS. */}
+        <BdInstallInstructions isMac={isMac} isWindows={isWindows} isLinux={isLinux} />
+        {isWindows && (
+          <p className="text-xs text-muted-foreground text-center mb-6">
+            After installing, add bd to your PATH and restart Beadbox so it can find it.
+          </p>
         )}
+        <div className="mb-6" />
         {feedback && <p className="text-sm text-amber-400 text-center mb-4">{feedback}</p>}
         <div className="flex items-center justify-center gap-4">
           <Button onClick={handleCheck} disabled={checking}>

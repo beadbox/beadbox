@@ -11,7 +11,15 @@ import { dirname } from "path"
 import { resolveBdPath } from "../lib/bd-paths"
 import { execFileAsync } from "../lib/exec"
 import { isValidDbPath } from "../lib/path-validation"
+import { bdUpgradeHint } from "../lib/version-requirements"
 import { getActiveWorkspace } from "../lib/workspace-registry"
+
+/** Shown when the installed bd has no `doctor` (beadbox-ag1: platform-gated fix). */
+export function diagnosticsUnsupportedMessage(platform: string): string {
+  const hint = bdUpgradeHint(platform)
+  const how = hint.fixCommand ? `Update with: ${hint.fixCommand}` : hint.fixDescription
+  return `Your version of beads does not support diagnostics. ${how}`
+}
 
 // bb-2a9b: bd doctor 1.0.x detects the workspace via process.cwd(), not the
 // `--db` flag. The flag controls which database doctor QUERIES, but the
@@ -169,8 +177,7 @@ export async function runDiagnostics(databasePath?: string): Promise<Diagnostics
         warnings: 0,
         errors: 0,
         checks: [],
-        error:
-          "Your version of beads does not support diagnostics. Update with: brew upgrade beads",
+        error: diagnosticsUnsupportedMessage(process.platform),
       }
     }
 
@@ -213,8 +220,7 @@ export async function runDiagnostics(databasePath?: string): Promise<Diagnostics
         warnings: 0,
         errors: 0,
         checks: [],
-        error:
-          "Your version of beads does not support diagnostics. Update with: brew upgrade beads",
+        error: diagnosticsUnsupportedMessage(process.platform),
       }
     }
 

@@ -15,6 +15,7 @@
 // checker, which keeps every call site unchanged for one extra round-trip.
 
 import { useCallback, useState } from "react"
+import { detectClientPlatform } from "@/lib/platform"
 
 // Mirrors tauri-plugin-updater's own DownloadEvent. Note contentLength is
 // OPTIONAL here, not nullable: the Rust host this replaced serialised it as
@@ -45,20 +46,11 @@ interface UseUpdateDownloaderResult {
   reset: () => void
 }
 
-function detectPlatform(): string | null {
-  if (typeof navigator === "undefined") return null
-  const p = navigator.platform.toLowerCase()
-  if (p.includes("mac")) return "darwin"
-  if (p.includes("win")) return "win32"
-  if (p.includes("linux")) return "linux"
-  return null
-}
-
 export function useUpdateDownloader(): UseUpdateDownloaderResult {
   const [status, setStatus] = useState<DownloadStatus>("idle")
   const [progress, setProgress] = useState<DownloadProgress>({ downloaded: 0, total: 0 })
   const [error, setError] = useState<string | null>(null)
-  const platform = detectPlatform()
+  const platform = detectClientPlatform()
 
   const startDownload = useCallback(async (): Promise<void> => {
     setError(null)

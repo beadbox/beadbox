@@ -160,3 +160,29 @@ function getUpgradeCommand(tool: "bd" | "dolt", platform: string): string {
   // win32 and anything else
   return "Download from beadbox.app/download"
 }
+
+/**
+ * How to update bd on this platform, as the fix shown for a bd error
+ * (beadbox-ag1). Every bd install/upgrade hint outside the startup gate goes
+ * through here.
+ */
+export function bdUpgradeHint(platform: string): {
+  fixCommand: string | null
+  fixDescription: string
+} {
+  // brew ONLY in this explicit darwin branch, never as the fall-through.
+  if (platform === "darwin") {
+    return { fixCommand: "brew upgrade beads", fixDescription: "Update bd to the latest version" }
+  }
+  if (platform === "linux") {
+    return {
+      fixCommand: getUpgradeCommand("bd", "linux"),
+      fixDescription: "Update bd to the latest version",
+    }
+  }
+  // win32 and anything unrecognised
+  return {
+    fixCommand: null,
+    fixDescription: "Download the latest bd from github.com/steveyegge/beads/releases/latest",
+  }
+}

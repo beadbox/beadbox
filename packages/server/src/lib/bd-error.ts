@@ -21,6 +21,8 @@
 // This function extracts the .error field if present, falling back
 // to the original text. Handles optional non-JSON prefix lines
 // (e.g., "warning: ..." before the JSON block).
+import { bdUpgradeHint } from "./version-requirements"
+
 export function extractBdMessage(text: string): string {
   const trimmed = text.trim()
   if (!trimmed) return trimmed
@@ -253,8 +255,7 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     test: (t) => /is not valid JSON/i.test(t) || /unexpected output format/i.test(t),
     category: "unexpected-output",
     severity: "recoverable",
-    fixCommand: "brew upgrade beads",
-    fixDescription: "Update bd to the latest version",
+    ...bdUpgradeHint(process.platform),
   },
 ]
 
