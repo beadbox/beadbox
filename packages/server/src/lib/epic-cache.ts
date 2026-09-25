@@ -11,6 +11,9 @@ let cachedDbPath: string | null = null
 let cachedIncludeSystem = false
 let cachedResult: Epic[] | null = null
 let cachedParts: FingerprintParts | null = null
+// Blocked-by from the same bd list the cached tree was built from, so the
+// tree's blocked-by does not cost a second full list (beadbox-w74).
+let cachedBlockedBy: Map<string, string[]> | null = null
 
 // Parse a fingerprint JSON string into its component parts.
 // Fingerprint format: [{"h":"<HEAD hash>","i":"<max updated_at>","c":"<count:maxId>"}]
@@ -36,12 +39,29 @@ export function getCachedEpics(fingerprint: string, dbPath: string, includeSyste
   return null
 }
 
-export function setCachedEpics(fingerprint: string, dbPath: string, epics: Epic[], includeSystem = false): void {
+export function setCachedEpics(
+  fingerprint: string,
+  dbPath: string,
+  epics: Epic[],
+  includeSystem = false,
+  blockedBy: Map<string, string[]> | null = null,
+): void {
   cachedFingerprint = fingerprint
   cachedDbPath = dbPath
   cachedIncludeSystem = includeSystem
   cachedResult = epics
   cachedParts = parseFingerprint(fingerprint)
+  cachedBlockedBy = blockedBy
+}
+
+/**
+ * Blocked-by computed with the cached tree, if that tree is for `dbPath` and
+ * was built from data with this fingerprint. Either list (with or without
+ * system beads) carries every dependency edge of the issues it lists.
+ */
+export function getCachedBlockedBy(fingerprint: string, dbPath: string): Map<string, string[]> | null {
+  if (fingerprint === cachedFingerprint && dbPath === cachedDbPath && cachedResult) return cachedBlockedBy
+  return null
 }
 
 export function getCachedFingerprintParts(): FingerprintParts | null {
@@ -157,5 +177,6 @@ export function invalidateEpicCache(): void {
   cachedIncludeSystem = false
   cachedResult = null
   cachedParts = null
+  cachedBlockedBy = null
   beadDetailCache.clear()
 }

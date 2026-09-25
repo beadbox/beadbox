@@ -9,6 +9,7 @@
 // belt-and-suspenders, but the explicit rewrite here documents the intent.
 
 import { basename, dirname, resolve } from "path"
+import { blocksMapFromIssues } from "../lib/blocks-map"
 import {
   type BdBead,
   type BdComment,
@@ -31,6 +32,7 @@ import {
   getCachedBeadDetail,
   getCachedDbPath,
   getCachedIncludeSystem,
+  getCachedBlockedBy,
   getCachedEpics,
   getCachedFingerprintParts,
   hasCachedResult,
@@ -298,7 +300,9 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
   }
 
   if (currentFingerprint) {
-    setCachedEpics(currentFingerprint, dbKey, topLevelEpics, options.includeSystem)
+    // The same list yields blocked-by, so the tree's blocked-by load does
+    // not have to run a second full bd list (beadbox-w74).
+    setCachedEpics(currentFingerprint, dbKey, topLevelEpics, options.includeSystem, blocksMapFromIssues(allBeads))
   }
 
   return topLevelEpics
@@ -444,6 +448,13 @@ export type BlocksDependenciesPayload = {
 export async function getBlocksDependencies(dbPath?: string): Promise<BlocksDependenciesPayload> {
   const options: BdOptions = dbPath ? { db: dbPath } : {}
   try {
+    // The tree for this data was just built from a full bd list; answer from
+    // it. Only when the data changed since (or no tree is cached) run a list.
+    if (options.db) {
+      const fingerprint = await getDataFingerprint({ ...options, parallel: true })
+      const cached = fingerprint ? getCachedBlockedBy(fingerprint, options.db) : null
+      if (cached) return { blockedBy: Object.fromEntries(cached) }
+    }
     const result = await getAllBlocksDependencies(options)
     if (result.status === "error") {
       return { blockedBy: {}, degraded: { reason: "error", message: result.error.message } }

@@ -13,6 +13,7 @@ import {
 } from "./bd-error"
 import { __resetBdPathCache, COMMON_BD_PATHS, resolveBdPath as getBdPath } from "./bd-paths"
 import { readMetadataPortSync, readPortFileSync } from "./dolt-port-file"
+import { blocksMapFromIssues } from "./blocks-map"
 import { getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import {
   assertCommentId,
@@ -1416,18 +1417,7 @@ export async function getAllBlocksDependencies(options: BdOptions = {}): Promise
     if (!Array.isArray(issues)) {
       throw new Error(`bd list returned ${issues === null ? "null" : typeof issues}, not a list`)
     }
-    const map = new Map<string, string[]>()
-    for (const issue of issues) {
-      for (const edge of issue.dependencies ?? []) {
-        // Parent-child and related links are dependency rows too; only
-        // blocks is a blocker. An edge with no target has nothing to show.
-        if (edge.type !== "blocks" || !edge.depends_on_id) continue
-        const existing = map.get(issue.id)
-        if (existing) existing.push(edge.depends_on_id)
-        else map.set(issue.id, [edge.depends_on_id])
-      }
-    }
-    return { status: "ok", map }
+    return { status: "ok", map: blocksMapFromIssues(issues) }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(`[bd] blocks dependencies unavailable (${options.db}): ${message}`)
