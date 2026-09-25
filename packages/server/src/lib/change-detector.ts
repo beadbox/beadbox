@@ -428,7 +428,6 @@ function startEmbeddedLoop(state: DetectorState): void {
   } else {
     console.warn(`Dolt directory not found: ${doltDir} (using polling only)`)
   }
-
 }
 
 // bb-fe03.6: setTimeout callback was 82 NLOC at CCN 29 — pool/fallback
@@ -620,7 +619,19 @@ export function _startServerPollChild(state: DetectorState, id: string): void {
  */
 export function buildPollShellArgs(id: string, dbArg: string, bdPath: string): string[] {
   const POLL_SQL = buildPollSql('"')
+  // beadbox-db6: the loop must die with the sidecar however the sidecar dies
+  // (quit is a SIGKILL from Tauri, so no cleanup hook ever runs). The sidecar
+  // holds the only write end of our stdin and never writes to it; the kernel
+  // closes it when the sidecar exits for any reason, and the watcher below
+  // reads EOF and signals our whole process group — this loop, its sleep, and
+  // any bd sql in flight. POSIX gives a background list /dev/null as stdin, so
+  // the pipe is parked on fd 3 first. The group is our own (the sidecar spawns
+  // us detached); -$$ is only ever OUR group, and if it does not exist the
+  // fallback signals this shell alone, never the sidecar's group.
   const SHELL_LOOP = `
+exec 3<&0 </dev/null
+( while read -r _ <&3; do :; done; kill -TERM -$$ 2>/dev/null || kill -TERM $$ ) &
+exec 3<&-
 ID="$1"
 DBPATH="$2"
 BD="$3"
@@ -659,6 +670,20 @@ done
   return ["-c", SHELL_LOOP, "--", id, dbArg, bdPath]
 }
 
+/** Signal the poll child's process group, or just the child where there is no group. */
+function killPollGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  try {
+    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal)
+    else child.kill(signal)
+  } catch {
+    try {
+      child.kill(signal)
+    } catch {
+      /* already dead */
+    }
+  }
+}
+
 function startServerPollChild(state: DetectorState, id: string): void {
   // Mirror bdServerPoll's env construction so the child's bd CLI hits
   // the same Dolt server with the same credentials.
@@ -682,11 +707,15 @@ function startServerPollChild(state: DetectorState, id: string): void {
     cwd = wsPath ?? undefined
   }
 
+  // stdin is a pipe the sidecar never writes: its EOF is the child's
+  // parent-death notice (see buildPollShellArgs). detached puts the child in
+  // its own process group so that notice, and stop(), can take down the
+  // whole group. Not on Windows, where detached opens a console window.
   const child = spawn("/bin/sh", buildPollShellArgs(id, dbArg, resolveBdPath()), {
-    stdio: ["ignore", "ignore", "inherit"],
+    stdio: ["pipe", "ignore", "inherit"],
     env,
     cwd,
-    detached: false,
+    detached: process.platform !== "win32",
   })
   state.pollChild = child
 
@@ -776,7 +805,9 @@ export async function createChangeDetector(
         state.trainWatcher = null
       })
     } catch (err: unknown) {
-      console.warn(`fs.watch failed for ${beadsDir} (train plans): ${err instanceof Error ? err.message : String(err)}`)
+      console.warn(
+        `fs.watch failed for ${beadsDir} (train plans): ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 
@@ -814,9 +845,7 @@ export async function createChangeDetector(
   // changes still emit normally once the poll succeeds; the prev/next fields
   // are intentionally absent on this synthetic event so the client can tell
   // it apart from real fingerprint diffs if needed.
-  process.stderr.write(
-    `[change-detector] emitting synthetic initial event for ${workspacePath}\n`,
-  )
+  process.stderr.write(`[change-detector] emitting synthetic initial event for ${workspacePath}\n`)
   emit({ type: "change", timestamp: Date.now(), trigger: "initial" })
 
   return {
@@ -857,14 +886,13 @@ export async function createChangeDetector(
       if (state.pollChild) {
         const child = state.pollChild
         try {
-          child.kill("SIGTERM")
+          // Signal the child's whole group (loop, sleep, in-flight bd sql),
+          // then close its stdin, which the loop also treats as "stop".
+          killPollGroup(child, "SIGTERM")
+          child.stdin?.destroy()
           await new Promise<void>((resolve) => {
             const timeout = setTimeout(() => {
-              try {
-                child.kill("SIGKILL")
-              } catch {
-                /* already dead */
-              }
+              killPollGroup(child, "SIGKILL")
               resolve()
             }, 250)
             child.once("exit", () => {

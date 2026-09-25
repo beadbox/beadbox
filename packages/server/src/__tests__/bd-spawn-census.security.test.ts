@@ -67,7 +67,7 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
   },
   "lib/change-detector.ts::startServerPollChild::spawn": {
     count: 1,
-    why: "/bin/sh poll loop: the db path and bd path are quoted positionals ($2, $3), never spliced into the script; enforced by change-detector-shell-argv.security.test.ts",
+    why: "/bin/sh poll loop: the db path and bd path are quoted positionals ($2, $3), never spliced into the script (change-detector-shell-argv.security.test.ts). It runs in its own process group and dies with the sidecar on any exit path via stdin EOF (beadbox-db6, poll-child-lifetime.test.ts)",
   },
   "lib/workspace-health.ts::probeBdVersion::execFileAsync": {
     count: 1,
