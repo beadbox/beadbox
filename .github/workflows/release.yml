@@ -320,6 +320,40 @@ jobs:
               --title "$TAG" --notes "Release ${TAG#v}" \
               --repo "${{ github.repository }}"
 
+  # beadbox-5p1: where the macOS jobs run. The self-hosted release runner
+  # (label beadbox-macos-release) when it is online and idle and the job is one
+  # it admits (scripts/ci-runner/admissible.sh: a release tag through this
+  # workflow, or a main build through build-main.yml), GitHub's macos-14
+  # otherwise. GitHub has no fallback of its own: a job for an offline
+  # self-hosted label just waits in the queue. RUNNER_STATUS_TOKEN
+  # (Administration: read on this repo, nothing else) lives in the release
+  # environment; without it the answer is always macos-14.
+  pick-macos-runner:
+    name: "Pick macOS runner"
+    environment: release
+    if: >-
+      !cancelled()
+      && needs.validate-tag.result == 'success'
+      && (github.event_name == 'push' || inputs.build_macos_arm64)
+    needs: [validate-tag]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      runs_on: ${{ steps.pick.outputs.runs_on }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+          persist-credentials: false
+          sparse-checkout: scripts/ci-runner
+      - name: Pick the macOS runner
+        id: pick
+        env:
+          MACOS_RUNNER: ${{ vars.MACOS_RUNNER }}
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+        run: bash scripts/ci-runner/pick-macos-runner.sh
+
   # ── Platform builds (each builds frontend inline, uploads to draft release) ──
 
   build-macos-arm64:
@@ -333,9 +367,10 @@ jobs:
       && needs.validate-tag.result == 'success'
       && needs.build-frontend.result == 'success'
       && (needs.create-draft.result == 'success' || (inputs.mode == 'build' && needs.create-draft.result == 'skipped'))
+      && needs.pick-macos-runner.result == 'success'
       && (github.event_name == 'push' || inputs.build_macos_arm64)
-    needs: [validate-tag, build-frontend, create-draft]
-    runs-on: macos-14
+    needs: [validate-tag, build-frontend, create-draft, pick-macos-runner]
+    runs-on: ${{ fromJSON(needs.pick-macos-runner.outputs.runs_on) }}
     timeout-minutes: 45
     permissions:
       contents: write
@@ -357,9 +392,34 @@ jobs:
           echo "build_id=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
+        if: runner.environment == 'github-hosted'
         uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03; toolchain chosen via input
         with:
           toolchain: stable
+
+      - name: Rust and package caches for this job only (release runner)
+        # beadbox-5p1: on the self-hosted release runner nothing one build
+        # writes may reach a later build. Rust comes from a root-owned,
+        # read-only toolchain; cargo's registry and bun's package cache live in
+        # this job's temp dir (emptied after the job); the build dir stays in
+        # the per-job work dir. A toolchain this job could write is refused.
+        if: runner.environment != 'github-hosted'
+        run: |
+          set -euo pipefail
+          TOOLS=/usr/local/libexec/beadbox-runner/rust
+          for d in "$TOOLS" "$TOOLS/rustup" "$TOOLS/cargo/bin"; do
+            if [ ! -d "$d" ] || [ "$(stat -f %Su "$d")" != root ] || [ -w "$d" ]; then
+              echo "::error::$d must exist, be owned by root and not be writable by this job"
+              exit 1
+            fi
+          done
+          mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/bun-cache"
+          {
+            echo "RUSTUP_HOME=$TOOLS/rustup"
+            echo "CARGO_HOME=$RUNNER_TEMP/cargo-home"
+            echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/bun-cache"
+          } >> "$GITHUB_ENV"
+          echo "$TOOLS/cargo/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies and stage Bun sidecar
         run: |
@@ -384,6 +444,7 @@ jobs:
         run: bun --cwd=packages/client run build
 
       - name: Rust cache
+        if: runner.environment == 'github-hosted'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
@@ -541,9 +602,10 @@ jobs:
       !cancelled()
       && needs.validate-tag.result == 'success'
       && needs.build-macos-arm64.result == 'success'
+      && needs.pick-macos-runner.result == 'success'
       && (github.event_name == 'push' || inputs.build_macos_arm64)
-    needs: [validate-tag, build-macos-arm64]
-    runs-on: macos-14
+    needs: [validate-tag, build-macos-arm64, pick-macos-runner]
+    runs-on: ${{ fromJSON(needs.pick-macos-runner.outputs.runs_on) }}
     timeout-minutes: 15
     permissions:
       contents: write

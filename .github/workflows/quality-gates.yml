@@ -313,15 +313,63 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: No homelab runner labels
+      - name: Runners are GitHub-hosted, except the reviewed release-runner route
+        # beadbox-5p1 (2026-09-25): a scoped exception, not a removal.
+        # This replaces a check for the literal string "self-hosted", which a
+        # job naming only a custom runner label got past. Now every runs-on
+        # must be a GitHub-hosted label, matrix os values included. The one
+        # exception is release.yml's macOS build and DMG jobs, which take the
+        # label scripts/ci-runner/pick-macos-runner.sh prints; that runner's
+        # job-started hook admits only release.yml pushed to main or a release
+        # tag (scripts/ci-runner/job-started.sh, tested by test-hooks.sh).
         run: |
           set -euo pipefail
-          PATTERN="self-""hosted"
-          if grep -rn "$PATTERN" .github/; then
-            echo "::error::Found a $PATTERN runner reference under .github/. The public repo must never dispatch to the homelab — use ubuntu-latest / macos-14 / windows-latest."
-            exit 1
+          HOSTED='^(ubuntu-latest|ubuntu-2[0-9]\.04(-arm)?|macos-1[4-9]|macos-latest|windows-latest|windows-20[0-9]{2})$'
+          # Split so Actions does not evaluate these as expressions here.
+          ROUTE='$''{{ fromJSON(needs.pick-macos-runner.outputs.runs_on) }}'
+          MATRIX='$''{{ matrix.os }}'
+          bad=0
+          routes=0
+          while IFS=: read -r file line val; do
+            val=$(printf '%s' "$val" | sed -E 's/^[[:space:]]*runs-on:[[:space:]]*//; s/[[:space:]]+$//')
+            if [[ "$val" =~ $HOSTED ]]; then continue; fi
+            if [ "$val" = "$MATRIX" ]; then continue; fi # values checked below
+            if [ "$val" = "$ROUTE" ] && [ "$file" = .github/workflows/release.yml ]; then
+              routes=$((routes + 1))
+              continue
+            fi
+            echo "::error file=$file,line=$line::runs-on '$val' is not a GitHub-hosted runner label"
+            bad=1
+          done < <(grep -rnE '^[[:space:]]*runs-on:' .github/workflows/)
+          while IFS=: read -r file line val; do
+            list=$(printf '%s' "$val" | sed -nE 's/^[[:space:]]*os:[[:space:]]*\[(.*)\][[:space:]]*$/\1/p')
+            if [ -z "$list" ]; then
+              echo "::error file=$file,line=$line::matrix os must be a one-line [list] of GitHub-hosted labels"
+              bad=1
+              continue
+            fi
+            IFS=, read -ra items <<< "$list"
+            for item in "${items[@]}"; do
+              item=$(printf '%s' "$item" | tr -d " \"'")
+              if ! [[ "$item" =~ $HOSTED ]]; then
+                echo "::error file=$file,line=$line::matrix os '$item' is not a GitHub-hosted runner label"
+                bad=1
+              fi
+            done
+          done < <(grep -rnE '^[[:space:]]*os:' .github/workflows/ || true)
+          if [ "$routes" -ne 2 ]; then
+            echo "::error::expected release.yml's two macOS jobs on the release-runner route, found $routes"
+            bad=1
           fi
-          echo "OK: no $PATTERN references under .github/"
+          if ! grep -qx 'readonly LABEL="beadbox-macos-release"' scripts/ci-runner/pick-macos-runner.sh; then
+            echo "::error::the release-runner label in scripts/ci-runner/pick-macos-runner.sh changed"
+            bad=1
+          fi
+          [ "$bad" -eq 0 ]
+          echo "OK: GitHub-hosted runners only, plus release.yml's reviewed release-runner route"
+
+      - name: Runner hook and picker tests
+        run: bash scripts/ci-runner/test-hooks.sh
 
       - name: No fork-triggered workflows with secret access
         run: |
