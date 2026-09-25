@@ -24,6 +24,7 @@ import { BunIo, RPCChannel } from "kkrpc"
 import { type HandlerRegistry, handlers } from "./handlers"
 import { closeLogFile } from "./lib/log-file"
 import { startParentDeathWatcherViaShell } from "./lib/parent-death-watcher"
+import { captureShutdownSource } from "./lib/shutdown-source"
 
 // bb-x0il (replaces bb-6x9y's Worker-based variant): when the parent
 // (Tauri host in production, bash/Claude Code wrapper in dev) dies
@@ -61,45 +62,18 @@ const channel = new RPCChannel<HandlerRegistry, Record<string, never>, BunIo>(io
 // future signals are ignored; only bb-x0il's shell watcher could reap it.
 //
 // Two additions versus the original handler:
-//   1. SIGTERM source capture: synchronous `ps -O ppid,user,etime,command`
-//      + `pgrep -l -f '[Bb]eadbox|tauri'` snapshot at signal receipt, before
+//   1. SIGTERM source capture: a synchronous snapshot of our parent chain
+//      and every process matching beadbox|tauri at signal receipt, before
 //      any state mutation. Bun's signal handlers don't expose siginfo_t, so
 //      out-of-band ps inspection is the only sender-identification we get.
+//      Processes are reported as "pid ppid name" only, never by command line:
+//      this line reaches the persistent log (beadbox-9j1, lib/shutdown-source).
 //      Stamped as `[bb-0vlu] sigterm_received ...` — frontend's
 //      sidecar-shutdown-stamp.ts parses this into window.__BEADBOX__.shutdown.
 //   2. Watchdog escalation: if process.exit(0) doesn't actually kill us in
 //      2s (Bun pending-work hang or downstream cleanup throw), SIGKILL self.
 //      timer.unref() so it doesn't itself keep the event loop alive.
 let shuttingDown = false
-function captureShutdownSource(): { parentChain: string; beadboxProcs: string } {
-  let parentChain = ""
-  let beadboxProcs = ""
-  try {
-    // -O appends listed columns to the default output. -p limits to specific
-    // PIDs. We list self + ppid; ppid's ppid is then walked by reading the
-    // ppid field from the first ps row, but doing the walk in JS is fragile;
-    // pgrep below catches the broader landscape (tauri-plugin-js helpers,
-    // intermediate shells) which is the actually-useful signal.
-    const psOut = Bun.spawnSync([
-      "ps",
-      "-O",
-      "ppid,user,etime,command",
-      "-p",
-      `${process.pid},${process.ppid}`,
-    ])
-    parentChain = (psOut.stdout?.toString() ?? "").trim()
-  } catch {
-    /* ps unavailable — non-fatal */
-  }
-  try {
-    const pgrepOut = Bun.spawnSync(["pgrep", "-l", "-f", "[Bb]eadbox|tauri"])
-    beadboxProcs = (pgrepOut.stdout?.toString() ?? "").trim()
-  } catch {
-    /* pgrep unavailable — non-fatal */
-  }
-  return { parentChain, beadboxProcs }
-}
-
 function shutdown(signal: NodeJS.Signals): void {
   if (shuttingDown) return
   shuttingDown = true

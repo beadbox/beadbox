@@ -9,3 +9,5 @@
 # stabilization window.
 [test]
 timeout = 30000
+# Keep test sidecars out of the user's real log (beadbox-9j1).
+preload = ["./src/__tests__/_test-log-isolation.ts"]

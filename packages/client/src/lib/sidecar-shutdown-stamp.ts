@@ -4,7 +4,8 @@
 // The sidecar (packages/server/src/index.ts) emits two structured stderr
 // lines on shutdown:
 //   [bb-0vlu] sigterm_received signal=SIGTERM pid=N ppid=N
-//             parentChain="<ps -O output>" beadboxProcs="<pgrep -l output>"
+//             parentChain="<pid ppid name lines>" beadboxProcs="<pid ppid name lines>"
+//   (processes by pid and executable name only, never argv or env: beadbox-9j1)
 //   [bb-0vlu] shutdown_watchdog_escalating — process.exit hung past 2s, SIGKILL self
 //
 // This module subscribes to tauri-plugin-js's onStderr early in app boot,

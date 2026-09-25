@@ -91,9 +91,13 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
     count: 1,
     why: "open / explorer.exe / xdg-open with path.resolve(dirPath): an absolute path cannot start with '-', and existsSync is checked first",
   },
-  "index.ts::captureShutdownSource::Bun.spawnSync": {
-    count: 2,
-    why: "ps / pgrep diagnostics with fixed args and our own pids; no input",
+  "lib/shutdown-source.ts::psNames::Bun.spawnSync": {
+    count: 1,
+    why: "ps -o pid=,ppid=,ucomm= over integer pids (ours, or parsed from pgrep); prints no argv or env (beadbox-9j1); no input",
+  },
+  "lib/shutdown-source.ts::captureShutdownSource::Bun.spawnSync": {
+    count: 1,
+    why: "pgrep -f with a fixed pattern, pids only (no -l, so no argv printed; beadbox-9j1); no input",
   },
   "index.ts::shutdown::Bun.spawn": {
     count: 1,
