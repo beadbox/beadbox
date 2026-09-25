@@ -1,6 +1,6 @@
 import { createHash } from "crypto"
 import { existsSync, readFileSync } from "fs"
-import { readFile } from "fs/promises"
+import { readFile, rename } from "fs/promises"
 import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
 import {
@@ -1236,14 +1236,26 @@ export async function initWorkspace(path: string): Promise<string> {
 // Initialize a local .beads/ scaffold for a remote server workspace.
 // This lets all bd CLI commands work against the remote server by giving bd
 // a local workspace directory with server connection metadata.
+//
+// beadbox-287: --database makes bd adopt the served database's _project_id
+// (bd GH#2922). Without it bd mints a new id and writes it back into the
+// served database, locking out every other client of that server.
 export async function initServerScaffold(
   scaffoldDir: string,
   server: { host: string; port: number; database: string; user: string },
   password?: string,
 ): Promise<void> {
+  // bd refuses to re-init over an existing .beads and would keep its project
+  // identity. The scaffold is Beadbox-owned and holds only connection config
+  // (the data is on the server), so move a previous one aside and start fresh.
+  const beadsDir = join(scaffoldDir, ".beads")
+  if (existsSync(beadsDir)) {
+    await rename(beadsDir, join(scaffoldDir, `.beads.stale-${Date.now()}`))
+  }
   const args = [
     "init",
     flagArg("--prefix", server.database),
+    flagArg("--database", server.database),
     "--server",
     "--external",
     flagArg("--server-host", server.host),

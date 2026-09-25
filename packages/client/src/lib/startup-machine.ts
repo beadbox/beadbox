@@ -17,6 +17,7 @@ export type HealthError =
     }
   | { kind: "server_unreachable"; host: string; port?: number }
   | { kind: "database_missing"; database: string }
+  | { kind: "project_identity_mismatch"; database: string; localId: string; databaseId: string }
   | { kind: "schema_migration_needed"; workspacePath: string; missingColumn?: string }
   | { kind: "timeout" }
   | { kind: "unknown"; message: string; bdOutput: string }

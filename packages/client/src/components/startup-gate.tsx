@@ -445,7 +445,10 @@ interface ErrorScreenProps {
 }
 
 const hasRecoveryActions = (kind: HealthError["kind"]) =>
-  kind === "database_missing" || kind === "server_unreachable" || kind === "access_denied"
+  kind === "database_missing" ||
+  kind === "server_unreachable" ||
+  kind === "access_denied" ||
+  kind === "project_identity_mismatch"
 
 function errorTitle(error: HealthError): string {
   switch (error.kind) {
@@ -461,6 +464,8 @@ function errorTitle(error: HealthError): string {
       return "Database server unreachable"
     case "database_missing":
       return "Database not found"
+    case "project_identity_mismatch":
+      return "Workspace needs to reconnect"
     case "schema_migration_needed":
       return "Workspace needs a database update"
     case "timeout":
@@ -908,6 +913,24 @@ function ErrorGuidance({
           Database &ldquo;{error.database}&rdquo; does not exist on the server. This usually means
           the workspace entry is stale. You can remove it and choose a different workspace.
         </p>
+      )
+
+    // beadbox-287: a scaffold minted by Beadbox 0.26.x or earlier.
+    case "project_identity_mismatch":
+      return (
+        <div className="text-sm text-muted-foreground text-center mb-2 space-y-2">
+          <p>
+            Beadbox&rsquo;s connection to &ldquo;{error.database}&rdquo; has a different project
+            identity ({error.localId.slice(0, 8)}) than the server ({error.databaseId.slice(0, 8)}).
+            Server workspaces added by earlier versions of Beadbox can be in this state.
+          </p>
+          <p>
+            Remove this workspace and add the server again: Beadbox will reconnect using the
+            server&rsquo;s own project identity. If other bd clients of this server also report
+            &ldquo;PROJECT IDENTITY MISMATCH&rdquo;, follow the repair steps in the v0.27.0 release
+            notes.
+          </p>
+        </div>
       )
 
     case "schema_migration_needed":

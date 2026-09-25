@@ -353,6 +353,21 @@ export function classifyHealthError(
     return { kind: "schema_migration_needed", workspacePath, missingColumn: columnMatch[1] }
   }
 
+  // beadbox-287: the scaffold's project_id differs from the served database's.
+  // For a server workspace that's a scaffold minted by an older Beadbox, so the
+  // fix is to re-add it (the scaffold then adopts the server's identity). bd's
+  // own text blames another project's server on the port, which is right only
+  // for local workspaces, so those fall through to the generic path.
+  if (workspace.server && combined.includes("project identity mismatch")) {
+    const id = (label: RegExp) => rawCombined.match(label)?.[1] ?? "unknown"
+    return {
+      kind: "project_identity_mismatch",
+      database: workspace.server.database,
+      localId: id(/Local project ID \(metadata\.json\):\s*([0-9a-f-]{36})/i),
+      databaseId: id(/Database project ID:\s*([0-9a-f-]{36})/i),
+    }
+  }
+
   // MySQL 1045 (28000): Access denied for user 'root'@'127.0.0.1' (using password: YES)
   // Must come before other patterns that might match "access denied" text.
   if (
