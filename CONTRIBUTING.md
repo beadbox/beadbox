@@ -20,6 +20,8 @@ Beadbox is licensed under the [MIT License](LICENSE). By submitting a contributi
 
 If we can't take a change, we'll close the PR with a specific reason rather than letting it sit: superseded by other work, too narrow for core, or a problem we decided to solve differently — in which case we'll point you at how we solved it.
 
+**Every landing also gets a security review**, separate from code review. It can hold a landing until a specific change is made; when that happens we make the change ourselves and land it with your attribution, as above. The changes that reliably hold a landing: a new network listener, a change to how the `bd` CLI is invoked, changes to CI workflows or secrets, and anything that reaches the installer or updater.
+
 **Hygiene that makes this work** — if you miss one we'll usually just fix it and mention it when we land:
 
 - **One concern per PR.** Two unrelated fixes are two PRs.
