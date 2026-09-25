@@ -281,6 +281,8 @@ describe("_startServerPollChild (bb-xe8g)", () => {
     expect(s.pollChild).not.toBeNull()
     expect(typeof s.pollChild?.pid).toBe("number")
     // Cleanup: kill the spawned shell so the test process can exit.
+    // stopped first, or the supervisor (beadbox-01f.2) replaces it.
+    s.stopped = true
     s.pollChild?.kill("SIGKILL")
   })
 
@@ -297,6 +299,7 @@ describe("_startServerPollChild (bb-xe8g)", () => {
     })
     // SIGKILL is the guaranteed-exit signal; the production stop()
     // tries SIGTERM first then escalates to SIGKILL after 250ms.
+    s.stopped = true
     child.kill("SIGKILL")
     await exitPromise
     expect(child.killed).toBe(true)

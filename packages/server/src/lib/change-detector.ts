@@ -70,6 +70,14 @@ const POLL_INTERVAL_MS = 5000
 const EMBEDDED_DEBOUNCE_MS = 2000
 const SERVER_POLL_MS = 1000
 const MAX_BACKOFF_MS = 60_000
+// beadbox-01f.2: bound on one `bd sql` poll in the shell loop (AC: <= 10s).
+const POLL_TIMEOUT_S = 10
+// beadbox-01f.2: respawn backoff for a poll child that exits while the
+// detector is live: 0.5s, 1s, 2s, 4s, then capped at 5s (restart within 5s).
+const RESPAWN_BASE_MS = 500
+const RESPAWN_MAX_MS = 5000
+// A child that lived this long was healthy; its exit restarts the backoff.
+const RESPAWN_RESET_AFTER_MS = 60_000
 
 /** Test-only overrides. Not used in production. */
 export const _testOverrides = {
@@ -77,6 +85,8 @@ export const _testOverrides = {
   maxBackoffMs: null as number | null,
   embeddedDebounceMs: null as number | null,
   pollIntervalMs: null as number | null,
+  pollTimeoutS: null as number | null,
+  respawnBaseMs: null as number | null,
 }
 
 function getServerPollMs(): number {
@@ -352,6 +362,10 @@ interface DetectorState {
   // [SUBSCRIPTION:<id>] lines to its stderr (inherited from sidecar →
   // same pipe Tauri reads), bypassing the gated main thread.
   pollChild: ChildProcess | null
+  // beadbox-01f.2: supervision of pollChild. Absent on hand-built test states.
+  respawnTimer?: ReturnType<typeof setTimeout> | null
+  respawnAttempt?: number
+  pollChildStartedAt?: number
 }
 
 async function emitIfChanged(
@@ -624,7 +638,12 @@ export function _startServerPollChild(state: DetectorState, id: string): void {
  * it, so a bare `bd` would resolve through a broader search list than the
  * resolveBdPath() used by every other bd call site (beadbox-l5i.3).
  */
-export function buildPollShellArgs(id: string, dbArg: string, bdPath: string): string[] {
+export function buildPollShellArgs(
+  id: string,
+  dbArg: string,
+  bdPath: string,
+  timeoutS: number = POLL_TIMEOUT_S,
+): string[] {
   const POLL_SQL = buildPollSql('"')
   // beadbox-db6: the loop must die with the sidecar however the sidecar dies
   // (quit is a SIGKILL from Tauri, so no cleanup hook ever runs). The sidecar
@@ -642,10 +661,35 @@ exec 3<&-
 ID="$1"
 DBPATH="$2"
 BD="$3"
+TMO="$4"
 LAST=""
 ERRS=0
+HB=0
 while true; do
-  RESULT=$("$BD" sql '${POLL_SQL}' --db "$DBPATH" --json --quiet --readonly 2>/dev/null)
+  # beadbox-01f.2: every poll is bounded. macOS has no timeout(1), so bd runs
+  # in the background beside a watchdog that TERMs it after TMO seconds and
+  # KILLs it 1s later (a SIGSTOPped bd leaves TERM pending). The watchdog's
+  # output goes to /dev/null so it never holds this substitution's pipe open,
+  # and its TERM trap reaps its own sleep. A timeout is a nonzero RC, i.e. an
+  # ordinary poll error below.
+  RESULT=$(
+    "$BD" sql '${POLL_SQL}' --db "$DBPATH" --json --quiet --readonly 2>/dev/null &
+    P=$!
+    (
+      trap 'kill $S 2>/dev/null; exit 0' TERM
+      sleep "$TMO" &
+      S=$!
+      wait $S
+      kill -TERM $P 2>/dev/null
+      sleep 1
+      kill -KILL $P 2>/dev/null
+    ) >/dev/null 2>&1 &
+    W=$!
+    wait $P
+    RC=$?
+    kill -TERM $W 2>/dev/null
+    exit $RC
+  )
   RC=$?
   if [ $RC -ne 0 ]; then
     ERRS=$((ERRS + 1))
@@ -671,10 +715,18 @@ while true; do
     printf '[SUBSCRIPTION:%s] {"type":"change","timestamp":%s}\\n' "$ID" "$TS" >&2
   fi
   LAST="$RESULT"
+  # beadbox-01f.2: a heartbeat after a SUCCESSFUL poll, on the first one and
+  # then at most every 10s. The client treats its absence as "live updates
+  # paused", which covers every way this pipeline can go quiet.
+  NOW=$(date +%s)
+  if [ $((NOW - HB)) -ge 10 ]; then
+    printf '[SUBSCRIPTION:%s] {"type":"heartbeat"}\\n' "$ID" >&2
+    HB=$NOW
+  fi
   sleep 1
 done
 `
-  return ["-c", SHELL_LOOP, "--", id, dbArg, bdPath]
+  return ["-c", SHELL_LOOP, "--", id, dbArg, bdPath, String(Math.max(1, Math.floor(timeoutS)))]
 }
 
 /** Signal the poll child's process group, or just the child where there is no group. */
@@ -720,13 +772,15 @@ function startServerPollChild(state: DetectorState, id: string): void {
   // parent-death notice (see buildPollShellArgs). detached puts the child in
   // its own process group so that notice, and stop(), can take down the
   // whole group. Not on Windows, where detached opens a console window.
-  const child = spawn("/bin/sh", buildPollShellArgs(id, dbArg, resolveBdPath()), {
+  const timeoutS = _testOverrides.pollTimeoutS ?? POLL_TIMEOUT_S
+  const child = spawn("/bin/sh", buildPollShellArgs(id, dbArg, resolveBdPath(), timeoutS), {
     stdio: ["pipe", "ignore", "inherit"],
     env,
     cwd,
     detached: process.platform !== "win32",
   })
   state.pollChild = child
+  state.pollChildStartedAt = Date.now()
 
   child.on("error", (err) => {
     // Failure to spawn (e.g., /bin/sh missing — vanishingly unlikely on
@@ -738,7 +792,7 @@ function startServerPollChild(state: DetectorState, id: string): void {
     if (!state.stopped) state.emit({ type: "polling_error" })
   })
   child.on("exit", (code, signal) => {
-    state.pollChild = null
+    if (state.pollChild === child) state.pollChild = null
     // Exit during normal stop() is expected (we kill the child). Log
     // unexpected early exits so future bb-i4qd-class regressions are
     // greppable in sidecar stderr.
@@ -746,9 +800,30 @@ function startServerPollChild(state: DetectorState, id: string): void {
       process.stderr.write(
         `[change-detector] pollChild exited unexpectedly for ${state.dbPath}: code=${code} signal=${signal}\n`,
       )
-      if (!state.stopped) state.emit({ type: "polling_error" })
+      scheduleRespawn(state, id)
     }
   })
+}
+
+// beadbox-01f.2: a poll child that exits while the detector is live used to
+// leave server mode with no detector at all until relaunch. Respawn it with
+// backoff and say so (reconnecting). If this timer is itself gated by the
+// kkrpc stdin reader, the client's heartbeat watchdog still shows the pause
+// and resubscribes, and that RPC wakes the loop.
+function scheduleRespawn(state: DetectorState, id: string): void {
+  if (state.stopped || state.respawnTimer) return
+  const lived = Date.now() - (state.pollChildStartedAt ?? 0)
+  if (lived >= RESPAWN_RESET_AFTER_MS) state.respawnAttempt = 0
+  const attempt = (state.respawnAttempt ?? 0) + 1
+  state.respawnAttempt = attempt
+  const base = _testOverrides.respawnBaseMs ?? RESPAWN_BASE_MS
+  const backoff = Math.min(base * 2 ** (attempt - 1), RESPAWN_MAX_MS)
+  state.emit({ type: "reconnecting", attempt_number: attempt, backoff_ms: backoff })
+  state.respawnTimer = setTimeout(() => {
+    state.respawnTimer = null
+    if (state.stopped) return
+    startServerPollChild(state, id)
+  }, backoff)
 }
 
 export async function createChangeDetector(
@@ -788,6 +863,8 @@ export async function createChangeDetector(
     portFileMissing: false,
     stopped: false,
     pollChild: null,
+    respawnTimer: null,
+    respawnAttempt: 0,
   }
 
   // Train plans (beadbox-if6): watched in EVERY detection mode. This is pure
@@ -865,6 +942,10 @@ export async function createChangeDetector(
       if (state.debounceTimer) {
         clearTimeout(state.debounceTimer)
         state.debounceTimer = null
+      }
+      if (state.respawnTimer) {
+        clearTimeout(state.respawnTimer)
+        state.respawnTimer = null
       }
       if (state.pollTimer) {
         // setInterval and setTimeout both clear safely with both APIs in Node.

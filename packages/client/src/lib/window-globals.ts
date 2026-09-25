@@ -88,6 +88,7 @@ export type BeadboxSubscriptionEventType =
   | "polling_error"
   | "reconnecting"
   | "recovered"
+  | "heartbeat"
   | "bd_command"
 
 export interface BeadboxSubscriptionStamp {

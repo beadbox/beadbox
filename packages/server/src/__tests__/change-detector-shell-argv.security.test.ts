@@ -25,7 +25,15 @@ describe("buildPollShellArgs", () => {
     const script = args[1]
     expect(args[0]).toBe("-c")
     expect(script).not.toContain("/tmp/ws/.beads")
-    expect(args.slice(2)).toEqual(["--", "sub-1", "/tmp/ws/.beads", BD])
+    // The 5th positional is the per-poll bound in whole seconds (beadbox-01f.2),
+    // derived in code, never from input.
+    expect(args.slice(2)).toEqual(["--", "sub-1", "/tmp/ws/.beads", BD, "10"])
+  })
+
+  test("the poll bound is a positive integer however it is passed", () => {
+    for (const t of [10, 2.7, 0, -5]) {
+      expect(buildPollShellArgs("sub-1", "/tmp/ws/.beads", BD, t)[6]).toMatch(/^[1-9][0-9]*$/)
+    }
   })
 
   test("dereferences the db path through a quoted shell variable", () => {

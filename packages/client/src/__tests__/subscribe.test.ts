@@ -27,6 +27,7 @@ import posthog from "posthog-js"
 import { act, createElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { queryClient } from "../lib/query-client"
+import * as subscribeModule from "../lib/subscribe"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import {
   _getSubscriptionChangeCount,
@@ -492,5 +493,106 @@ describe("useChangeSubscription", () => {
         ;(posthog as { capture?: unknown }).capture = originalCapture
       }
     })
+  })
+})
+
+// beadbox-01f.2: server-mode live updates must not go silently dark. The poll
+// loop heartbeats after each healthy poll; once a subscription has shown it
+// heartbeats, 30s of silence means "live updates paused" (visible), and the
+// hook resubscribes once. Embedded mode never heartbeats, so it never pauses.
+// Seams are read through the namespace so this block fails on behaviour, not
+// on import, against a subscribe.ts that predates them.
+describe("live-updates liveness (beadbox-01f.2)", () => {
+  type LivenessSeams = {
+    _setLivenessTiming?: (t: { pauseAfterMs: number; tickMs: number }) => void
+    _resetLivenessTiming?: () => void
+    _getLiveUpdatesPaused?: () => boolean
+    _resetLiveUpdatesPaused?: () => void
+  }
+  const seams = subscribeModule as unknown as LivenessSeams
+  const paused = () => seams._getLiveUpdatesPaused?.() ?? false
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const line = (e: SubscriptionEvent) => formatLine("test-id-1", e)
+
+  let root: Root
+  let rpcMocks: RpcMocks
+  let listenMocks: ListenMocks
+
+  beforeEach(() => {
+    setupDom()
+    _setRuntimeCheck(() => true)
+    rpcMocks = installRpcMock("test-id-1")
+    listenMocks = installListenMock()
+    root = createRoot(container)
+    seams._setLivenessTiming?.({ pauseAfterMs: 300, tickMs: 25 })
+  })
+
+  afterEach(() => {
+    try {
+      root.unmount()
+    } catch {
+      /* already unmounted */
+    }
+    teardownDom()
+    _resetRpc()
+    _resetListenStderr()
+    _resetRuntimeCheck()
+    _resetSubscriptionChangeCount()
+    seams._resetLivenessTiming?.()
+    seams._resetLiveUpdatesPaused?.()
+    queryClient.clear()
+  })
+
+  async function mount(): Promise<void> {
+    await act(async () => {
+      root.render(createElement(HookHost, { workspacePath: "/ws/server" }))
+    })
+    await flushMicrotasks()
+  }
+
+  test("a heartbeating stream that goes quiet is paused, and resubscribes once", async () => {
+    await mount()
+    await act(async () => listenMocks.fire(line({ type: "heartbeat" })))
+    expect(paused()).toBe(false)
+    await act(async () => {
+      await sleep(450)
+    })
+    await flushMicrotasks()
+    expect(paused()).toBe(true)
+    expect(rpcMocks.start).toHaveBeenCalledTimes(2)
+    // Still quiet on the new subscription: stays paused, no resubscribe storm.
+    await act(async () => {
+      await sleep(450)
+    })
+    expect(paused()).toBe(true)
+    expect(rpcMocks.start).toHaveBeenCalledTimes(2)
+  })
+
+  test("a stream that never heartbeats (embedded mode) never pauses", async () => {
+    await mount()
+    await act(async () =>
+      listenMocks.fire(line({ type: "change", timestamp: 1, trigger: "initial" })),
+    )
+    await act(async () => {
+      await sleep(450)
+    })
+    expect(paused()).toBe(false)
+    expect(rpcMocks.start).toHaveBeenCalledTimes(1)
+  })
+
+  test("a heartbeat clears the pause; the new subscription's synthetic initial change does not", async () => {
+    await mount()
+    await act(async () => listenMocks.fire(line({ type: "heartbeat" })))
+    await act(async () => {
+      await sleep(450)
+    })
+    await flushMicrotasks()
+    expect(paused()).toBe(true)
+    await act(async () =>
+      listenMocks.fire(line({ type: "change", timestamp: 2, trigger: "initial" })),
+    )
+    expect(paused()).toBe(true)
+    await act(async () => listenMocks.fire(line({ type: "heartbeat" })))
+    expect(paused()).toBe(false)
   })
 })

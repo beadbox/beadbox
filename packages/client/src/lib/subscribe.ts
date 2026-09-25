@@ -117,6 +117,86 @@ export function useSubscriptionChangeSignal(): number {
 // last invalidation fired. NO behavior change — pure side-effect
 // stamp, tolerant of non-browser test environments via
 // ensureBeadboxStamp returning null.
+// ---------------------------------------------------------------------------
+// beadbox-01f.2: live-updates liveness.
+//
+// The server-mode poll loop emits a heartbeat after each healthy poll (first
+// one, then at most every 10s). Once a subscription has heartbeated, a
+// stretch with no heartbeat and no real change means the detector is not
+// working, whatever the reason (hung bd, dead child, gated sidecar loop,
+// broken pipe). The WebView's timers are not gated, so this is the one place
+// every silent path becomes visible. Embedded mode never heartbeats, so the
+// watchdog never arms there. reconnecting / polling_error do NOT count as
+// healthy: a loop stuck in an error streak still emits them.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_LIVENESS = { pauseAfterMs: 30_000, tickMs: 5_000 }
+let livenessTiming = { ...DEFAULT_LIVENESS }
+
+/** Test-only: shrink the pause window and tick. */
+export function _setLivenessTiming(t: { pauseAfterMs: number; tickMs: number }): void {
+  livenessTiming = { ...t }
+}
+
+export function _resetLivenessTiming(): void {
+  livenessTiming = { ...DEFAULT_LIVENESS }
+}
+
+let liveUpdatesPaused = false
+// The workspace the pause belongs to; a switch to another one clears it.
+let pausedWorkspace: string | null = null
+// One resubscribe per pause, so a detector that stays broken can't storm.
+let resubscribedForPause = false
+const pausedListeners = new Set<() => void>()
+
+function setLiveUpdatesPaused(paused: boolean, workspacePath: string | null): void {
+  if (!paused) resubscribedForPause = false
+  if (liveUpdatesPaused === paused && pausedWorkspace === workspacePath) return
+  liveUpdatesPaused = paused
+  pausedWorkspace = paused ? workspacePath : null
+  for (const listener of pausedListeners) listener()
+}
+
+function subscribePausedListener(listener: () => void): () => void {
+  pausedListeners.add(listener)
+  return () => {
+    pausedListeners.delete(listener)
+  }
+}
+
+function getPausedSnapshot(): boolean {
+  return liveUpdatesPaused
+}
+
+/** True while live updates for the displayed workspace are known to be stalled. */
+export function useLiveUpdatesPaused(): boolean {
+  return useSyncExternalStore(subscribePausedListener, getPausedSnapshot, getPausedSnapshot)
+}
+
+export function _getLiveUpdatesPaused(): boolean {
+  return liveUpdatesPaused
+}
+
+/** Test-only: force the paused state (banner tests). */
+export function _setLiveUpdatesPausedForTests(paused: boolean): void {
+  setLiveUpdatesPaused(paused, paused ? "test" : null)
+}
+
+export function _resetLiveUpdatesPaused(): void {
+  resubscribedForPause = false
+  setLiveUpdatesPaused(false, null)
+}
+
+/**
+ * Refresh the displayed view exactly as a live change event would
+ * (query invalidation + the change signal the tree reloads on). Works in
+ * every degraded state: it doesn't depend on the subscription.
+ */
+export function requestManualRefresh(): void {
+  void queryClient.invalidateQueries()
+  bumpSubscriptionChange()
+}
+
 function getOrInitSubscriptionStamp(): BeadboxSubscriptionStamp | null {
   const root = ensureBeadboxStamp()
   if (!root) return null
@@ -294,6 +374,24 @@ export function useChangeSubscription(
   useEffect(() => {
     if (!workspacePath || !runtimeCheck()) return
 
+    // beadbox-01f.2: a pause belongs to one workspace.
+    if (liveUpdatesPaused && pausedWorkspace !== workspacePath) setLiveUpdatesPaused(false, null)
+    // Liveness for THIS subscription: armed by its first heartbeat.
+    let armed = false
+    let lastHealthyAt = Date.now()
+    const livenessTimer = setInterval(() => {
+      if (!armed || cancelled) return
+      if (Date.now() - lastHealthyAt <= livenessTiming.pauseAfterMs) return
+      armed = false
+      setLiveUpdatesPaused(true, workspacePath)
+      if (!resubscribedForPause) {
+        resubscribedForPause = true
+        // A fresh subscription is a new detector, and the RPC also wakes a
+        // sidecar loop whose timers are gated.
+        setTransportEpoch((epoch) => epoch + 1)
+      }
+    }, livenessTiming.tickMs)
+
     let cancelled = false
     let activeId: string | null = null
     let unlisten: UnlistenFn | null = null
@@ -332,7 +430,16 @@ export function useChangeSubscription(
             // Filter to events for OUR subscription id — multiple subscriptions
             // could share the stderr stream if a future bead allows it.
             if (parsed.id !== id) continue
-            onEvent(parsed.payload)
+            const payload = parsed.payload
+            const healthy =
+              payload.type === "heartbeat" ||
+              (payload.type === "change" && payload.trigger !== "initial")
+            if (healthy) {
+              if (payload.type === "heartbeat") armed = true
+              lastHealthyAt = Date.now()
+              if (liveUpdatesPaused) setLiveUpdatesPaused(false, null)
+            }
+            onEvent(payload)
           }
         })
 
@@ -377,6 +484,7 @@ export function useChangeSubscription(
 
     return () => {
       cancelled = true
+      clearInterval(livenessTimer)
       const idAtCleanup = activeId
       const unlistenAtCleanup = unlisten
       const connectedAtCleanup = connectedAt

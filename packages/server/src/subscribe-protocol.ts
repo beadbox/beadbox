@@ -33,6 +33,10 @@ export type SubscriptionEvent =
   // backoff_ms). See change-detector.ts:_handlePollError.
   | { type: "reconnecting"; attempt_number: number; backoff_ms: number }
   | { type: "recovered" }
+  // beadbox-01f.2: the server-mode poll loop emits this after a successful
+  // poll (first one, then at most every 10s). Its absence is how the client
+  // tells "no changes" apart from "no detector".
+  | { type: "heartbeat" }
   | { type: "bd_command"; [key: string]: unknown }
 
 export function formatLine(id: string, payload: SubscriptionEvent): string {

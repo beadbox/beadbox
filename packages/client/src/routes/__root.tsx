@@ -1,6 +1,7 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { DevBadge } from "../components/dev-badge"
+import { LiveUpdatesPausedBanner } from "../components/live-updates-paused"
 import { StartupGate, useWorkspaceGate } from "../components/startup-gate"
 import { Toaster } from "../components/ui/sonner"
 import { WorkspaceRailPanel } from "../components/workspace-rail-panel"
@@ -61,6 +62,8 @@ function RootLayout() {
         <div className="min-w-0 flex-1">
           <StartupGate>
             <ChangeSubscriptionMount />
+            {/* beadbox-01f.2: visible when the change stream stalls. */}
+            <LiveUpdatesPausedBanner />
             <Outlet />
           </StartupGate>
         </div>
