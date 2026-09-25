@@ -2,6 +2,9 @@
 // (beadbox-6x2). DEV-ONLY: not in any build entrypoint, not run by CI or the
 // pre-push hook. Deterministic from a seed; contains no real issue text.
 //
+// Cleanup ends everything the fixture started, including bd serve's
+// per-workspace db-proxy-child (bd 1.3.x), and throws if anything survives.
+//
 // Shape (frozen on beadbox-6x2): 49% of issues have dependencies, ~6.5
 // comments per issue, 10% epics with parent-child children, 40% closed.
 // Text lengths are drawn from our own tracker's measured length quantiles
@@ -132,6 +135,18 @@ export function generateJsonl(size: number, seed: number): { lines: string[]; id
   return { lines, ids }
 }
 
+/** Pids of bd db-proxy-child processes rooted in this fixture's Dolt directory. */
+function proxyPids(beadsDir: string): number[] {
+  const root = join(beadsDir, "dolt")
+  const out = execFileSync("ps", ["-axww", "-o", "pid=,command="]).toString()
+  return out
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .filter((f) => f.includes("db-proxy-child") && f[f.indexOf("--root") + 1] === root)
+    .map((f) => Number(f[0]))
+    .filter((pid) => Number.isInteger(pid) && pid > 0)
+}
+
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0)
@@ -176,6 +191,12 @@ export function makeFixture(bd: string, size: number, seed: number): Fixture {
       if (Number.isInteger(pid) && pid > 0) stopAndWait(pid)
     }
     if (!dir.includes("beadbox-bench-")) return
+    // bd serve (1.3.x) starts a per-workspace db-proxy-child in its own
+    // session, so it outlives both bd serve and the Dolt server. The fixture
+    // is ours alone, so end every proxy rooted in it, and fail if one stays.
+    for (const pid of proxyPids(beadsDir)) stopAndWait(pid)
+    const left = proxyPids(beadsDir)
+    if (left.length) throw new Error(`fixture cleanup failed: db-proxy-child still running (${left.join(", ")})`)
     for (let attempt = 0; attempt < 5 && existsSync(dir); attempt++) {
       rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
     }
