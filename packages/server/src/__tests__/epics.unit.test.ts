@@ -39,10 +39,13 @@ describe("handlers/epics", () => {
     expect(cached.success).toBe(true)
   })
 
-  test("getBlocksDependencies returns Record (possibly empty)", async () => {
+  test("getBlocksDependencies returns blockedBy, and says so when it could not compute it", async () => {
     const r = await epics.getBlocksDependencies(ws.dbPath)
-    expect(typeof r).toBe("object")
-    expect(r).not.toBeNull()
+    expect(typeof r.blockedBy).toBe("object")
+    expect(r.blockedBy).not.toBeNull()
+    // Either computed (no degraded marker) or explicitly degraded with a reason --
+    // never an empty map standing in for a failure (beadbox-01f.6).
+    if (r.degraded) expect(["unsupported", "error"]).toContain(r.degraded.reason)
   })
 
   test("getBeadDetail returns Bead | null", async () => {

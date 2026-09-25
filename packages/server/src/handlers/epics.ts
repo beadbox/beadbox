@@ -412,20 +412,32 @@ export async function incrementalRefresh(dbPath?: string): Promise<EpicResult> {
 }
 
 // Fetch blocks/dependency data separately for deferred loading.
-export async function getBlocksDependencies(dbPath?: string): Promise<Record<string, string[]>> {
+//
+// `degraded` is set whenever blockedBy could NOT be computed, so the client can
+// tell "nothing is blocked" apart from "we could not find out". Both used to be
+// an empty object -- the swallow that hid bd's column rename from every bd >= 1.2
+// user. How the UI shows a degraded result is a follow-up; the distinction
+// itself is not optional.
+export type BlocksDependenciesPayload = {
+  blockedBy: Record<string, string[]>
+  degraded?: { reason: "unsupported" | "error"; message: string }
+}
+
+export async function getBlocksDependencies(dbPath?: string): Promise<BlocksDependenciesPayload> {
   const options: BdOptions = dbPath ? { db: dbPath } : {}
-
   try {
-    const blocksDeps = await getAllBlocksDependencies(options)
-    if (blocksDeps.size === 0) return {}
-
-    const result: Record<string, string[]> = {}
-    for (const [beadId, blockerIds] of blocksDeps) {
-      result[beadId] = blockerIds
+    const result = await getAllBlocksDependencies(options)
+    if (result.status === "unsupported") {
+      return { blockedBy: {}, degraded: { reason: "unsupported", message: result.reason } }
     }
-    return result
-  } catch {
-    return {}
+    if (result.status === "error") {
+      return { blockedBy: {}, degraded: { reason: "error", message: result.error.message } }
+    }
+    return { blockedBy: Object.fromEntries(result.map) }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(`[epics] getBlocksDependencies failed: ${message}`)
+    return { blockedBy: {}, degraded: { reason: "error", message } }
   }
 }
 

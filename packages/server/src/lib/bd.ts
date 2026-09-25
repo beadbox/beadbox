@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "fs"
 import { readFile } from "fs/promises"
 import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
-import { classifyBdError } from "./bd-error"
+import { type BdLoadError, classifyBdError, toBdLoadError } from "./bd-error"
 import { __resetBdPathCache, COMMON_BD_PATHS, resolveBdPath as getBdPath } from "./bd-paths"
 import { getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import {
@@ -1300,35 +1300,94 @@ export async function getChangedBeadIds(since: string, options: BdOptions = {}):
   return rows.map((r) => r.id)
 }
 
-// Get all "blocks" dependencies in one bulk query via bd sql
-// Returns a map: beadId -> array of IDs that block it
-// Embedded mode: returns empty map (bd sql unsupported)
-export async function getAllBlocksDependencies(
-  options: BdOptions = {},
-): Promise<Map<string, string[]>> {
-  if (!options.db) return new Map()
-  if (isEmbeddedMode(options.db)) return new Map()
+// ── "blocks" dependencies, in one bulk query ───────────────────────────────
+//
+// bd renamed the target column: bd 1.0.x stores it as depends_on_id, bd 1.2.x as
+// depends_on_issue_id (alongside depends_on_wisp_id / depends_on_external for
+// targets that are not issues). Beadbox supports both ends of that range
+// (MIN_BD_VERSION), so the query is tried against the current schema first and
+// the legacy one second. A query can only succeed against the schema that has
+// its column, so "the first one that works" needs no error-text parsing -- which
+// matters, because a failed `bd sql` reports the Dolt message on stdout, and that
+// text does not survive into the thrown error.
+//
+// The working schema is cached per database so a 1.0.x workspace does not fire
+// one failing query per load (each would land in the Dolt server log). A cached
+// choice that later fails is dropped and re-detected, e.g. after a bd upgrade.
+//
+// FAILURE IS NOT EMPTINESS. This used to catch everything and return an empty
+// map, so "the query failed" and "nothing here is blocked" were the same value.
+// That is how the column rename shipped to every bd >= 1.2 user with no
+// blockers shown and no error anywhere. Callers now get a result they can tell
+// apart: ok (possibly empty), unsupported (embedded mode), or error.
+export type BlocksDependenciesResult =
+  | { status: "ok"; map: Map<string, string[]> }
+  | { status: "unsupported"; reason: string }
+  | { status: "error"; error: BdLoadError }
 
-  try {
-    const sql = `SELECT issue_id, depends_on_id FROM dependencies WHERE type = 'blocks'`
-    const rows = isServerOnlyWithoutScaffold(options.db)
-      ? await serverSqlQuery<{ issue_id: string; depends_on_id: string }>(sql, options)
-      : await bdExec<Array<{ issue_id: string; depends_on_id: string }>>(["sql", sql], options)
-    if (!rows || rows.length === 0) return new Map()
+type BlocksSchema = "issue" | "legacy"
+const BLOCKS_SQL: Record<BlocksSchema, string> = {
+  // NULL depends_on_issue_id means the blocker is a wisp or an external ref,
+  // not an issue in this workspace, so there is nothing to show it as.
+  issue: `SELECT issue_id, depends_on_issue_id AS depends_on_id FROM dependencies WHERE type = 'blocks' AND depends_on_issue_id IS NOT NULL`,
+  legacy: `SELECT issue_id, depends_on_id FROM dependencies WHERE type = 'blocks'`,
+}
+const blocksSchemaByDb = new Map<string, BlocksSchema>()
 
-    const map = new Map<string, string[]>()
-    for (const row of rows) {
-      const existing = map.get(row.issue_id)
-      if (existing) {
-        existing.push(row.depends_on_id)
-      } else {
-        map.set(row.issue_id, [row.depends_on_id])
-      }
-    }
-    return map
-  } catch {
-    return new Map()
+/** Test hook: forget detected schemas. */
+export function __resetBlocksSchemaCache(): void {
+  blocksSchemaByDb.clear()
+}
+
+type BlocksRow = { issue_id: string; depends_on_id: string | null }
+
+async function runBlocksQuery(schema: BlocksSchema, options: BdOptions & { db: string }): Promise<BlocksRow[]> {
+  const sql = BLOCKS_SQL[schema]
+  const rows = isServerOnlyWithoutScaffold(options.db)
+    ? await serverSqlQuery<BlocksRow>(sql, options)
+    : await bdExec<BlocksRow[]>(["sql", sql], options)
+  // The old code reached its catch only via a TypeError from iterating a
+  // non-array. Say what actually happened instead.
+  if (!Array.isArray(rows)) throw new Error(`bd sql returned ${rows === null ? "null" : typeof rows}, not rows`)
+  return rows
+}
+
+// Returns a map: beadId -> IDs of the issues that block it.
+export async function getAllBlocksDependencies(options: BdOptions = {}): Promise<BlocksDependenciesResult> {
+  if (!options.db) return { status: "ok", map: new Map() }
+  if (isEmbeddedMode(options.db)) {
+    // Not "no blockers": bd refuses `bd sql` in embedded mode (bd 1.2.2:
+    // "'bd sql' is not yet supported in embedded mode").
+    return { status: "unsupported", reason: "bd sql is not supported in embedded mode" }
   }
+  const db = options.db
+  const cached = blocksSchemaByDb.get(db)
+  const order: BlocksSchema[] = cached ? [cached, cached === "issue" ? "legacy" : "issue"] : ["issue", "legacy"]
+
+  const failures: Array<{ schema: BlocksSchema; error: unknown }> = []
+  for (const schema of order) {
+    try {
+      const rows = await runBlocksQuery(schema, { ...options, db })
+      blocksSchemaByDb.set(db, schema)
+      const map = new Map<string, string[]>()
+      for (const row of rows) {
+        if (!row.depends_on_id) continue
+        const existing = map.get(row.issue_id)
+        if (existing) existing.push(row.depends_on_id)
+        else map.set(row.issue_id, [row.depends_on_id])
+      }
+      return { status: "ok", map }
+    } catch (error) {
+      failures.push({ schema, error })
+      if (cached === schema) blocksSchemaByDb.delete(db)
+    }
+  }
+
+  const detail = failures
+    .map((f) => `${f.schema}: ${f.error instanceof Error ? f.error.message : String(f.error)}`)
+    .join(" | ")
+  console.error(`[bd] blocks dependencies query failed for every known schema (${db}): ${detail}`)
+  return { status: "error", error: toBdLoadError(failures[0]?.error ?? new Error(detail)) }
 }
 
 // Validate that a configured workspace directory points to a database with the beads schema.

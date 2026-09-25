@@ -485,8 +485,13 @@ function BeadsEpicsViewer() {
     const loadId = ++blocksLoadIdRef.current
     const dbPath = currentWorkspace.databasePath
 
-    getBlocksDependencies(dbPath).then((blocksMap) => {
+    getBlocksDependencies(dbPath).then(({ blockedBy: blocksMap, degraded }) => {
       if (blocksLoadIdRef.current !== loadId) return // stale
+      // beadbox-01f.6: the server now says when blockedBy could not be computed
+      // (embedded mode, or a failed query) instead of returning an empty map that
+      // reads as "nothing is blocked". Surfacing it in the UI is a follow-up;
+      // until then it is at least visible in the devtools console.
+      if (degraded) console.warn(`[blocks] blocked-by unavailable (${degraded.reason}): ${degraded.message}`)
       if (Object.keys(blocksMap).length === 0) return
 
       setEpics((prev) => {
