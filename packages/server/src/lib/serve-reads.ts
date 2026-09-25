@@ -20,7 +20,7 @@ import { basename, dirname } from "node:path"
 import { resolveBdPath } from "./bd-paths"
 import { serveReadEligibility } from "./serve-eligibility"
 import { classifyServeFailure, ServeClient } from "./serve-http"
-import { ServeManager, sweepStaleServeDirs } from "./serve-manager"
+import { ServeManager, sweepStaleServeDirs, sweepStaleServeProxies } from "./serve-manager"
 import { probeBdVersion } from "./workspace-health"
 import { findWorkspaceByDbPath, type RegistryEntry, readRegistry } from "./workspace-registry"
 
@@ -80,6 +80,7 @@ function startInBackground(entry: RegistryEntry, state: WorkspaceServe): void {
     try {
       const handle = await m.get({ key: entry.id, workspaceDir: dirname(beadsDir), env: {} })
       state.client = await ServeClient.connect(handle, { beadsDir })
+      m.noteHealthy(entry.id)
     } catch (error) {
       onFailure(entry.id, state, error)
     } finally {
@@ -129,8 +130,13 @@ export async function tryServe<T>(dbPath: string | undefined, read: ServeRead<T>
 
 /** Sidecar start: remove token dirs a previous sidecar could not clean up. */
 export function sweepServeDirsAtStartup(): void {
-  const removed = sweepStaleServeDirs(undefined, manager?.liveTokenDirs() ?? new Set())
+  const live = manager?.liveTokenDirs() ?? new Set<string>()
+  const removed = sweepStaleServeDirs(undefined, live)
   if (removed.length) console.error(`[serve-reads] removed ${removed.length} stale serve token dir(s)`)
+  // Proxies a dead sidecar recorded but could not reap (serve-proxy.ts, R4).
+  void sweepStaleServeProxies(undefined, live).then((outcomes) => {
+    for (const o of outcomes) console.error(`[serve-reads] stale proxy ${o}`)
+  })
 }
 
 /** @internal tests only */

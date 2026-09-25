@@ -69,6 +69,14 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
     count: 1,
     why: "/bin/sh poll loop: the db path and bd path are quoted positionals ($2, $3), never spliced into the script (change-detector-shell-argv.security.test.ts). It runs in its own process group and dies with the sidecar on any exit path via stdin EOF (beadbox-db6, poll-child-lifetime.test.ts)",
   },
+  "lib/serve-proxy.ts::processTable::execFileSync": {
+    count: 1,
+    why: "fixed argv: ps -axww -o pid=,ppid=,uid=,lstart=,command= (a read-only process-table snapshot for the attributed proxy reap, beadbox-6x2 R1-R3); no input",
+  },
+  "lib/serve-proxy.ts::cwdOf::execFileSync": {
+    count: 1,
+    why: "fixed argv: lsof -a -p <pid> -d cwd -Fn, where pid is a number taken from our own ps snapshot (String of an integer, never text), to find a live bd serve's root (R3)",
+  },
   "lib/serve-manager.ts::spawnServeChild::spawn": {
     count: 1,
     why: "/bin/sh wrapper for bd serve (beadbox-6x2 L2): a constant script; the resolved bd path and our own mkdtemp token dir are quoted positionals ($1, $2), never spliced (serve-shell-argv.security.test.ts). bd argv is fixed: serve --addr 127.0.0.1:0 --auth-token-file <dir>/token. Minimal env (serveChildEnv). Dies with the sidecar via stdin EOF, which also removes the token dir (serve-lifetime.test.ts)",

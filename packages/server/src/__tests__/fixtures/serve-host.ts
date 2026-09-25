@@ -12,6 +12,10 @@ import { ServeManager } from "../../lib/serve-manager"
 const mode = process.env.HOST_MODE ?? "hang"
 const manager = new ServeManager({ bdPath: () => process.env.HOST_BD ?? "", tokenRoot: process.env.HOST_TOKEN_ROOT })
 const handle = await manager.get({ key: "ws", workspaceDir: process.env.HOST_WS ?? "", env: {} })
+if (process.env.HOST_NOTE_HEALTHY) {
+  await new Promise((r) => setTimeout(r, 500))
+  manager.noteHealthy("ws")
+}
 const [tokenDir] = [...manager.liveTokenDirs()]
 process.stdout.write(`READY ${JSON.stringify({ wrapperPid: handle.pid, url: handle.url, tokenDir })}\n`)
 

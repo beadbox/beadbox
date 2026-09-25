@@ -23,11 +23,21 @@
 
 import { type ChildProcess, spawn } from "node:child_process"
 import { randomBytes } from "node:crypto"
-import { chmodSync, lstatSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
+import {
+  canonical,
+  findOurProxy,
+  findServePid,
+  type ProxyRecord,
+  processTable,
+  reapRecordedProxy,
+} from "./serve-proxy"
 
 export const SERVE_DIR_PREFIX = "beadbox-serve-"
+/** A recorded proxy (serve-proxy.ts) waiting to be reaped; kept after the token is removed. */
+export const PROXY_RECORD = "proxy.json"
 const LISTENING = /^bd serve: listening on (http:\/\/127\.0\.0\.1:(\d{1,5}))$/
 const STARTUP_TIMEOUT_MS = 10_000
 const STOP_WAIT_MS = 5_000
@@ -70,7 +80,7 @@ export function buildServeShellArgs(bdPath: string, tokenDir: string): string[] 
 exec 3<&0 </dev/null
 BD="$1"
 TOKDIR="$2"
-cleanup() { case "\${TOKDIR##*/}" in ${SERVE_DIR_PREFIX}*) rm -rf -- "$TOKDIR" ;; esac; }
+cleanup() { case "\${TOKDIR##*/}" in ${SERVE_DIR_PREFIX}*) rm -f -- "$TOKDIR/token"; [ -e "$TOKDIR/${PROXY_RECORD}" ] || rm -rf -- "$TOKDIR" ;; esac; }
 ( while read -r _ <&3; do :; done; cleanup; kill -TERM -$$ 2>/dev/null || kill -TERM $$ ) &
 exec 3<&-
 "$BD" serve --addr 127.0.0.1:0 --auth-token-file "$TOKDIR/token" &
@@ -149,6 +159,7 @@ export function sweepStaleServeDirs(
     try {
       const st = lstatSync(path)
       if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== uid) continue
+      if (existsSync(join(path, PROXY_RECORD))) continue // sweepStaleServeProxies reaps it first
       rmSync(path, { recursive: true, force: true })
       removed.push(path)
     } catch {
@@ -158,11 +169,49 @@ export function sweepStaleServeDirs(
   return removed
 }
 
+/**
+ * The startup half of R4: for stale token dirs of DEAD sidecars that still
+ * hold a proxy record, reap that recorded proxy (R2 + R3 decide), then remove
+ * the dir. Same attribution rules as sweepStaleServeDirs.
+ */
+export async function sweepStaleServeProxies(
+  root: string = tmpdir(),
+  inUse: ReadonlySet<string> = new Set(),
+  uid: number = process.getuid?.() ?? -1,
+): Promise<string[]> {
+  const outcomes: string[] = []
+  let names: string[]
+  try {
+    names = readdirSync(root)
+  } catch {
+    return outcomes
+  }
+  for (const name of names) {
+    const owner = OWNER_PID.exec(name)
+    const path = join(root, name)
+    if (!owner || inUse.has(path) || processAlive(Number(owner[1]))) continue
+    try {
+      const st = lstatSync(path)
+      if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== uid) continue
+      const recFile = join(path, PROXY_RECORD)
+      if (!existsSync(recFile)) continue
+      const rec = JSON.parse(readFileSync(recFile, "utf-8")) as ProxyRecord
+      outcomes.push(`${rec.pid}: ${await reapRecordedProxy(rec)}`)
+      rmSync(path, { recursive: true, force: true })
+    } catch {
+      /* unreadable record or raced away: leave it */
+    }
+  }
+  return outcomes
+}
+
 interface Child {
   handle: ServeHandle
   process: ChildProcess
   tokenDir: string
+  workspaceDir: string
   lastUsed: number
+  proxy: ProxyRecord | null
 }
 
 export interface ServeManagerOptions {
@@ -214,10 +263,18 @@ export class ServeManager {
     const child = this.children.get(key)
     if (!child) return
     this.children.delete(key)
+    recordProxy(child)
     await endChild(child.process)
-    // The wrapper removes the token dir on a normal stop. If the stop had to
-    // SIGKILL its group, the wrapper died first, so remove it here too.
-    removeTokenDir(child.tokenDir)
+    // The exit handler also runs finishChild; both are idempotent. Awaiting it
+    // here means a stop returns only once the proxy decision is made and the
+    // token dir is gone (the wrapper may have been SIGKILLed before it could).
+    await finishChild(child)
+  }
+
+  /** Called once reads are flowing: the proxy exists by now, so record it (R1). */
+  noteHealthy(key: string): void {
+    const child = this.children.get(key)
+    if (child) recordProxy(child)
   }
 
   async stopAll(): Promise<void> {
@@ -253,7 +310,9 @@ export class ServeManager {
         handle: { key: target.key, url, token, pid: proc.pid },
         process: proc,
         tokenDir: dir,
+        workspaceDir: target.workspaceDir,
         lastUsed: this.now(),
+        proxy: null,
       }
       // The moment the child exits, for any reason: drop its address, so no
       // caller can reach a port another process may since have taken, and
@@ -262,9 +321,10 @@ export class ServeManager {
       // outside).
       proc.once("exit", () => {
         if (this.children.get(target.key) === child) this.children.delete(target.key)
-        removeTokenDir(dir)
+        void finishChild(child)
       })
       this.children.set(target.key, child)
+      recordProxy(child)
       return child
     } catch (error) {
       await endChild(proc)
@@ -286,6 +346,45 @@ function spawnServeChild(bdPath: string, tokenDir: string, target: ServeTarget):
     stdio: ["pipe", "pipe", "ignore"],
     detached: true,
   })
+}
+
+/**
+ * R1: record the db-proxy-child whose parent is OUR bd serve, while that
+ * serve is still alive. Best effort and idempotent; persisted beside the
+ * token so a sidecar that dies can still have it reaped at the next start.
+ */
+function recordProxy(child: Child): void {
+  if (child.proxy) return
+  try {
+    const rows = processTable()
+    const servePid = findServePid(rows, child.handle.pid)
+    const root = canonical(join(child.workspaceDir, ".beads", "dolt"))
+    if (!servePid || !root) return
+    const rec = findOurProxy(rows, servePid, root)
+    if (!rec) return
+    child.proxy = rec
+    writeFileSync(join(child.tokenDir, PROXY_RECORD), JSON.stringify(rec), { mode: 0o600 })
+  } catch {
+    /* no record: nothing of ours to reap */
+  }
+}
+
+const finishing = new WeakMap<Child, Promise<void>>()
+
+/** After our serve is gone: reap our recorded proxy (R2-R4 decide), then remove the token dir. */
+function finishChild(child: Child): Promise<void> {
+  let done = finishing.get(child)
+  if (!done) {
+    done = (async () => {
+      if (child.proxy) {
+        const outcome = await reapRecordedProxy(child.proxy).catch((e) => `error: ${String(e)}`)
+        console.error(`[serve-manager] proxy ${child.proxy.pid} for ${child.handle.key}: ${outcome}`)
+      }
+      removeTokenDir(child.tokenDir)
+    })()
+    finishing.set(child, done)
+  }
+  return done
 }
 
 /** Remove one of our token dirs; refuses any path whose own name lacks our prefix. */
