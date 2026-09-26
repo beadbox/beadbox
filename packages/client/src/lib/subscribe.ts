@@ -125,7 +125,9 @@ export function useSubscriptionChangeSignal(): number {
 // stretch with no heartbeat and no real change means the detector is not
 // working, whatever the reason (hung bd, dead child, gated sidecar loop,
 // broken pipe). The WebView's timers are not gated, so this is the one place
-// every silent path becomes visible. Embedded mode never heartbeats, so the
+// every silent path becomes visible. The watchdog ARMS on a first heartbeat or
+// on a first polling_error / reconnecting (beadbox-cvp: a loop that fails from
+// its first poll never heartbeats). Embedded mode emits none of these, so the
 // watchdog never arms there. reconnecting / polling_error do NOT count as
 // healthy: a loop stuck in an error streak still emits them.
 // ---------------------------------------------------------------------------
@@ -438,11 +440,19 @@ export function useChangeSubscription(
             const payload = parsed.payload
             const healthy =
               payload.type === "heartbeat" ||
+              payload.type === "recovered" ||
               (payload.type === "change" && payload.trigger !== "initial")
             if (healthy) {
               if (payload.type === "heartbeat") armed = true
               lastHealthyAt = Date.now()
               if (liveUpdatesPaused) setLiveUpdatesPaused(false, null)
+            } else if (payload.type === "polling_error" || payload.type === "reconnecting") {
+              // beadbox-cvp: a poll loop failing from its FIRST poll never
+              // heartbeats, so waiting for a heartbeat to arm left it invisible.
+              // A failure report arms the watchdog without refreshing
+              // lastHealthyAt: a stream broken from birth pauses within
+              // pauseAfterMs of the subscription's start.
+              armed = true
             }
             onEvent(payload)
           }

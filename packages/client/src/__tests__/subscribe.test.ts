@@ -580,6 +580,46 @@ describe("live-updates liveness (beadbox-01f.2)", () => {
     expect(rpcMocks.start).toHaveBeenCalledTimes(1)
   })
 
+  // beadbox-cvp: a poll loop that fails from its FIRST poll never heartbeats,
+  // so a watchdog armed only by a heartbeat never armed: broken from birth and
+  // invisible. polling_error / reconnecting are evidence of a server-mode
+  // detector that isn't healthy, so they arm it too.
+  test("a stream that fails from birth (polling_error, never a heartbeat) is paused", async () => {
+    await mount()
+    await act(async () => listenMocks.fire(line({ type: "change", timestamp: 1, trigger: "initial" })))
+    await act(async () => listenMocks.fire(line({ type: "polling_error" })))
+    await act(async () => {
+      await sleep(450)
+    })
+    await flushMicrotasks()
+    expect(paused()).toBe(true)
+    // Keeps the one-resubscribe-per-pause rule.
+    expect(rpcMocks.start).toHaveBeenCalledTimes(2)
+  })
+
+  test("reconnecting events alone (no heartbeat) also arm the pause", async () => {
+    await mount()
+    await act(async () =>
+      listenMocks.fire(line({ type: "reconnecting", attempt_number: 4, backoff_ms: 5000 })),
+    )
+    await act(async () => {
+      await sleep(450)
+    })
+    expect(paused()).toBe(true)
+  })
+
+  test("recovered clears a pause", async () => {
+    await mount()
+    await act(async () => listenMocks.fire(line({ type: "polling_error" })))
+    await act(async () => {
+      await sleep(450)
+    })
+    await flushMicrotasks()
+    expect(paused()).toBe(true)
+    await act(async () => listenMocks.fire(line({ type: "recovered" })))
+    expect(paused()).toBe(false)
+  })
+
   test("a heartbeat clears the pause; the new subscription's synthetic initial change does not", async () => {
     await mount()
     await act(async () => listenMocks.fire(line({ type: "heartbeat" })))
