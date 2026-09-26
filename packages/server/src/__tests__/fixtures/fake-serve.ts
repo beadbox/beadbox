@@ -3,10 +3,12 @@
 // from the workspace directory. It serves rows titled "from-serve" so a test
 // can tell which path answered, writes its pid to ./fake-serve.pid, and reads
 // ./fake-serve-mode on EVERY request so a test can change its behaviour:
-//   normal | slow-start (read at startup) | garbage | identity | 503 | incomplete | deps-stripped
-// Unknown or missing mode = normal.
+//   normal | gated-start (read at startup) | garbage | identity | 503 | incomplete | deps-stripped
+// Unknown or missing mode = normal. gated-start: the fake does not listen
+// until the test creates ./fake-serve-release, so a test can hold serve
+// "not ready" for as long as it needs, however slow the machine is.
 
-import { readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 const args = process.argv.slice(2)
@@ -25,7 +27,10 @@ const row = (id: string) => ({ id, title: `from-serve ${id}`, status: "open", pr
 const json = (b: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(typeof b === "string" ? b : JSON.stringify(b), { status, headers: { "content-type": "application/json", ...headers } })
 
-if (mode() === "slow-start") await Bun.sleep(1500)
+if (mode() === "gated-start") {
+  const release = join(cwd, "fake-serve-release")
+  for (let i = 0; i < 1200 && !existsSync(release); i++) await Bun.sleep(50)
+}
 writeFileSync(join(cwd, "fake-serve.pid"), String(process.pid))
 
 const server = Bun.serve({

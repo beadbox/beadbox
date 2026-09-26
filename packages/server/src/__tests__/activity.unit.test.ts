@@ -8,12 +8,18 @@
 // Tests skip cleanly when bd is unavailable (CI without bd installed); the
 // parity runner in P1.7 is the gating coverage for end-to-end behavior.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getActivityEvents, getActivityEventsSince, listBeadsByStatus } from "../handlers/activity"
+
+// Every call here runs the real bd, which may start the workspace's Dolt
+// server; on a loaded machine (load average 25-50) one call can exceed bun's
+// 5 s default. The assertions are about the result, never the time taken, so
+// a larger budget only bounds a hang. (File-scoped: other files keep 5 s.)
+setDefaultTimeout(30_000)
 
 let bdAvailable = true
 try {

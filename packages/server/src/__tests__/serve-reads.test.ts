@@ -6,7 +6,7 @@
 //  - sec: no read waits for a serve start.
 //  - Any serve failure makes the read use the CLI; never an empty result.
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -15,6 +15,18 @@ import { getCustomStatusList } from "../handlers/beads"
 import { getBeadDetail, getBlocksDependencies, getEpics } from "../handlers/epics"
 import { __resetServeReads, __serveReadsState, __settleServeStarts } from "../lib/serve-reads"
 import { invalidateEpicCache } from "../lib/epic-cache"
+
+// Load-robust, not load-dependent: every assertion here is about WHICH path
+// answered and what it returned, never about how long it took. A test starts
+// a real child (the fake serve) and a stop reaps it, which on a machine at a
+// load average of 25-50 can take well over bun's 5 s default; the budgets
+// below only bound a hang.
+const TEST_BUDGET_MS = 30_000
+const HOOK_BUDGET_MS = 30_000
+setDefaultTimeout(TEST_BUDGET_MS)
+// Bun's hooks accept a timeout at runtime; the pinned types don't.
+const beforeEachT = beforeEach as unknown as (fn: () => unknown, timeoutMs?: number) => void
+const afterEachT = afterEach as unknown as (fn: () => unknown, timeoutMs?: number) => void
 
 const FAKE_SERVE = join(import.meta.dir, "fixtures", "fake-serve.ts")
 const ID = "22222222-2222-4222-8222-222222222222"
@@ -63,6 +75,14 @@ function registry(serveReads: unknown): void {
   writeFileSync(process.env.BEADBOX_REGISTRY_PATH as string, JSON.stringify({ version: 2, activeWorkspace: ID, workspaces: [entry] }))
 }
 
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
 const serveSpawns = () => (existsSync(log) ? readFileSync(log, "utf-8").split("\n").filter((l) => l === "serve").length : 0)
 const mode = (m: string) => writeFileSync(join(ws, "fake-serve-mode"), m)
 
@@ -72,7 +92,7 @@ async function warm(): Promise<void> {
   await __settleServeStarts()
 }
 
-beforeEach(async () => {
+beforeEachT(async () => {
   root = mkdtempSync(join(tmpdir(), "beadbox-serve-reads-"))
   ws = join(root, "ws")
   beadsDir = join(ws, ".beads")
@@ -84,9 +104,9 @@ beforeEach(async () => {
   __resetBdPathCache()
   await __resetServeReads()
   invalidateEpicCache()
-})
+}, HOOK_BUDGET_MS)
 
-afterEach(async () => {
+afterEachT(async () => {
   await __resetServeReads()
   invalidateEpicCache()
   if (saved.registry === undefined) delete process.env.BEADBOX_REGISTRY_PATH
@@ -95,7 +115,7 @@ afterEach(async () => {
   else process.env.BD_PATH = saved.bd
   __resetBdPathCache()
   rmSync(root, { recursive: true, force: true })
-})
+}, HOOK_BUDGET_MS)
 
 describe("QAM: only a literal true changes behaviour, through the real handlers", () => {
   for (const value of ["<absent>", false, "true", 1, {}, "yes", null]) {
@@ -125,11 +145,25 @@ describe("QAM: only a literal true changes behaviour, through the real handlers"
 describe("sec: no read waits for a serve start", () => {
   test("a slow serve start never delays a read; the CLI answers until serve is ready", async () => {
     registry(true)
-    mode("slow-start") // the fake prints its listening line after 1.5 s
-    const t0 = performance.now()
-    expect(await getCustomStatusList(beadsDir)).toEqual(["cli-a", "cli-b"])
-    expect(await getCustomStatusList(beadsDir)).toEqual(["cli-a", "cli-b"])
-    expect(performance.now() - t0).toBeLessThan(1000)
+    // Serve cannot become ready until the test says so. Reads that return
+    // while it is held provably did not wait for it: no wall-clock bound, so
+    // a loaded machine can't fail this and a fast one can't pass it by luck.
+    mode("gated-start")
+    const release = join(ws, "fake-serve-release")
+    const reads = (async () => [await getCustomStatusList(beadsDir), await getCustomStatusList(beadsDir)])()
+    const outcome = await Promise.race([reads, Bun.sleep(TEST_BUDGET_MS / 2).then(() => "a read waited for serve")])
+    expect(outcome).toEqual([
+      ["cli-a", "cli-b"],
+      ["cli-a", "cli-b"],
+    ])
+    expect(existsSync(release)).toBe(false) // serve was never allowed to be ready
+    const state = [...__serveReadsState().workspaces.values()][0]
+    expect(state?.client).toBeFalsy()
+    // The decisive check, and not a clock: the start is STILL in progress when
+    // both reads have answered. A read that waited for the start could only
+    // have answered after the start ended (here, only by failing).
+    expect(state?.starting).toBeTruthy()
+    writeFileSync(release, "")
     await __settleServeStarts()
     expect(await getCustomStatusList(beadsDir)).toEqual(["serve-a", "serve-b"])
   })
@@ -189,7 +223,9 @@ describe("any serve failure reads through the CLI, never empty", () => {
     await warm()
     const pid = Number(readFileSync(join(ws, "fake-serve.pid"), "utf-8"))
     process.kill(pid, "SIGKILL")
-    await Bun.sleep(200)
+    // Wait until the child is really gone (a fixed sleep is a guess under load).
+    for (let i = 0; i < 200 && alive(pid); i++) await Bun.sleep(50)
+    expect(alive(pid)).toBe(false)
     expect(await getCustomStatusList(beadsDir)).toEqual(["cli-a", "cli-b"])
     await getCustomStatusList(beadsDir)
     await __settleServeStarts()
