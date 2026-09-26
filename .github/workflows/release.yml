@@ -1798,7 +1798,12 @@ jobs:
           echo "Listing release assets..."
           # Capture full assets (name + id) so we can resolve per-bundle asset
           # ids; assets.txt keeps the name-only list for the fetch_sig grep.
-          gh release view "$TAG" --json assets --repo "$REPO" > "$WORK/assets.json"
+          # beadbox-z3j (M1): the release is a DRAFT here, so every call works on
+          # its release ID, never its tag. Exactly one object must carry the tag.
+          gh api --paginate "repos/$REPO/releases?per_page=100" -q ".[] | select(.tag_name == \"$TAG\") | .id" > "$WORK/ids"
+          [ "$(wc -l < "$WORK/ids")" -eq 1 ] || { echo "::error::expected 1 release object for $TAG, found $(wc -l < "$WORK/ids")"; exit 1; }
+          REL_ID=$(cat "$WORK/ids")
+          gh api --paginate "repos/$REPO/releases/$REL_ID/assets?per_page=100" | jq -s '{assets: add}' > "$WORK/assets.json"
           jq -r '.assets[].name' "$WORK/assets.json" > "$WORK/assets.txt"
           cat "$WORK/assets.txt"
 
@@ -1806,7 +1811,8 @@ jobs:
           fetch_sig() {
             local sig_name="$1"
             if grep -qx "$sig_name" "$WORK/assets.txt"; then
-              gh release download "$TAG" --pattern "$sig_name" --dir "$WORK" --clobber --repo "$REPO" >/dev/null 2>&1
+              sig_id=$(jq -r --arg n "$sig_name" '.assets[] | select(.name == $n) | .id' "$WORK/assets.json")
+              gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$sig_id" > "$WORK/$sig_name"
               if [ -f "$WORK/$sig_name" ]; then
                 cat "$WORK/$sig_name"
                 return 0
@@ -1882,17 +1888,18 @@ jobs:
           # newline is the only difference tolerated.
           NOTES_FILE="release-notes/$TAG.md"
           if [ "${{ needs.validate-tag.outputs.is_final }}" = "true" ] && [ -f "$NOTES_FILE" ]; then
-            gh api --paginate "repos/$REPO/releases?per_page=100" -q ".[] | select(.tag_name == \"$TAG\") | .id" > "$WORK/ids"
-            [ "$(wc -l < "$WORK/ids")" -eq 1 ] || { echo "::error::expected 1 release object for $TAG, found $(wc -l < "$WORK/ids")"; exit 1; }
-            REL_ID=$(cat "$WORK/ids")
-            jq -n --rawfile body "$NOTES_FILE" '{body: $body}' > "$WORK/body.json"
+            # A PATCH to a DRAFT without tag_name makes GitHub rebind it to
+            # "untagged-…" (v0.27.2, 2026-09-26), so every PATCH carries the tag.
+            jq -n --arg tag "$TAG" --rawfile body "$NOTES_FILE" '{tag_name: $tag, body: $body}' > "$WORK/body.json"
             gh api -X PATCH "repos/$REPO/releases/$REL_ID" --input "$WORK/body.json" > /dev/null
             gh api "repos/$REPO/releases/$REL_ID" > "$WORK/release.json"
+            jq -e --arg tag "$TAG" '.tag_name == $tag' "$WORK/release.json" > /dev/null \
+              || { echo "::error::release $REL_ID lost its tag: tag_name is '$(jq -r .tag_name "$WORK/release.json")', expected $TAG"; exit 1; }
             jq -e --rawfile body "$NOTES_FILE" '(.body | rtrimstr("\n")) == ($body | rtrimstr("\n"))' "$WORK/release.json" > /dev/null \
               || { echo "::error::release body read back differs from $NOTES_FILE"; exit 1; }
             cp "$NOTES_FILE" "$WORK/notes.txt"
           else
-            gh release view "$TAG" --json body --repo "$REPO" | jq -j '.body' > "$WORK/notes.txt"
+            gh api "repos/$REPO/releases/$REL_ID" | jq -j '.body' > "$WORK/notes.txt"
           fi
           PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -1907,7 +1914,13 @@ jobs:
           echo "Generated latest.json:"
           cat "$WORK/latest.json" | jq .
 
-          gh release upload "$TAG" "$WORK/latest.json" --clobber --repo "$REPO"
+          old=$(jq -r '.assets[] | select(.name == "latest.json") | .id' "$WORK/assets.json")
+          [ -z "$old" ] || gh api -X DELETE "repos/$REPO/releases/assets/$old"
+          gh api -X POST -H "Content-Type: application/octet-stream" \
+            "https://uploads.github.com/repos/$REPO/releases/$REL_ID/assets?name=latest.json" \
+            --input "$WORK/latest.json" > /dev/null
+          gh api "repos/$REPO/releases/$REL_ID" -q .tag_name | grep -qxF "$TAG" \
+            || { echo "::error::release $REL_ID no longer carries tag $TAG"; exit 1; }
 
   # ── Promote draft release ──
 
@@ -2014,8 +2027,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "${RELEASE_TAG}" --draft=false \
-            --repo "${{ github.repository }}"
+          # By release ID and WITH tag_name (a draft is not tag-addressable, and a
+          # PATCH without tag_name can rebind it to "untagged-…").
+          REPO="${{ github.repository }}"
+          gh api --paginate "repos/$REPO/releases?per_page=100" -q ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id" > ids.txt
+          [ "$(wc -l < ids.txt)" -eq 1 ] || { echo "::error::expected 1 release object for $RELEASE_TAG, found $(wc -l < ids.txt)"; exit 1; }
+          gh api -X PATCH "repos/$REPO/releases/$(cat ids.txt)" -f tag_name="$RELEASE_TAG" -F draft=false \
+            -q 'select(.tag_name == "'"$RELEASE_TAG"'" and .draft == false) | "published \(.tag_name)"' | grep -q "published" \
+            || { echo "::error::publishing $RELEASE_TAG did not leave it published under its tag"; exit 1; }
       - name: Verify the published updater manifest (promote path)
         if: needs.validate-tag.outputs.is_final == 'true' && !inputs.rebuild_final
         env:
