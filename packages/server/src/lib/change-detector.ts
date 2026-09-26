@@ -51,13 +51,14 @@ import { type ChildProcess, execFile, spawn } from "child_process"
 import { createHash } from "crypto"
 import { existsSync, type FSWatcher, watch } from "fs"
 import { readFile } from "fs/promises"
-import { basename, dirname, join, resolve } from "path"
+import { basename, dirname, join } from "path"
 import { SUBSCRIPTION_PREFIX, type SubscriptionEvent } from "../subscribe-protocol"
 import { buildServerEnv, getWorkspacePassword } from "./bd"
 import { resolveBdPath } from "./bd-paths"
 import { beadsDirFromDatabasePath } from "./beadtrain-fs"
 import { drainPool, getPool, PortFileMissingError } from "./dolt-pool"
-import { portFilePath, readPortFile, readPortFileSync } from "./dolt-port-file"
+import { readPortFileSync } from "./dolt-port-file"
+import { resolveDoltMode } from "./dolt-metadata"
 import { getDoltDir, getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import { beadsDirOf, isWorkspacePresent } from "./workspace-presence"
 import { findExternalWorkspaceByDbPath, parseServerUri } from "./workspace-registry"
@@ -117,39 +118,8 @@ export interface ChangeDetector {
 }
 
 export async function readMetadataMode(dbPath: string): Promise<DoltMode> {
-  if (dbPath.startsWith("server://")) return "server"
-  if (findExternalWorkspaceByDbPath(dbPath)) return "server"
-
-  try {
-    const resolved = resolve(dbPath)
-    const beadsDir = basename(resolved) === ".beads" ? resolved : dirname(resolved)
-
-    const portFile = await readPortFile(beadsDir)
-    if (portFile.status === "ok") return "server"
-    if (portFile.status === "unreadable") {
-      console.warn(
-        `[change-detector] failed to read ${portFilePath(beadsDir)}: code=${portFile.error.code}, ${portFile.error.message}`,
-      )
-    }
-
-    const metaPath = join(beadsDir, "metadata.json")
-    const content = await readFile(metaPath, "utf-8")
-    const meta = JSON.parse(content)
-    return meta.dolt_mode === "server" ? "server" : "embedded"
-  } catch (err: unknown) {
-    if (
-      err &&
-      typeof err === "object" &&
-      "code" in err &&
-      (err as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
-      return "embedded"
-    }
-    console.warn(
-      `[change-detector] metadata.json exists but could not be parsed for ${dbPath}, falling back to embedded mode`,
-    )
-    return "embedded"
-  }
+  // beadbox-dr6: one oracle for the whole sidecar (metadata dolt_mode wins).
+  return resolveDoltMode(dbPath)
 }
 
 // Signal source migration history lives in dolt-write-marker.ts. Current

@@ -43,6 +43,7 @@ import type {
   MolProgressRaw,
   ServerDatabase,
 } from "./types"
+import { resolveDoltMode } from "./dolt-metadata"
 import { readOnlyQuery } from "./read-only-query"
 import { isWorkspacePresent, workspaceMissingError } from "./workspace-presence"
 import {
@@ -345,26 +346,8 @@ function readDoltPort(dbPath: string): string | undefined {
 // of whether a server happens to be running. We must match that semantic
 // or our guard misfires (820 events, 22 users on bb-yoof).
 export function isEmbeddedMode(dbPath: string): boolean {
-  if (dbPath.startsWith("server://")) return false
-  const beadsDir = resolveBeadsDir(dbPath)
-
-  // Priority 1: explicit dolt_mode in metadata.json. Trust the user's
-  // configured intent over runtime artifacts.
-  try {
-    const meta = JSON.parse(readFileSync(join(beadsDir, "metadata.json"), "utf-8"))
-    if (meta.dolt_mode === "embedded") return true
-    if (meta.dolt_mode === "server") return false
-    // dolt_mode field absent: fall through to port file detection
-  } catch {
-    // metadata.json missing or unparseable: fall through to port file detection
-  }
-
-  // Priority 2 (fallback): port file presence indicates a server was
-  // configured. Only consulted when metadata doesn't specify dolt_mode.
-  if (readPortFileSync(beadsDir).status === "ok") return false
-
-  // Default: no metadata, no port file -> embedded (fresh workspace)
-  return true
+  // beadbox-dr6: one oracle for the whole sidecar (metadata dolt_mode wins).
+  return resolveDoltMode(dbPath) === "embedded"
 }
 
 // Embedded-mode cache fingerprint. Hashes the workspace's canonical

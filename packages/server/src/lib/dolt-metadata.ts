@@ -12,53 +12,57 @@
 // collapse this and lib/the legacy ws transport module's readMetadataMode into a single source
 // of truth (likely this one, since the main app's the legacy ws transport goes away).
 
-import { readFile } from "fs/promises"
+import { readFileSync } from "fs"
 import { basename, dirname, join, resolve } from "path"
-import { portFilePath, readPortFile } from "./dolt-port-file"
+import { portFilePath, readPortFileSync } from "./dolt-port-file"
+import { findExternalWorkspaceByDbPath } from "./workspace-registry"
 
 export type DoltMode = "embedded" | "server"
 
 /**
- * Detect whether a workspace runs Dolt embedded (in-process) or as a server.
- *
- * Detection cascade:
- *   1. URI prefix `server://` -> always server mode.
- *   2. `.beads/dolt-server.port` exists with a valid port -> server mode.
- *   3. `.beads/metadata.json` has `dolt_mode === "server"` -> server mode.
- *   4. Anything else (including missing files / unparseable JSON) -> embedded.
+ * THE mode oracle (beadbox-dr6). Every "embedded or server?" question in the
+ * sidecar answers through this, so the change detector, the handlers and bd.ts
+ * can never disagree. Order, which is bd's own rule (bd refuses `bd sql` when
+ * metadata says embedded, whatever port file exists):
+ *   1. `server://` URI -> server.
+ *   2. `.beads/metadata.json` with an explicit `dolt_mode` of "embedded" or
+ *      "server" -> that. It WINS over any port file or registry entry.
+ *   3. No explicit metadata mode: an external registry entry, or a valid
+ *      `.beads/dolt-server.port`, -> server.
+ *   4. Otherwise -> embedded.
+ * A port file left beside an embedded store (for example by a server that bd
+ * auto-started while the metadata was briefly server-mode) no longer turns an
+ * embedded workspace into a server one.
  */
-export async function readMetadataMode(dbPath: string): Promise<DoltMode> {
-  // Server-only workspace URIs are always server mode
+export function resolveDoltMode(dbPath: string): DoltMode {
   if (dbPath.startsWith("server://")) return "server"
+  const resolved = resolve(dbPath)
+  const beadsDir = basename(resolved) === ".beads" ? resolved : dirname(resolved)
 
   try {
-    const resolved = resolve(dbPath)
-    const beadsDir = basename(resolved) === ".beads" ? resolved : dirname(resolved)
-
-    const portFile = await readPortFile(beadsDir)
-    if (portFile.status === "ok") return "server"
-    if (portFile.status === "unreadable") {
+    const meta = JSON.parse(readFileSync(join(beadsDir, "metadata.json"), "utf-8"))
+    if (meta?.dolt_mode === "embedded" || meta?.dolt_mode === "server") return meta.dolt_mode
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code
+    if (code !== "ENOENT") {
       process.stderr.write(
-        `[dolt-metadata] failed to read ${portFilePath(beadsDir)}: code=${portFile.error.code}, ${portFile.error.message}\n`,
+        `[dolt-metadata] metadata.json unreadable or unparseable for ${dbPath}; using port file / registry\n`,
       )
     }
-
-    const metaPath = join(beadsDir, "metadata.json")
-    const content = await readFile(metaPath, "utf-8")
-    const meta = JSON.parse(content)
-    return meta.dolt_mode === "server" ? "server" : "embedded"
-  } catch (err: unknown) {
-    if (
-      err &&
-      typeof err === "object" &&
-      "code" in err &&
-      (err as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
-      return "embedded"
-    }
-    process.stderr.write(
-      `[dolt-metadata] metadata.json exists but could not be parsed for ${dbPath}, falling back to embedded mode\n`,
-    )
-    return "embedded"
   }
+
+  if (findExternalWorkspaceByDbPath(dbPath)) return "server"
+  const portFile = readPortFileSync(beadsDir)
+  if (portFile.status === "ok") return "server"
+  if (portFile.status === "unreadable") {
+    process.stderr.write(
+      `[dolt-metadata] failed to read ${portFilePath(beadsDir)}: code=${portFile.error.code}, ${portFile.error.message}\n`,
+    )
+  }
+  return "embedded"
+}
+
+/** Async form kept for existing callers; same answer as resolveDoltMode. */
+export async function readMetadataMode(dbPath: string): Promise<DoltMode> {
+  return resolveDoltMode(dbPath)
 }
