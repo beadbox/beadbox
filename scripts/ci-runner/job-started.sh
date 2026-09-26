@@ -14,6 +14,12 @@
 # Allowlist only, exact comparisons, fail closed: any unset value, any
 # disagreement, or any error refuses. The only `exit 0` is the last line.
 set -euo pipefail
+# The hook's own commands never come from the job's PATH: that PATH is one of
+# the things it checks (H0), so it is captured first and replaced by the
+# system dirs for the hook itself.
+JOB_PATH=${PATH-}
+PATH=/usr/bin:/bin
+readonly HOOK_DIR="${BASH_SOURCE[0]%/*}"
 
 readonly SHA_RE='^[0-9a-f]{40}$'
 # The runner user's home, fixed at install time (not taken from the job's env).
@@ -37,13 +43,21 @@ trap 'refuse "hook error at line $LINENO"' ERR
 # The table of admissible jobs, shared with the runner picker. Installed
 # root-owned beside this hook; a missing or broken copy refuses (ERR trap).
 # shellcheck source=scripts/ci-runner/admissible.sh
-source "$(dirname "${BASH_SOURCE[0]}")/admissible.sh"
+source "$HOOK_DIR/admissible.sh"
+# shellcheck source=scripts/ci-runner/trusted-path.sh
+source "$HOOK_DIR/trusted-path.sh"
 readonly REPO="$ADMISSIBLE_REPO"
 
 for v in GITHUB_REPOSITORY GITHUB_EVENT_NAME GITHUB_REF GITHUB_WORKFLOW_REF \
-  GITHUB_WORKFLOW_SHA GITHUB_SHA GITHUB_EVENT_PATH GITHUB_WORKSPACE; do
+  GITHUB_WORKFLOW_SHA GITHUB_SHA GITHUB_EVENT_PATH GITHUB_WORKSPACE JOB_PATH; do
   [ -n "${!v-}" ] || refuse "$v is unset or empty"
 done
+
+# H0: every program the job can reach through PATH (git for checkout, first
+# of all) comes from a directory no other account on this machine can change.
+# The runner's own dirs are skipped: they are rebuilt or reset every cycle.
+why=$(untrusted_path_entries "$JOB_PATH" "$RUNNER_HOME" -- root)
+[ -z "$why" ] || refuse "untrusted PATH: $why"
 
 # H1-H4: this repository, and an event, ref and workflow ref that match one
 # row of the admissible table exactly (admissible.sh): a release tag through

@@ -6,6 +6,7 @@
 # keychain the job added to the search list, and the work dir. It never fails
 # the job; what it could not remove is logged.
 set -uo pipefail
+PATH=/usr/bin:/bin  # its own commands never come from the job's PATH
 
 readonly RUNNER_HOME="/Users/beadbox-ci"
 readonly RUNNER_WORK="$RUNNER_HOME/actions-runner/_work"

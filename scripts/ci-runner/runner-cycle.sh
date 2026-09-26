@@ -29,6 +29,8 @@ readonly RUNNER_HOME="/Users/$RUNNER_USER"
 readonly RUNNER_DIR="$RUNNER_HOME/actions-runner"
 readonly LIBEXEC="/usr/local/libexec/beadbox-runner"   # root:wheel 0755
 readonly TEMPLATE="$LIBEXEC/runner-template"          # pinned runner release, root-owned
+# The job's PATH holds only root-owned dirs: $LIBEXEC/bin (gh, pinned) and the
+# system's. Homebrew and /usr/local/bin are writable by other accounts here.
 # root 0600, one line: "Authorization: Bearer <token>" (Administration
 # read/write on $REPO only). Read by curl as a header file, never put on a
 # command line: macOS shows every user's process arguments.
@@ -127,7 +129,7 @@ main() {
     set +e
     /usr/bin/sudo -u "$RUNNER_USER" -H /usr/bin/env -i \
       HOME="$RUNNER_HOME" USER="$RUNNER_USER" LOGNAME="$RUNNER_USER" \
-      PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+      PATH="$LIBEXEC/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
       LANG=en_US.UTF-8 \
       /bin/bash -c 'cd "$1" || exit 1
         ACTIONS_RUNNER_INPUT_JITCONFIG=$(cat .jitconfig) || exit 1

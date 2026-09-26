@@ -407,12 +407,10 @@ jobs:
         run: |
           set -euo pipefail
           TOOLS=/usr/local/libexec/beadbox-runner/rust
-          for d in "$TOOLS" "$TOOLS/rustup" "$TOOLS/cargo/bin"; do
-            if [ ! -d "$d" ] || [ "$(stat -f %Su "$d")" != root ] || [ -w "$d" ]; then
-              echo "::error::$d must exist, be owned by root and not be writable by this job"
-              exit 1
-            fi
-          done
+          # Every PATH entry this job will use and the whole toolchain: owned by
+          # root, no group or other write, ancestors included. Not only "can
+          # this job write it", but "can any other account on the machine".
+          bash scripts/ci-runner/check-runner-path.sh "$TOOLS/cargo/bin:$PATH" "$TOOLS"
           mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/bun-cache"
           {
             echo "RUSTUP_HOME=$TOOLS/rustup"

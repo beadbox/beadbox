@@ -14,6 +14,10 @@ mkdir -p "$WORK/_temp/_github_workflow" "$WORK/beadbox/beadbox"
 sed "s|^readonly RUNNER_HOME=.*|readonly RUNNER_HOME=\"$HOME_DIR\"|" "$HOOK_SRC" > "$T/hook.sh"
 # The hook reads the admissible table from its own directory.
 cp "$(dirname "$HOOK_SRC")/admissible.sh" "$T/admissible.sh"
+cp "$(dirname "$HOOK_SRC")/trusted-path.sh" "$T/trusted-path.sh"
+# A PATH of root-owned, non-symlinked system dirs (on merged-/usr Linux /bin is
+# a symlink, which the hook rightly refuses).
+if [ -L /bin ]; then SYS_PATH=/usr/bin; else SYS_PATH=/usr/bin:/bin; fi
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 grep -q "^readonly RUNNER_HOME=\"$HOME_DIR\"" "$T/hook.sh" || { echo "harness: RUNNER_HOME not substituted"; exit 2; }
 
@@ -29,7 +33,7 @@ run() {
     "GITHUB_REPOSITORY=beadbox/beadbox" "GITHUB_EVENT_NAME=push" "GITHUB_REF=refs/tags/v1.2.3"
     "GITHUB_WORKFLOW_REF=beadbox/beadbox/.github/workflows/release.yml@refs/tags/v1.2.3"
     "GITHUB_WORKFLOW_SHA=$SHA" "GITHUB_SHA=$SHA" "GITHUB_EVENT_PATH=$EV"
-    "GITHUB_WORKSPACE=$WORK/beadbox/beadbox" "PATH=/usr/bin:/bin"
+    "GITHUB_WORKSPACE=$WORK/beadbox/beadbox" "PATH=$SYS_PATH"
   )
   local kv k
   for kv in "$@"; do
@@ -134,8 +138,25 @@ mv "$EV" "$WORK/_temp/real.json" && ln -s "$WORK/_temp/real.json" "$EV"
 run refuse "payload is a symlink"
 rm -f "$EV" && payload refs/tags/v1.2.3
 run refuse "workspace outside the work dir" GITHUB_WORKSPACE=/tmp
+# H0: PATH. A dir another account could write, or a relative/empty entry, is
+# refused; the runner's own dirs (under its home) are skipped.
+mkdir -p "$T/userbin" "$HOME_DIR/tools/bin"
+chmod 755 "$T/userbin"
+run refuse "PATH with a dir not owned by root" "PATH=$T/userbin:$SYS_PATH"
+run refuse "PATH with an empty entry (cwd)" "PATH=:$SYS_PATH"
+run refuse "PATH with a relative entry" "PATH=bin:$SYS_PATH"
+run refuse "PATH with a missing dir" "PATH=/nonexistent/bin:$SYS_PATH"
+run admit "PATH with the runner's own dir (skipped)" "PATH=$HOME_DIR/tools/bin:$SYS_PATH"
+# The hook must not run its own commands through the PATH it is checking: a
+# planted 'find' first on PATH must never execute, and the job is refused.
+mkdir -p "$T/planted" && chmod 755 "$T/planted"
+printf '#!/bin/sh\ntouch "%s/PLANTED_RAN"\nexit 0\n' "$T" > "$T/planted/find"
+chmod 755 "$T/planted/find"
+for tool in dirname tr cut ls jq logger; do cp "$T/planted/find" "$T/planted/$tool"; done
+run refuse "PATH with a planted find/dirname/tr (untrusted)" "PATH=$T/planted:$SYS_PATH"
+if [ -e "$T/PLANTED_RAN" ]; then fail=$((fail + 1)); echo "FAIL [planted tool]: the hook executed a program from the PATH it was checking"; fi
 # F1: every required value unset, and empty.
-for v in GITHUB_REPOSITORY GITHUB_EVENT_NAME GITHUB_REF GITHUB_WORKFLOW_REF GITHUB_WORKFLOW_SHA GITHUB_SHA GITHUB_EVENT_PATH GITHUB_WORKSPACE; do
+for v in GITHUB_REPOSITORY GITHUB_EVENT_NAME GITHUB_REF GITHUB_WORKFLOW_REF GITHUB_WORKFLOW_SHA GITHUB_SHA GITHUB_EVENT_PATH GITHUB_WORKSPACE PATH; do
   run refuse "$v unset" "$v=@unset"
   run refuse "$v empty" "$v="
 done
@@ -151,6 +172,105 @@ run refuse "work dir unreadable"
 chmod 700 "$WORK/beadbox/beadbox"
 
 echo "hook tests: $pass passed, $fail failed"
+
+# ---------------------------------------------------------------------------
+# trusted-path.sh: what the signing job may execute. The owner set is a
+# parameter so these run without root: here it is {root, this user}, over a
+# tree under $HOME (whose ancestors are root- or user-owned, not shared).
+# shellcheck source=scripts/ci-runner/trusted-path.sh
+source "$(dirname "$HOOK_SRC")/trusted-path.sh"
+tpass=0; tfail=0
+ME=$(id -un)
+B=$(mktemp -d "$HOME/.beadbox-trust-test.XXXXXX")
+chmod 755 "$B"
+# tcase <expect: trusted|untrusted> <label> <command...>
+tcase() {
+  local expect=$1 label=$2 why got
+  shift 2
+  why=$("$@")
+  if [ -z "$why" ]; then got=trusted; else got=untrusted; fi
+  if [ "$got" = "$expect" ]; then tpass=$((tpass + 1)); else tfail=$((tfail + 1)); echo "FAIL trust [$label]: expected $expect, got $got ($why)"; fi
+}
+mkdir -p "$B/good" "$B/gw" "$B/ow" "$B/wparent/child" "$B/skip/x" "$B/skipper"
+chmod 755 "$B/good" "$B/wparent/child"
+chmod 775 "$B/gw" "$B/wparent" "$B/skip/x" "$B/skipper"
+chmod 757 "$B/ow"
+ln -s "$B/good" "$B/link"
+tcase trusted "own-set dir" untrusted_dir "$B/good" root "$ME"
+tcase untrusted "group-writable dir" untrusted_dir "$B/gw" root "$ME"
+tcase untrusted "other-writable dir" untrusted_dir "$B/ow" root "$ME"
+tcase untrusted "symlinked dir" untrusted_dir "$B/link" root "$ME"
+tcase untrusted "dir under a group-writable parent" untrusted_dir "$B/wparent/child" root "$ME"
+tcase untrusted "dir not owned by root (production owner set)" untrusted_dir "$B/good" root
+tcase untrusted "missing dir" untrusted_dir "$B/none" root "$ME"
+tcase untrusted "relative dir" untrusted_dir "good" root "$ME"
+tcase trusted "PATH of trusted dirs" untrusted_path_entries "$B/good:$SYS_PATH" -- root "$ME"
+tcase untrusted "PATH with a leading empty entry" untrusted_path_entries ":$B/good" -- root "$ME"
+tcase untrusted "PATH with an empty middle entry" untrusted_path_entries "$B/good::$SYS_PATH" -- root "$ME"
+tcase untrusted "PATH with a trailing empty entry" untrusted_path_entries "$B/good:" -- root "$ME"
+tcase untrusted "PATH with a group-writable dir" untrusted_path_entries "$B/good:$B/gw" -- root "$ME"
+tcase trusted "PATH entry under a skip prefix" untrusted_path_entries "$B/skip/x:$B/good" "$B/skip" -- root "$ME"
+tcase untrusted "PATH entry that only starts like the skip prefix" untrusted_path_entries "$B/skipper:$B/good" "$B/skip" -- root "$ME"
+# The toolchain tree, rustup-style.
+TC="$B/tc"
+mkdir -p "$TC/rustup/toolchains/x/bin" "$TC/cargo/bin"
+printf '#!/bin/sh\n' > "$TC/cargo/bin/rustup" && chmod 755 "$TC/cargo/bin/rustup"
+ln -s rustup "$TC/cargo/bin/cargo"
+printf 'x' > "$TC/rustup/toolchains/x/bin/rustc" && chmod 755 "$TC/rustup/toolchains/x/bin/rustc"
+chmod -R go-w "$TC"
+tcase trusted "toolchain tree (with rustup proxy links)" untrusted_tree "$TC" root "$ME"
+chmod g+w "$TC/rustup/toolchains/x/bin/rustc"
+tcase untrusted "toolchain with a group-writable file" untrusted_tree "$TC" root "$ME"
+chmod g-w "$TC/rustup/toolchains/x/bin/rustc"
+chmod o+w "$TC/rustup/toolchains"
+tcase untrusted "toolchain with an other-writable dir" untrusted_tree "$TC" root "$ME"
+chmod o-w "$TC/rustup/toolchains"
+ln -s /usr/bin/true "$TC/cargo/bin/evil"
+tcase untrusted "toolchain symlink leaving its dir" untrusted_tree "$TC" root "$ME"
+rm "$TC/cargo/bin/evil"
+ln -s ../../rustup "$TC/cargo/bin/evil"
+tcase untrusted "toolchain symlink with a path" untrusted_tree "$TC" root "$ME"
+rm "$TC/cargo/bin/evil"
+mkdir "$TC/cargo/bin/adir" && chmod 755 "$TC/cargo/bin/adir" && ln -s adir "$TC/cargo/bin/evil"
+tcase untrusted "toolchain symlink to a dir beside it" untrusted_tree "$TC" root "$ME"
+rm -rf "$TC/cargo/bin/evil" "$TC/cargo/bin/adir"
+mkdir "$TC/cargo/bin/sub" && printf 'x' > "$TC/cargo/bin/sub/real" && chmod 755 "$TC/cargo/bin/sub" "$TC/cargo/bin/sub/real"
+ln -s sub/real "$TC/cargo/bin/evil"
+tcase untrusted "toolchain symlink into a subdir (a path, even to a file)" untrusted_tree "$TC" root "$ME"
+rm -rf "$TC/cargo/bin/evil" "$TC/cargo/bin/sub"
+tcase untrusted "toolchain not owned by root (production owner set)" untrusted_tree "$TC" root
+# check-runner-path.sh (the release.yml step): refuses a PATH led by planted
+# tools without ever executing one of them.
+mkdir -p "$B/planted" && chmod 755 "$B/planted"
+printf '#!/bin/sh\ntouch "%s/CHECK_PLANTED_RAN"\nexit 0\n' "$B" > "$B/planted/find"
+for tool in dirname readlink head sed tr; do cp "$B/planted/find" "$B/planted/$tool"; done
+chmod 755 "$B"/planted/*
+if env -i HOME="$HOME" RUNNER_TEMP="$T" PATH="$B/planted:$SYS_PATH" /bin/bash "$(dirname "$HOOK_SRC")/check-runner-path.sh" "$B/planted:$SYS_PATH" "$TC" >"$T/crp.out" 2>&1; then
+  tfail=$((tfail + 1)); echo "FAIL trust [check-runner-path refuses planted PATH]: it passed"
+elif [ -e "$B/CHECK_PLANTED_RAN" ]; then
+  tfail=$((tfail + 1)); echo "FAIL trust [check-runner-path ran a planted tool]"
+else
+  tpass=$((tpass + 1))
+fi
+chmod -R u+w "$B" && rm -rf "$B"
+# The supervisor's literal job PATH: root-owned dirs only, $LIBEXEC/bin first,
+# nothing another account can write. Its system dirs must pass the production
+# check here where they are real dirs (macOS, where the runner runs).
+CYCLE_PATH=$(sed -n 's/^[[:space:]]*PATH="\(.*\)" \\$/\1/p' "$(dirname "$HOOK_SRC")/runner-cycle.sh")
+# shellcheck disable=SC2016 # literal $LIBEXEC / $HOME text in the script
+case "$CYCLE_PATH" in
+  '$LIBEXEC/bin:'*) tpass=$((tpass + 1)) ;;
+  *) tfail=$((tfail + 1)); echo "FAIL trust [runner PATH starts with \$LIBEXEC/bin]: '$CYCLE_PATH'" ;;
+esac
+# shellcheck disable=SC2016 # literal $HOME text in the script
+case ":$CYCLE_PATH:" in
+  *:/usr/local/bin:* | *:/opt/homebrew/bin:* | *homebrew* | *'$HOME'* | *::*) tfail=$((tfail + 1)); echo "FAIL trust [runner PATH has a shared dir]: '$CYCLE_PATH'" ;;
+  *) tpass=$((tpass + 1)) ;;
+esac
+if [ ! -L /bin ]; then
+  tcase trusted "runner PATH's system dirs (production owner set)" untrusted_path_entries "${CYCLE_PATH#\$LIBEXEC/bin:}" -- root
+fi
+echo "trust tests: $tpass passed, $tfail failed"
 
 # ---------------------------------------------------------------------------
 # pick-macos-runner.sh: every uncertain answer must be the GitHub fallback.
@@ -295,10 +415,11 @@ if [ -f "$REL" ]; then
   grep -q 'echo "CARGO_HOME=$RUNNER_TEMP/cargo-home"' "$REL" || c4="no per-job CARGO_HOME"
   grep -q 'echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/bun-cache"' "$REL" || c4="no per-job bun cache"
   grep -q 'echo "RUSTUP_HOME=$TOOLS/rustup"' "$REL" || c4="no root-owned toolchain"
+  grep -q 'bash scripts/ci-runner/check-runner-path.sh "$TOOLS/cargo/bin:$PATH" "$TOOLS"' "$REL" || c4="no PATH/toolchain trust check"
   [ "$(grep -A1 -E 'name: (Rust cache|Setup Rust)$' "$REL" | grep -c "if: runner.environment == 'github-hosted'")" -ge 2 ] || c4="GitHub cache/toolchain not limited to hosted runners"
   if [ "$c4" = ok ]; then cpass=$((cpass + 1)); else cfail=$((cfail + 1)); echo "FAIL cycle [C-4 release.yml]: $c4"; fi
 else
   cfail=$((cfail + 1)); echo "FAIL cycle [C-4]: release.yml not found at $REL"
 fi
 echo "cycle tests: $cpass passed, $cfail failed"
-[ "$fail" -eq 0 ] && [ "$pfail" -eq 0 ] && [ "$cfail" -eq 0 ]
+[ "$fail" -eq 0 ] && [ "$tfail" -eq 0 ] && [ "$pfail" -eq 0 ] && [ "$cfail" -eq 0 ]
