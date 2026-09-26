@@ -22,6 +22,10 @@ concurrency:
 # build mode); a caller must grant at least what the callee's jobs request.
 permissions:
   contents: write
+  # beadbox-z3j: release.yml's resolve-promotion reads Actions run results
+  # (skipped in build mode, but a caller must still grant every permission
+  # its callee's jobs request, or GitHub refuses the run at startup).
+  actions: read
 
 jobs:
   build:
