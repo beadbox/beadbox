@@ -204,6 +204,20 @@ export function findWorkspaceByDbPath(
 }
 
 /** Resolve a scaffold-backed external connection from a bd database path. */
+/** The registry entry whose local .beads is this db path, whatever its ownership (beadbox-5wk). */
+export function findRegistryEntryByDbPath(dbPath: string): RegistryEntry | null {
+  if (dbPath.startsWith("server://")) return null
+  const path = resolve(dbPath)
+  const beadsPath = basename(path) === ".beads" ? path : basename(dirname(path)) === ".beads" ? dirname(path) : path
+  try {
+    const registry = JSON.parse(readFileSync(getBeadboxRegistryPath(), "utf-8")) as WorkspaceRegistry
+    if (!Array.isArray(registry.workspaces)) return null
+    return registry.workspaces.find((entry) => entry.local?.path && resolve(entry.local.path) === beadsPath) ?? null
+  } catch {
+    return null
+  }
+}
+
 export function findExternalWorkspaceByDbPath(dbPath: string): RegistryEntry | null {
   if (dbPath.startsWith("server://")) return null
   const path = resolve(dbPath)

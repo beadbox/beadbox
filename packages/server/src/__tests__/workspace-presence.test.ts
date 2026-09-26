@@ -12,6 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { spawn } from "node:child_process"
+import { rmSync } from "node:fs"
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -139,6 +140,8 @@ describe("the server-mode poll loop never runs bd on a vanished workspace", () =
     } catch {
       /* gone */
     }
+    // SIGKILL skips the loop's own trap; remove its per-poll stderr file (beadbox-5wk).
+    if (pid) rmSync(join(tmpdir(), `beadbox-poll-${pid}`), { force: true })
   }
 
   test("vanished .beads: no bd spawns, and polling_error after three loops", async () => {

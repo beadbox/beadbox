@@ -49,7 +49,8 @@
 
 import { type ChildProcess, execFile, spawn } from "child_process"
 import { createHash } from "crypto"
-import { existsSync, type FSWatcher, watch } from "fs"
+import { existsSync, type FSWatcher, rmSync, watch } from "fs"
+import { tmpdir } from "os"
 import { readFile } from "fs/promises"
 import { basename, dirname, join } from "path"
 import { SUBSCRIPTION_PREFIX, type SubscriptionEvent } from "../subscribe-protocol"
@@ -58,7 +59,7 @@ import { resolveBdPath } from "./bd-paths"
 import { beadsDirFromDatabasePath } from "./beadtrain-fs"
 import { drainPool, getPool, PortFileMissingError } from "./dolt-pool"
 import { readPortFileSync } from "./dolt-port-file"
-import { resolveDoltMode } from "./dolt-metadata"
+import { markEmbeddedByRefusal, resolveDoltMode } from "./dolt-metadata"
 import { getDoltDir, getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import { beadsDirOf, isWorkspacePresent } from "./workspace-presence"
 import { findExternalWorkspaceByDbPath, parseServerUri } from "./workspace-registry"
@@ -79,6 +80,9 @@ const POLL_TIMEOUT_S = 10
 // beadbox-01f.2: respawn backoff for a poll child that exits while the
 // detector is live: 0.5s, 1s, 2s, 4s, then capped at 5s (restart within 5s).
 const RESPAWN_BASE_MS = 500
+// beadbox-5wk: the poll loop's exit code when bd refuses server-mode SQL
+// because the store is embedded.
+const EMBEDDED_REFUSAL_EXIT = 64
 const RESPAWN_MAX_MS = 5000
 // A child that lived this long was healthy; its exit restarts the backoff.
 const RESPAWN_RESET_AFTER_MS = 60_000
@@ -632,6 +636,16 @@ TMO="$4"
 # $5 is empty when the log file sink is unavailable.
 LOG="$5"
 BEADSDIR="$6"
+# beadbox-5wk: bd's stderr for ONE poll, so a refusal can be told from a
+# failure. bd's stderr can carry credentials, so the file is owner-only
+# (umask 077), emptied right after each poll's check (nothing persists between
+# polls) and removed on exit. It's named by this shell's pid so the sidecar
+# can remove it even when the loop is SIGKILLed (no trap sees that).
+umask 077
+ERRF="\${TMPDIR:-/tmp}/beadbox-poll-$$"
+: > "$ERRF"
+trap 'rm -f "$ERRF"' EXIT
+trap 'exit 143' TERM INT
 emit() {
   printf '%s\\n' "$1" >&2
   if [ -n "$LOG" ]; then printf '%s\\n' "$1" >> "$LOG" 2>/dev/null; fi
@@ -659,8 +673,9 @@ while true; do
   # output goes to /dev/null so it never holds this substitution's pipe open,
   # and its TERM trap reaps its own sleep. A timeout is a nonzero RC, i.e. an
   # ordinary poll error below.
+  : > "$ERRF"
   RESULT=$(
-    "$BD" sql '${POLL_SQL}' --db "$DBPATH" --json --quiet --readonly 2>/dev/null &
+    "$BD" sql '${POLL_SQL}' --db "$DBPATH" --json --quiet --readonly 2>"$ERRF" &
     P=$!
     (
       trap 'kill $S 2>/dev/null; exit 0' TERM
@@ -678,7 +693,16 @@ while true; do
     exit $RC
   )
   RC=$?
+  REFUSED=0
+  if [ $RC -ne 0 ] && grep -qi "supported in embedded mode" "$ERRF" 2>/dev/null; then REFUSED=1; fi
+  : > "$ERRF"
   if [ $RC -ne 0 ]; then
+    # beadbox-5wk: bd refuses server-mode SQL on an embedded store. That is
+    # not a transient failure, so stop here (exit 64) and let the detector
+    # fall back to embedded detection, before any polling_error is emitted.
+    if [ "$REFUSED" = "1" ]; then
+      exit ${EMBEDDED_REFUSAL_EXIT}
+    fi
     ERRS=$((ERRS + 1))
     if [ "$ERRS" = "3" ]; then
       emit "$(printf '[SUBSCRIPTION:%s] {"type":"polling_error"}' "$ID")"
@@ -792,9 +816,15 @@ function startServerPollChild(state: DetectorState, id: string): void {
   })
   child.on("exit", (code, signal) => {
     if (state.pollChild === child) state.pollChild = null
+    // beadbox-5wk: the loop's per-poll stderr file (see buildPollShellArgs).
+    if (child.pid) rmSync(join(tmpdir(), `beadbox-poll-${child.pid}`), { force: true })
     // Exit during normal stop() is expected (we kill the child). Log
     // unexpected early exits so future bb-i4qd-class regressions are
     // greppable in sidecar stderr.
+    if (!state.stopped && code === EMBEDDED_REFUSAL_EXIT) {
+      void fallBackToEmbedded(state)
+      return
+    }
     if (!state.stopped) {
       process.stderr.write(
         `[change-detector] pollChild exited unexpectedly for ${state.dbPath}: code=${code} signal=${signal}\n`,
@@ -802,6 +832,22 @@ function startServerPollChild(state: DetectorState, id: string): void {
       scheduleRespawn(state, id)
     }
   })
+}
+
+// beadbox-5wk: bd refused server-mode SQL, so this workspace's store is
+// embedded even though no explicit dolt_mode said so (a stale port file or
+// registry entry made it look like a server). Stop trying server mode, switch
+// this detector to embedded detection, and teach the mode oracle, all once.
+async function fallBackToEmbedded(state: DetectorState): Promise<void> {
+  if (state.stopped || state.mode === "embedded") return
+  process.stderr.write(
+    `[change-detector] bd refused bd sql for ${state.dbPath}: its store is embedded; falling back to embedded detection\n`,
+  )
+  markEmbeddedByRefusal(state.dbPath)
+  state.mode = "embedded"
+  // Baseline the fingerprint so the switch itself isn't reported as a change.
+  state.lastFingerprint = await getChangeFingerprint(state.dbPath, "embedded")
+  if (!state.stopped) startEmbeddedLoop(state)
 }
 
 // beadbox-01f.2: a poll child that exits while the detector is live used to

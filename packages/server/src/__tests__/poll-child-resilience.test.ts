@@ -9,6 +9,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { type ChildProcess, spawn } from "node:child_process"
+import { rmSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -44,6 +45,8 @@ afterEach(() => {
     } catch {
       /* gone */
     }
+    // SIGKILL skips the loop's own trap; remove its per-poll stderr file (beadbox-5wk).
+    if (c.pid) rmSync(join(tmpdir(), `beadbox-poll-${c.pid}`), { force: true })
   }
   overrides.pollTimeoutS = null
   overrides.respawnBaseMs = null

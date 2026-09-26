@@ -15,7 +15,7 @@
 import { readFileSync } from "fs"
 import { basename, dirname, join, resolve } from "path"
 import { portFilePath, readPortFileSync } from "./dolt-port-file"
-import { findExternalWorkspaceByDbPath } from "./workspace-registry"
+import { findExternalWorkspaceByDbPath, findRegistryEntryByDbPath } from "./workspace-registry"
 
 export type DoltMode = "embedded" | "server"
 
@@ -38,10 +38,33 @@ export function resolveDoltMode(dbPath: string): DoltMode {
   if (dbPath.startsWith("server://")) return "server"
   const resolved = resolve(dbPath)
   const beadsDir = basename(resolved) === ".beads" ? resolved : dirname(resolved)
+  const { mode, source } = decide(dbPath, beadsDir)
+  warnIfRegistryDisagrees(dbPath, beadsDir, mode, source)
+  return mode
+}
 
+// beadbox-5wk: stores bd has REFUSED server-mode SQL for (its "not yet
+// supported in embedded mode" error). Learned at runtime by the change
+// detector, because with no explicit dolt_mode only bd knows the truth.
+const refusedServerMode = new Set<string>()
+
+/** Record that bd refused `bd sql` for this workspace: its store is embedded. */
+export function markEmbeddedByRefusal(dbPath: string): void {
+  const resolved = resolve(dbPath)
+  refusedServerMode.add(basename(resolved) === ".beads" ? resolved : dirname(resolved))
+}
+
+/** Test-only: forget learned refusals. */
+export function _resetEmbeddedRefusals(): void {
+  refusedServerMode.clear()
+}
+
+function decide(dbPath: string, beadsDir: string): { mode: DoltMode; source: string } {
   try {
     const meta = JSON.parse(readFileSync(join(beadsDir, "metadata.json"), "utf-8"))
-    if (meta?.dolt_mode === "embedded" || meta?.dolt_mode === "server") return meta.dolt_mode
+    if (meta?.dolt_mode === "embedded" || meta?.dolt_mode === "server") {
+      return { mode: meta.dolt_mode, source: "metadata.json" }
+    }
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException)?.code
     if (code !== "ENOENT") {
@@ -51,15 +74,39 @@ export function resolveDoltMode(dbPath: string): DoltMode {
     }
   }
 
-  if (findExternalWorkspaceByDbPath(dbPath)) return "server"
+  if (refusedServerMode.has(beadsDir))
+    return { mode: "embedded", source: "bd refused server-mode sql" }
+  if (findExternalWorkspaceByDbPath(dbPath))
+    return { mode: "server", source: "external registry entry" }
   const portFile = readPortFileSync(beadsDir)
-  if (portFile.status === "ok") return "server"
+  if (portFile.status === "ok") return { mode: "server", source: "dolt-server.port" }
   if (portFile.status === "unreadable") {
     process.stderr.write(
       `[dolt-metadata] failed to read ${portFilePath(beadsDir)}: code=${portFile.error.code}, ${portFile.error.message}\n`,
     )
   }
-  return "embedded"
+  return { mode: "embedded", source: "default" }
+}
+
+// beadbox-5wk (AC6): the registry's per-workspace mode is historical user
+// state and is NOT an input above, so when it disagrees it is ignored, but
+// never silently: one warning per workspace and disagreement.
+const registryWarnings = new Set<string>()
+
+function warnIfRegistryDisagrees(
+  dbPath: string,
+  beadsDir: string,
+  mode: DoltMode,
+  source: string,
+): void {
+  const entry = findRegistryEntryByDbPath(dbPath)
+  if (!entry || entry.mode === mode) return
+  const key = `${beadsDir}|${entry.mode}|${mode}`
+  if (registryWarnings.has(key)) return
+  registryWarnings.add(key)
+  process.stderr.write(
+    `[dolt-metadata] registry says ${entry.mode} for ${beadsDir}; using ${mode} (from ${source}). The registry entry is left as is.\n`,
+  )
 }
 
 /** Async form kept for existing callers; same answer as resolveDoltMode. */
