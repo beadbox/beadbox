@@ -1,8 +1,10 @@
 name: Install Smoke
 # beadbox-z3j: the run name carries the tag it smoke-tests. A workflow_run run
 # reports main's head_sha and head_branch, so this is how the release
-# workflow finds the smoke run of a given rc.
-run-name: Install Smoke ${{ github.event.inputs.tag || github.event.workflow_run.head_branch || 'latest' }}
+# workflow finds the smoke run of a given rc. A DISPATCHED Release reports the
+# dispatching branch as head_branch; its tag is its display title (release.yml
+# run-name).
+run-name: Install Smoke ${{ github.event.inputs.tag || (github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.display_title) || github.event.workflow_run.head_branch || 'latest' }}
 
 # Cross-platform install-and-smoke (P5.6 / bb-x6lg.6).
 #
@@ -56,7 +58,7 @@ on:
     types: [completed]
 
 concurrency:
-  group: install-smoke-${{ github.event.inputs.tag || github.event.workflow_run.head_branch || github.ref_name }}
+  group: install-smoke-${{ github.event.inputs.tag || (github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.display_title) || github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -91,6 +93,8 @@ jobs:
     env:
       INPUT_TAG: ${{ github.event.inputs.tag }}
       WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
+      WORKFLOW_RUN_TITLE: ${{ github.event.workflow_run.display_title }}
     steps:
       - id: resolve
         env:
@@ -104,7 +108,16 @@ jobs:
           # parses every expression inside a run: block regardless of
           # leading '#', and an unparseable example would HTTP 422 the
           # workflow at dispatch time. See bb-x6lg.6 QA bounce.)
-          TAG="${INPUT_TAG:-$WORKFLOW_RUN_BRANCH}"
+          # A tag-push Release reports its tag as head_branch. A dispatched one
+          # reports the branch it was dispatched from (main), and carries its tag
+          # as the display title instead (release.yml run-name, beadbox-z3j).
+          if [ -n "${INPUT_TAG:-}" ]; then
+            TAG="$INPUT_TAG"
+          elif [ "${WORKFLOW_RUN_EVENT:-}" = "workflow_dispatch" ]; then
+            TAG="$WORKFLOW_RUN_TITLE"
+          else
+            TAG="${WORKFLOW_RUN_BRANCH:-}"
+          fi
           if [ -z "$TAG" ]; then
             TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName')
           fi

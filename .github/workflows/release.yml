@@ -1,4 +1,9 @@
 name: Release
+# beadbox-z3j: the run name is the tag, on a tag push and on a dispatch alike.
+# Install Smoke triggers on workflow_run, which carries the run's display
+# title but not its inputs, so this is how a dispatched release tells Install
+# Smoke which tag it published (head_branch would be the dispatching branch).
+run-name: ${{ github.event.inputs.tag || github.ref_name }}
 
 # Bun is pinned to 1.3.14 in every job below (setup-bun bun-version, and the
 # Windows manual download). beadbox-e6a: with setup-bun unpinned, the v0.26.1
@@ -2078,7 +2083,7 @@ jobs:
       !cancelled()
       && needs.validate-tag.result == 'success'
       && needs.promote.result == 'success'
-      && github.event_name == 'push'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && inputs.mode != 'build'
       && needs.validate-tag.outputs.is_final == 'true'
     needs: [validate-tag, promote]
@@ -2161,7 +2166,7 @@ jobs:
       !cancelled()
       && needs.validate-tag.result == 'success'
       && needs.promote.result == 'success'
-      && github.event_name == 'push'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && inputs.mode != 'build'
       && needs.validate-tag.outputs.is_final == 'true'
     needs: [validate-tag, promote]
@@ -2216,6 +2221,14 @@ jobs:
           # whose contents are code.
           rm -rf /tmp/cask
           git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/beadbox/homebrew-cask.git" /tmp/cask
+          # A dispatch can re-publish an OLDER final (beadbox-z3j); never roll the
+          # tap back. A newer version already in the tap is left as it is.
+          CURRENT=$(sed -n 's/^  version "\(.*\)"$/\1/p' /tmp/cask/Casks/beadbox.rb | head -1)
+          if [ -n "$CURRENT" ] && [ "$CURRENT" != "$VERSION" ] \
+             && [ "$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)" = "$CURRENT" ]; then
+            echo "::notice::tap already carries ${CURRENT}, newer than ${VERSION}; cask left unchanged"
+            exit 0
+          fi
 
           cat > /tmp/cask/Casks/beadbox.rb <<CASK
           cask "beadbox" do
@@ -2269,13 +2282,16 @@ jobs:
   # ── Terminal gate (beadbox-uc1): a final whose publish jobs did not run is a
   #    RED run, not a green one. The v0.26.2 skip was invisible because nothing
   #    downstream asserted on those two jobs and the run-level conclusion only
-  #    reports failures, never absences. push-only, like the jobs it guards: a
-  #    workflow_dispatch rebuild of a final tag never publishes by design.
+  #    reports failures, never absences. It runs on a tag push AND on a
+  #    dispatch, like the jobs it guards: a final published by dispatch must ship
+  #    its cask and changelog too (v0.27.2 was promoted by dispatch and skipped
+  #    all three, beadbox-z3j).
   final-publish-gate:
     name: "Final tag published its cask and changelog"
     needs: [validate-tag, publish-changelog, publish-cask]
     if: >-
-      always() && github.event_name == 'push'
+      always()
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && inputs.mode != 'build'
       && needs.validate-tag.outputs.is_final == 'true'
     runs-on: ubuntu-latest
