@@ -21,6 +21,12 @@ setDefaultTimeout(60_000)
 
 const RUN = `f2x${process.pid}x${Date.now()}`
 const TIMEOUT_S = 2
+// When a bounded poll's bd is killed, the next poll starts after: the bound
+// (TIMEOUT_S) + the watchdog's 1s TERM->KILL grace + the loop's 5s error
+// sleep, i.e. ~8s. The margin keeps this from flaking on a loaded machine
+// (it did at a load average of ~25); the assertion is unchanged: the stuck bd
+// is killed and polling continues.
+const NEXT_POLL_BOUND_MS = (TIMEOUT_S + 1 + 5) * 1000 + 15_000
 // Reads through the namespace: a detector that predates the override still
 // loads, and these tests then fail on behaviour rather than on import.
 const overrides = detector._testOverrides as Record<string, number | null>
@@ -133,7 +139,7 @@ describe("each poll is bounded (AC3)", () => {
     const [first] = await invocations(bd.log)
     // Within the bound (+1s TERM->KILL grace) the loop has moved on.
     expect(
-      await until(async () => (await invocations(bd.log)).length >= 2, (TIMEOUT_S + 8) * 1000),
+      await until(async () => (await invocations(bd.log)).length >= 2, NEXT_POLL_BOUND_MS),
     ).toBe(true)
     expect(alive(first)).toBe(false)
   })
@@ -144,7 +150,7 @@ describe("each poll is bounded (AC3)", () => {
     expect(await until(async () => (await invocations(bd.log)).length >= 1, 5_000)).toBe(true)
     const [first] = await invocations(bd.log)
     expect(
-      await until(async () => (await invocations(bd.log)).length >= 2, (TIMEOUT_S + 8) * 1000),
+      await until(async () => (await invocations(bd.log)).length >= 2, NEXT_POLL_BOUND_MS),
     ).toBe(true)
     expect(alive(first)).toBe(false)
   })

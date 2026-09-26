@@ -96,5 +96,8 @@ describe("server-mode fallback emits no first-run tick (beadbox-01f.3)", () => {
     const changes = events.filter((e) => e.type === "change")
     expect(changes).toHaveLength(1)
     expect(changes[0]).toMatchObject({ trigger: "initial" })
-  })
+    // A detector start + a 1.5s observation window + stop: past bun's 5s
+    // default on a loaded machine (it timed out at load ~30). The window, and
+    // so the assertion, is unchanged.
+  }, 30_000)
 })
