@@ -44,6 +44,7 @@ import {
 } from "../lib/epic-cache"
 import { consumeEpicPrefetch, startEpicPrefetch } from "../lib/epic-prefetch"
 import { matchRig, parseRoutes } from "../lib/routes"
+import { recordStartedAt } from "../lib/started-at"
 import type { Bead, BeadPriority, BeadStatus, Comment, Epic } from "../lib/types"
 
 // Convert bd ISO date string to Date
@@ -87,6 +88,7 @@ function convertBead(bdBead: BdBead, comments: Comment[] = []): Bead {
     parentId: bdBead.parent,
     createdAt: toDate(bdBead.created_at),
     updatedAt: toDate(bdBead.updated_at),
+    closedAt: toDate(bdBead.closed_at),
   }
 }
 
@@ -311,6 +313,9 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
     }
     topLevelEpics.forEach(attachRigNames)
   }
+
+  // Not awaited: a slow or failing write must never hold up the tree.
+  void recordStartedAt(topLevelEpics, options)
 
   if (currentFingerprint) {
     // The same list yields blocked-by, so the tree's blocked-by load does

@@ -828,6 +828,19 @@ export async function updateTitle(
   await bdExecRaw(buildUpdateArgs(id, "--title", title), options)
 }
 
+// Set one metadata key. bd splits key=value at the FIRST '=', so a key
+// containing one would silently set a different key.
+export async function updateMetadata(
+  id: string,
+  key: string,
+  value: string,
+  options: BdOptions = {},
+): Promise<void> {
+  assertSafeName(key, "metadata key")
+  if (key.includes("=")) throw new BdArgvError(`Invalid metadata key: ${key} (must not contain '=')`)
+  await bdExecRaw(buildUpdateArgs(id, "--set-metadata", `${key}=${value}`), options)
+}
+
 // Update bead description
 export async function updateDescription(
   id: string,

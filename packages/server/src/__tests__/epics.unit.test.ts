@@ -80,6 +80,80 @@ describe("handlers/epics", () => {
   })
 })
 
+describe("handlers/epics — closedAt", () => {
+  let closedWs: Workspace
+
+  beforeAll(async () => {
+    closedWs = await createBdWorkspace()
+    await runBdInWorkspace(["close", closedWs.seedIds.test1], closedWs.root)
+  })
+
+  afterAll(async () => {
+    await closedWs?.cleanup()
+  })
+
+  test("a closed bead carries closedAt; an open one does not", async () => {
+    const r = await epics.getEpics(closedWs.dbPath)
+    expect(r.success).toBe(true)
+    if (!r.success) return
+    const all = r.epics.flatMap((e) => e.children)
+    const closed = all.find((b) => b.id === closedWs.seedIds.test1)
+    const open = all.find((b) => b.id === closedWs.seedIds.test2)
+    expect(closed?.status).toBe("closed")
+    expect(closed?.closedAt).toBeInstanceOf(Date)
+    expect(open?.closedAt).toBeUndefined()
+  })
+})
+
+// beadbox-eic: the tree build records metadata.started_at for started beads.
+describe("handlers/epics — started_at recording against real bd", () => {
+  let startWs: Workspace
+
+  beforeAll(async () => {
+    startWs = await createBdWorkspace()
+    await runBdInWorkspace(["update", startWs.seedIds.test2, "--status", "in_progress"], startWs.root)
+  })
+
+  afterAll(async () => {
+    await startWs?.cleanup()
+  })
+
+  async function storedStartedAt(id: string): Promise<string | undefined> {
+    const shown = JSON.parse(await runBdInWorkspace(["show", id, "--json"], startWs.root))
+    const bead = Array.isArray(shown) ? shown[0] : shown
+    return bead?.metadata?.started_at
+  }
+
+  test("an in-progress bead gets started_at = its updated_at, written once and never changed", async () => {
+    const r = await epics.getEpics(startWs.dbPath)
+    expect(r.success).toBe(true)
+    if (!r.success) return
+    const all = r.epics.flatMap((e) => e.children)
+    const started = all.find((b) => b.id === startWs.seedIds.test2)!
+    const open = all.find((b) => b.id === startWs.seedIds.test3)!
+    // The reply already carries the value; the write runs in the background.
+    expect(started.metadata?.started_at).toBe(started.updatedAt!.toISOString())
+    expect(open.metadata?.started_at).toBeUndefined()
+
+    let stored: string | undefined
+    for (let i = 0; i < 40 && !stored; i++) {
+      stored = await storedStartedAt(startWs.seedIds.test2)
+      if (!stored) await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    expect(stored).toBeDefined()
+    expect(new Date(stored!).getTime()).toBe(started.updatedAt!.getTime())
+    expect(await storedStartedAt(startWs.seedIds.test3)).toBeUndefined()
+
+    // A later rebuild finds the key and leaves it alone.
+    const again = await epics.incrementalRefresh(startWs.dbPath)
+    expect(again.success).toBe(true)
+    if (!again.success) return
+    const startedAgain = again.epics.flatMap((e) => e.children).find((b) => b.id === startWs.seedIds.test2)
+    expect(startedAgain?.metadata?.started_at).toBe(stored!)
+    expect(await storedStartedAt(startWs.seedIds.test2)).toBe(stored!)
+  })
+})
+
 describe("handlers/epics — system issue visibility", () => {
   let gateWorkspace: Workspace
   let gateId: string

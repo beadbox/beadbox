@@ -42,6 +42,7 @@ export interface Bead {
   parentId?: string
   createdAt?: Date
   updatedAt?: Date
+  closedAt?: Date
   children?: Bead[] // Subtasks (nested parent-child relationships)
   blockedBy?: BeadDependency[] // Beads that must complete before this one
   blocks?: BeadDependency[] // Beads waiting on this one to complete

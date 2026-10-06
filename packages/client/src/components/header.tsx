@@ -15,6 +15,7 @@ import {
   Activity,
   ArrowLeft,
   ArrowUpCircle,
+  ChartGantt,
   Circle,
   FlaskConical,
   Heart,
@@ -329,6 +330,23 @@ export function Header({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>Formulas \u2318\u0033</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => navigateTo("chart", "tab")}
+                    className={cn(
+                      "px-2.5 py-1.5 text-sm font-medium rounded-md transition-colors inline-flex items-center gap-1.5",
+                      pathname === "/chart"
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                    )}
+                  >
+                    <ChartGantt className="h-3.5 w-3.5" />
+                    Chart
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Chart ⌘5</TooltipContent>
               </Tooltip>
               {hasTrains && (
               <Tooltip>

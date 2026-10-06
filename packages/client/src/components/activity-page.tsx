@@ -509,7 +509,7 @@ function ActivityViewer() {
       }
 
       // Cmd+1/Cmd+2/Cmd+3: view switching (always active)
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4")) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4" || e.key === "5")) {
         e.preventDefault()
         if (e.key === "1") {
           navigate({ to: "/" })
@@ -519,6 +519,9 @@ function ActivityViewer() {
         }
         if (e.key === "4" && hasTrains) {
           navigate({ to: "/trains" as never })
+        }
+        if (e.key === "5") {
+          navigate({ to: "/chart" as never })
         }
         return
       }
