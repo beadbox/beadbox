@@ -90,3 +90,11 @@ reports/mutation/
 # stages those artifacts straight into the public repo — eng2 confirmed with a
 # `git add -An` dry-run that website/out/404.html and friends would have been.
 website/
+
+# Beads / Dolt files (added by bd init)
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*
+
+
+openspec/*
