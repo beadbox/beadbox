@@ -269,6 +269,88 @@ describe("Chart view", () => {
     expect(b[0]).toBeGreaterThanOrEqual(nowX - 0.5) // the plan starts no earlier than now
   }, 20_000)
 
+  test("the timeline scroller is the only scroll container and holds no titles (beadbox-aqn.1.2)", async () => {
+    // A scrollbar spans the element that scrolls; with the titles outside the
+    // scroller, the scrollbars run only along the bars.
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const frame = screen.getByTestId("gantt-frame")
+    const scroller = screen.getByTestId("gantt-scroll")
+    const titles = screen.getByTestId("gantt-titles")
+    expect(frame.querySelectorAll(".overflow-auto")).toHaveLength(1)
+    expect(frame.querySelector(".overflow-auto")).toBe(scroller)
+    expect(scroller.contains(titles)).toBe(false)
+    expect(titles.className).toContain("overflow-hidden")
+    // The axis scrolls sideways with the bars and stays on top.
+    const header = screen.getByTestId("gantt-header-row")
+    expect(scroller.contains(header)).toBe(true)
+    expect(header.className).toContain("sticky top-0")
+    expect(frame.querySelector(".grid")).toBeNull()
+  }, 20_000)
+
+  test("the titles follow the scroller, focus scrolling flows back, and wheel over the titles scrolls it", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const scroller = screen.getByTestId("gantt-scroll")
+    const titles = screen.getByTestId("gantt-titles")
+    scroller.scrollTop = 56
+    fireEvent.scroll(scroller)
+    expect(titles.scrollTop).toBe(56)
+
+    titles.scrollTop = 28 // e.g. keyboard focus moved to a title
+    fireEvent.scroll(titles)
+    expect(scroller.scrollTop).toBe(28)
+
+    const calls: Array<{ left?: number; top?: number }> = []
+    scroller.scrollBy = ((opts: ScrollToOptions) => calls.push(opts)) as typeof scroller.scrollBy
+    fireEvent.wheel(titles, { deltaY: 40, deltaX: 0 })
+    expect(calls).toEqual([{ left: 0, top: 40 }])
+  }, 20_000)
+
+  test("a marker shows its tooltip on keyboard focus and on hover, with no native <title>", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const marker = screen
+      .getAllByTestId("gantt-marker")
+      .find((el) => el.getAttribute("aria-label") === "Blocked by a: Title a")!
+    expect(marker.getAttribute("tabindex")).toBe("0")
+    expect(marker.querySelector("title")).toBeNull()
+    expect(Number(marker.querySelector("circle")!.getAttribute("r"))).toBeGreaterThan(3.5) // hit area
+
+    fireEvent.focus(marker)
+    await waitFor(() => expect(screen.getAllByText("Blocked by a: Title a").length).toBeGreaterThan(0), {
+      timeout: 2_000,
+    })
+    fireEvent.blur(marker)
+
+    const other = screen.getAllByTestId("gantt-marker").find((el) => el.getAttribute("aria-label") === "Blocks d: Title d")!
+    fireEvent.pointerMove(other, { pointerType: "mouse" })
+    await waitFor(() => expect(screen.getAllByText("Blocks d: Title d").length).toBeGreaterThan(0), { timeout: 2_000 })
+  }, 20_000)
+
+  test("the legend explains every chart element with the chart's own styles", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const legend = screen.getByTestId("gantt-legend")
+    const swatch = (key: string) => legend.querySelector(`[data-testid="legend-${key}"] svg > *`)!
+    // Bars: same classes as the drawn bars of each style.
+    expect(swatch("working").getAttribute("class")).toBe(barFor("a")!.getAttribute("class"))
+    expect(swatch("planned").getAttribute("class")).toBe(barFor("b")!.getAttribute("class"))
+    expect(swatch("planned").getAttribute("stroke-dasharray")).toBe(barFor("b")!.getAttribute("stroke-dasharray"))
+    expect(swatch("blocked").getAttribute("class")).toBe(barFor("x")!.getAttribute("class"))
+    expect(swatch("done").getAttribute("class")).toBe(barFor("c")!.getAttribute("class"))
+    // Markers and the now line.
+    const dot = (label: string) =>
+      screen.getAllByTestId("gantt-marker").find((el) => el.getAttribute("aria-label") === label)!.querySelector("circle:last-child")!
+    expect(swatch("blocked-by").getAttribute("class")).toBe(dot("Blocked by a: Title a").getAttribute("class"))
+    expect(swatch("blocks").getAttribute("class")).toBe(dot("Blocks d: Title d").getAttribute("class"))
+    const now = screen.getByTestId("gantt-now")
+    expect(swatch("now").getAttribute("class")).toBe(now.getAttribute("class"))
+    expect(swatch("now").getAttribute("stroke-dasharray")).toBe(now.getAttribute("stroke-dasharray"))
+    expect(legend.querySelector('[data-testid="legend-connector"]')?.textContent).toMatch(/Blocks/)
+    expect(legend.querySelectorAll("li")).toHaveLength(8)
+  }, 20_000)
+
   test("missing dependency data shows the notice and draws no arrows", async () => {
     blocksAnswer = { blockedBy: {}, degraded: { reason: "error", message: "failed to open database" } }
     setFiltersPreference(FILTERS)
@@ -286,6 +368,73 @@ describe("Chart view", () => {
     fireEvent.click(screen.getByTitle("b: Title b"))
     await waitFor(() => expect(screen.getByText("BEADS VIEW")).toBeTruthy(), { timeout: 5_000 })
     expect(getSelectedBead()).toBe("b")
+  }, 20_000)
+})
+
+describe("Chart view — stepwise zoom (beadbox-aqn.2.2)", () => {
+  const pressed = () =>
+    ["Fit", "Hours", "Days", "Weeks"].filter(
+      (name) => screen.getByRole("button", { name }).getAttribute("aria-pressed") === "true",
+    )
+  const zoomIn = () => screen.getByRole("button", { name: "Zoom in" }) as HTMLButtonElement
+  const zoomOut = () => screen.getByRole("button", { name: "Zoom out" }) as HTMLButtonElement
+
+  test("− from Days steps through unhighlighted levels and lands on Weeks on the 4th press", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(screen.getByRole("button", { name: "Days" }))
+    expect(pressed()).toEqual(["Days"])
+    for (let i = 0; i < 3; i++) {
+      fireEvent.click(zoomOut())
+      expect(pressed()).toEqual([])
+    }
+    fireEvent.click(zoomOut())
+    expect(pressed()).toEqual(["Weeks"])
+  }, 20_000)
+
+  test("+ from Fit leaves Fit", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    expect(pressed()).toEqual(["Fit"])
+    fireEvent.click(zoomIn())
+    expect(pressed()).not.toContain("Fit")
+  }, 20_000)
+
+  test("the buttons are disabled at the limits", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(screen.getByRole("button", { name: "Hours" }))
+    fireEvent.click(zoomIn())
+    fireEvent.click(zoomIn())
+    expect(zoomIn().disabled).toBe(true)
+    expect(zoomOut().disabled).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Weeks" }))
+    fireEvent.click(zoomOut())
+    expect(zoomOut().disabled).toBe(true)
+    expect(zoomIn().disabled).toBe(false)
+  }, 20_000)
+
+  test("+ keeps the moment at the centre of the view in place", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(screen.getByRole("button", { name: "Hours" }))
+    const scroller = screen.getByTestId("gantt-scroll")
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: 400 })
+    const width = () => Number(screen.getByTestId("gantt-timeline").getAttribute("width"))
+    const before = width()
+    scroller.scrollLeft = 3_000
+    const centreFraction = (3_000 + 200) / before
+    fireEvent.click(zoomIn())
+    const after = width()
+    expect(after).toBeGreaterThan(before * 2) // one Hours-band step is about ×2.13
+    expect((scroller.scrollLeft + 200) / after).toBeCloseTo(centreFraction, 6)
+  }, 20_000)
+
+  test("a preset name stored before the ladder restores that preset", async () => {
+    sessionStorage.setItem("beadbox:chart-zoom", JSON.stringify("days"))
+    setFiltersPreference(FILTERS)
+    await mounted()
+    expect(pressed()).toEqual(["Days"])
   }, 20_000)
 })
 

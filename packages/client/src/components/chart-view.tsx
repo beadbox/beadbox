@@ -170,7 +170,7 @@ export function ChartView() {
         onSettingsOpen={() => setSettingsOpen(true)}
       />
 
-      <main className="flex-1 min-h-0 flex flex-col w-full px-6 py-4 gap-3">
+      <main className="flex-1 min-h-0 min-w-0 flex flex-col w-full px-6 py-4 gap-3">
         <div className="flex items-center gap-2">
           <ChartGantt className="h-5 w-5" />
           <h1 className="text-lg font-semibold">Chart</h1>

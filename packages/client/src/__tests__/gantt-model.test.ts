@@ -280,3 +280,44 @@ describe("buildGanttModel — dependency scheduling (design D12)", () => {
     expect(m.extent!.end).toBe(NOW + 3 * HOUR)
   })
 })
+
+describe("buildGanttModel — blockers inherited from epics (beadbox-aqn, design D6)", () => {
+  const rowBar = (m: ReturnType<typeof model>, id: string) =>
+    m.sections.flatMap(function rows(sec): GanttSection["rows"] {
+      return [...sec.rows, ...sec.sections.flatMap(rows)]
+    }).find((r) => r.bead.id === id)!.bar!
+  const running = (id: string, startDay: number) =>
+    bead(id, { status: "in_progress", metadata: { started_at: day(startDay).toISOString() } })
+
+  test("a group blocked by a group: its not-started tasks start after the other group's last bar", () => {
+    const g1 = epic("G1", [running("a", 1), bead("b", { estimatedMinutes: 120 })])
+    const g2 = epic("G2", [bead("t")])
+    const m = model([g1, g2], FILTERS, { b: ["a"], G2: ["G1"] })
+    // G1's last bar is b's planned window, ending now + 2h.
+    expect(rowBar(m, "t").start).toBe(NOW + 2 * HOUR)
+  })
+
+  test("nested epics: a bead waits for the blocker of an epic further up", () => {
+    const outer = epic("E", [bead("x", { estimatedMinutes: 180 })], [epic("E1", [bead("t")])])
+    const m = model([outer, epic("B", [bead("blocker", { estimatedMinutes: 90 })])], FILTERS, { E1: [], E: ["blocker"] })
+    expect(rowBar(m, "t").start).toBe(NOW + 90 * 60_000)
+  })
+
+  test("a recorded start wins over an inherited blocker", () => {
+    const m = model([epic("G1", [bead("a", { estimatedMinutes: 120 })]), epic("G2", [running("t", 2)])], FILTERS, {
+      G2: ["G1"],
+    })
+    expect(rowBar(m, "t").start).toBe(day(2).getTime())
+  })
+
+  test("an epic blocked by its own child does not hang", () => {
+    const m = model([epic("E", [bead("c"), bead("d")])], FILTERS, { E: ["c"] })
+    expect(rowBar(m, "c").start).toBe(NOW)
+    expect(rowBar(m, "d").start).toBe(NOW + HOUR) // d inherits E's blocker c
+  })
+
+  test("an empty epic used as a blocker finishes at the end of its own bar", () => {
+    const m = model([epic("Empty", [], [], { estimatedMinutes: 30 }), epic("G", [bead("t")])], FILTERS, { G: ["Empty"] })
+    expect(rowBar(m, "t").start).toBe(NOW + 30 * 60_000)
+  })
+})

@@ -91,42 +91,80 @@ function scheduledBar(bead: Bead, latest: number, now: number): GanttBar | null 
   return { start, end: Math.max(start, end), style }
 }
 
-function indexBeads(beads: Bead[], out: Map<string, Bead>): void {
-  for (const bead of beads) {
-    if (bead.id !== UNGROUPED_ID && !out.has(bead.id)) out.set(bead.id, bead)
-    if (bead.children) indexBeads(bead.children, out)
-    if ((bead as Epic).childEpics) indexBeads((bead as Epic).childEpics!, out)
-  }
+interface BeadIndex {
+  beads: Map<string, Bead>
+  ancestorEpics: Map<string, string[]> // nearest first
+  descendants: Map<string, string[]> // for epics: every bead and epic inside
 }
 
-// Bars for every loaded bead, each placed after its blockers' bars. Runs on
-// the unfiltered tree so blockers hidden by filters still count. A bead met
-// again while it is being computed (a cycle) adds no constraint; null
-// blockedBy (dependency data unavailable) schedules nothing after anything.
+function indexBeads(epics: Epic[]): BeadIndex {
+  const index: BeadIndex = { beads: new Map(), ancestorEpics: new Map(), descendants: new Map() }
+  const visit = (bead: Bead, ancestors: string[]) => {
+    const real = bead.id !== UNGROUPED_ID
+    if (real && !index.beads.has(bead.id)) {
+      index.beads.set(bead.id, bead)
+      index.ancestorEpics.set(bead.id, ancestors)
+      for (const a of ancestors) index.descendants.get(a)?.push(bead.id)
+    }
+    const isEpic = real && "childEpics" in bead
+    if (isEpic && !index.descendants.has(bead.id)) index.descendants.set(bead.id, [])
+    const inner = isEpic ? [bead.id, ...ancestors] : ancestors
+    for (const child of bead.children ?? []) visit(child, inner)
+    for (const child of (bead as Epic).childEpics ?? []) visit(child, inner)
+  }
+  for (const epic of epics) visit(epic, [])
+  return index
+}
+
+// Bars for every loaded bead, each placed after its blockers' bars. A bead
+// also waits for the blockers of its ancestor epics (design D6 of
+// improve-chart-scroll-and-zoom), and an epic used as a blocker finishes when
+// the last bar inside it ends. Runs on the unfiltered tree so blockers hidden
+// by filters still count. A bead or epic met again while it is being computed
+// (a cycle) adds no constraint; null blockedBy (dependency data unavailable)
+// schedules nothing after anything.
 export function scheduleBars(
   epics: Epic[],
   blockedBy: Record<string, string[]> | null,
   now: number,
 ): Map<string, GanttBar | null> {
-  const beads = new Map<string, Bead>()
-  indexBeads(epics, beads)
+  const { beads, ancestorEpics, descendants } = indexBeads(epics)
   const bars = new Map<string, GanttBar | null>()
   const inProgress = new Set<string>()
-  const barOf = (id: string): GanttBar | null => {
+  const finishing = new Set<string>()
+
+  const finishOf = (id: string): number => {
+    const inside = descendants.get(id)
+    if (!inside?.length || finishing.has(id)) return barOf(id)?.end ?? Number.NEGATIVE_INFINITY
+    finishing.add(id)
+    let end = Number.NEGATIVE_INFINITY
+    for (const d of inside) {
+      if (inProgress.has(d)) continue
+      const bar = barOf(d)
+      if (bar) end = Math.max(end, bar.end)
+    }
+    finishing.delete(id)
+    return Number.isFinite(end) ? end : (barOf(id)?.end ?? Number.NEGATIVE_INFINITY)
+  }
+
+  function barOf(id: string): GanttBar | null {
     if (bars.has(id)) return bars.get(id)!
+    if (inProgress.has(id)) return null
     const bead = beads.get(id)!
     inProgress.add(id)
     let latest = Number.NEGATIVE_INFINITY
-    for (const blocker of blockedBy?.[id] ?? []) {
-      if (!beads.has(blocker) || inProgress.has(blocker)) continue
-      const bar = barOf(blocker)
-      if (bar) latest = Math.max(latest, bar.end)
+    for (const owner of [id, ...(ancestorEpics.get(id) ?? [])]) {
+      for (const blocker of blockedBy?.[owner] ?? []) {
+        if (!beads.has(blocker) || inProgress.has(blocker)) continue
+        latest = Math.max(latest, finishOf(blocker))
+      }
     }
     inProgress.delete(id)
     const bar = scheduledBar(bead, latest, now)
     bars.set(id, bar)
     return bar
   }
+
   for (const id of beads.keys()) barOf(id)
   return bars
 }
