@@ -14,6 +14,7 @@ Beadbox gives `bd` users a visual interface for the things a terminal can't show
 ## Features
 
 - **Epic tree** — hierarchical view of epics and child beads with status, priority, and progress at a glance
+- **Chart** — a timeline per epic: when work on each bead started and closed, what is planned after what, and what blocks what; same filters as the Beads view
 - **Trains** — `.beadtrain` files in the workspace `.beads/` folder: ready cars, coupler joins, click through to the bead
 - **Live updates** — changes made from the `bd` CLI appear in the UI in real time; no refresh
 - **Bead detail** — full descriptions, comments, dependencies, and workflow advancement in a side panel or modal
