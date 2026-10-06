@@ -55,11 +55,11 @@ function recordLoadEpicsPhase(
 // telemetry. Paired with app_workspace_load_succeeded on success, this lets us measure
 // the real load-time distribution instead of conflating "slow but working" with stuck.
 const WORKSPACE_LOAD_TIMEOUT_MS = 15_000
-const systemIssuesKey = (id: string) => `beadbox:system-issues:${id}`
+export const systemIssuesKey = (id: string) => `beadbox:system-issues:${id}`
 const treeCacheKey = (id: string | undefined, includeSystem: boolean) =>
   id ? `${id}:${includeSystem ? "all" : "normal"}` : undefined
 
-function readSystemIssues(id: string | undefined): boolean {
+export function readSystemIssues(id: string | undefined): boolean {
   if (!id || typeof localStorage === "undefined") return false
   try {
     return localStorage.getItem(systemIssuesKey(id)) === "true"

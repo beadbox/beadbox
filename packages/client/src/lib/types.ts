@@ -43,6 +43,8 @@ export interface Bead {
   parentId?: string
   createdAt?: Date
   updatedAt?: Date
+  closedAt?: Date
+  startedAt?: Date // bd's started_at; absent when bd recorded no start
   children?: Bead[] // Subtasks (nested parent-child relationships)
   blockedBy?: BeadDependency[] // Beads that must complete before this one
   blocks?: BeadDependency[] // Beads waiting on this one to complete

@@ -202,6 +202,7 @@ export interface BdBead {
   created_at: string // ISO date string
   updated_at: string // ISO date string
   closed_at?: string // ISO date string
+  started_at?: string // ISO; bd stamps it when work first starts, and omits the key until then
   deleted_at?: string
   acceptance_criteria?: string
   notes?: string

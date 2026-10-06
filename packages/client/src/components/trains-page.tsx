@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Loader2, TrainFront } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useAppHealth } from "../hooks/use-app-health"
 import { usePreferences } from "../hooks/use-preferences"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import { setSelectedBead as persistSelectedBead } from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
 import { useSubscriptionChangeSignal } from "../lib/subscribe"
+import { tryViewSwitchShortcut } from "../lib/view-switch-keys"
 import type { Workspace } from "../lib/types"
 import { getWorkspaceCookie } from "../lib/workspace-cookie"
 import { Header } from "./header"
@@ -259,6 +260,15 @@ export function TrainsPage() {
     persistSelectedBead(bead)
     void navigate({ to: "/" })
   }
+
+  // ⌘1–⌘5 view switching; this page is only reachable when plans exist.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      tryViewSwitchShortcut(e, { push: (to) => void navigate({ to: to as never }), hasTrains: true })
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [navigate])
 
   return (
     <div className="h-full flex flex-col bg-background safe-area-inset">

@@ -51,8 +51,9 @@ interface FilterBarProps {
   onTypeChange?: (type: string) => void
   includeSystem?: boolean
   onIncludeSystemChange?: (enabled: boolean) => void
-  sort: SortOption
-  onSortChange: (sort: SortOption) => void
+  // Omit both to hide the sort control (the Chart view keeps tree order).
+  sort?: SortOption
+  onSortChange?: (sort: SortOption) => void
 }
 
 // Encode sort option as string for select value
@@ -336,39 +337,41 @@ export function FilterBar({
       )}
 
       {/* Sort */}
-      <Select
-        value={encodeSortValue(sort)}
-        onValueChange={(value) => {
-          const newSort = decodeSortValue(value)
-          if (getAnalyticsEnabled()) {
-            safeCapture("app_sort_changed", {
-              sort_field: newSort.field,
-              sort_direction: newSort.direction,
-              previous_field: sort.field,
-              previous_direction: sort.direction,
-            })
-          }
-          onSortChange(newSort)
-        }}
-      >
-        <SelectTrigger
-          className={
-            isDesktop
-              ? "w-[235px] h-9 bg-transparent border-0 rounded-none"
-              : "w-full min-h-[44px] bg-transparent border-border/50"
-          }
+      {sort && onSortChange && (
+        <Select
+          value={encodeSortValue(sort)}
+          onValueChange={(value) => {
+            const newSort = decodeSortValue(value)
+            if (getAnalyticsEnabled()) {
+              safeCapture("app_sort_changed", {
+                sort_field: newSort.field,
+                sort_direction: newSort.direction,
+                previous_field: sort.field,
+                previous_direction: sort.direction,
+              })
+            }
+            onSortChange(newSort)
+          }}
         >
-          <ArrowUpDown className="h-4 w-4 mr-2 text-muted-foreground" />
-          <SelectValue placeholder="Sort by" />
-        </SelectTrigger>
-        <SelectContent>
-          {sortOptions.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+          <SelectTrigger
+            className={
+              isDesktop
+                ? "w-[235px] h-9 bg-transparent border-0 rounded-none"
+                : "w-full min-h-[44px] bg-transparent border-border/50"
+            }
+          >
+            <ArrowUpDown className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            {sortOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
       {/* Filter Toggles */}
       <TooltipProvider delayDuration={200} skipDelayDuration={0}>

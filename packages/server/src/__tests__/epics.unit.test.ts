@@ -80,6 +80,73 @@ describe("handlers/epics", () => {
   })
 })
 
+describe("handlers/epics — closedAt", () => {
+  let closedWs: Workspace
+
+  beforeAll(async () => {
+    closedWs = await createBdWorkspace()
+    await runBdInWorkspace(["close", closedWs.seedIds.test1], closedWs.root)
+  })
+
+  afterAll(async () => {
+    await closedWs?.cleanup()
+  })
+
+  test("a closed bead carries closedAt; an open one does not", async () => {
+    const r = await epics.getEpics(closedWs.dbPath)
+    expect(r.success).toBe(true)
+    if (!r.success) return
+    const all = r.epics.flatMap((e) => e.children)
+    const closed = all.find((b) => b.id === closedWs.seedIds.test1)
+    const open = all.find((b) => b.id === closedWs.seedIds.test2)
+    expect(closed?.status).toBe("closed")
+    expect(closed?.closedAt).toBeInstanceOf(Date)
+    expect(open?.closedAt).toBeUndefined()
+  })
+})
+
+// beadbox-8wz: bd records when work starts; the tree carries bd's own value,
+// and building the tree writes nothing.
+describe("handlers/epics — startedAt is bd's started_at", () => {
+  let startWs: Workspace
+
+  beforeAll(async () => {
+    startWs = await createBdWorkspace()
+    await runBdInWorkspace(["update", startWs.seedIds.test2, "--status", "in_progress"], startWs.root)
+  })
+
+  afterAll(async () => {
+    await startWs?.cleanup()
+  })
+
+  const shown = async (id: string) => {
+    const out = JSON.parse(await runBdInWorkspace(["show", id, "--json"], startWs.root))
+    return Array.isArray(out) ? out[0] : out
+  }
+
+  test("an in-progress bead carries bd's started_at; an open one has none", async () => {
+    const r = await epics.getEpics(startWs.dbPath)
+    expect(r.success).toBe(true)
+    if (!r.success) return
+    const all = r.epics.flatMap((e) => e.children)
+    const started = all.find((b) => b.id === startWs.seedIds.test2)
+    const open = all.find((b) => b.id === startWs.seedIds.test3)
+    const bdStarted = (await shown(startWs.seedIds.test2)).started_at
+    expect(typeof bdStarted).toBe("string")
+    expect(started?.startedAt?.getTime()).toBe(new Date(bdStarted).getTime())
+    expect((await shown(startWs.seedIds.test3)).started_at).toBeUndefined()
+    expect(open?.startedAt).toBeUndefined()
+  })
+
+  test("building the tree leaves bd's data byte-identical", async () => {
+    const before = await runBdInWorkspace(["list", "--all", "--json"], startWs.root)
+    await epics.getEpics(startWs.dbPath)
+    await epics.incrementalRefresh(startWs.dbPath)
+    await epics.getBlocksDependencies(startWs.dbPath)
+    expect(await runBdInWorkspace(["list", "--all", "--json"], startWs.root)).toBe(before)
+  })
+})
+
 describe("handlers/epics — system issue visibility", () => {
   let gateWorkspace: Workspace
   let gateId: string

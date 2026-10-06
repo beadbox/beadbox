@@ -762,6 +762,7 @@ export function SettingsDialog({
                               { keys: ["\u2318", "F"], action: "Toggle filter bar" },
                               { keys: ["\u2318", "1"], action: "Switch to Beads view" },
                               { keys: ["\u2318", "2"], action: "Switch to Activity view" },
+                              { keys: ["\u2318", "5"], action: "Switch to Chart view" },
                               { keys: ["\u2318", ","], action: "Open Settings" },
                               { keys: ["\u2318", "R"], action: "Refresh data" },
                             ].map((row, i) => (
