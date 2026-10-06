@@ -49,7 +49,7 @@
 
 import { type ChildProcess, execFile, spawn } from "child_process"
 import { createHash } from "crypto"
-import { existsSync, type FSWatcher, rmSync, watch } from "fs"
+import { existsSync, type FSWatcher, readdirSync, unlinkSync, watch } from "fs"
 import { tmpdir } from "os"
 import { readFile } from "fs/promises"
 import { basename, dirname, join } from "path"
@@ -588,6 +588,30 @@ export function _startServerPollChild(state: DetectorState, id: string): void {
 }
 
 /**
+ * Remove the poll loop's per-poll stderr file(s) for a loop pid (beadbox-5wk).
+ * The loop's own EXIT trap does this, but SIGKILL skips traps. mktemp gives
+ * the file a random suffix, so match the pid prefix. unlink never follows a
+ * symlink, and in a sticky /tmp it cannot remove another user's file.
+ */
+export function removePollStderrFiles(pid: number): void {
+  const prefix = `beadbox-poll-${pid}.`
+  let names: string[]
+  try {
+    names = readdirSync(tmpdir())
+  } catch {
+    return
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue
+    try {
+      unlinkSync(join(tmpdir(), name))
+    } catch {
+      /* gone, or not ours */
+    }
+  }
+}
+
+/**
  * Build the /bin/sh argv for the subscription poll child.
  *
  * Exported for test: everything attacker-influenceable (subscription id,
@@ -637,14 +661,16 @@ TMO="$4"
 LOG="$5"
 BEADSDIR="$6"
 # beadbox-5wk: bd's stderr for ONE poll, so a refusal can be told from a
-# failure. bd's stderr can carry credentials, so the file is owner-only
-# (umask 077), emptied right after each poll's check (nothing persists between
-# polls) and removed on exit. It's named by this shell's pid so the sidecar
-# can remove it even when the loop is SIGKILLed (no trap sees that).
+# failure. bd's stderr can carry credentials, so mktemp creates the file
+# exclusively (0600, random suffix: nothing planted at a guessable name in a
+# shared /tmp is ever opened), it is emptied right after each poll's check
+# (nothing persists between polls) and removed on exit. Its name starts with
+# this shell's pid so the sidecar can remove it even when the loop is
+# SIGKILLed (no trap sees that). If mktemp fails, refusals go undetected
+# rather than stderr going anywhere else.
 umask 077
-ERRF="\${TMPDIR:-/tmp}/beadbox-poll-$$"
-: > "$ERRF"
-trap 'rm -f "$ERRF"' EXIT
+ERRF=$(mktemp "\${TMPDIR:-/tmp}/beadbox-poll-$$.XXXXXX" 2>/dev/null) || ERRF=""
+if [ -n "$ERRF" ]; then trap 'rm -f "$ERRF"' EXIT; else ERRF=/dev/null; fi
 trap 'exit 143' TERM INT
 emit() {
   printf '%s\\n' "$1" >&2
@@ -817,7 +843,7 @@ function startServerPollChild(state: DetectorState, id: string): void {
   child.on("exit", (code, signal) => {
     if (state.pollChild === child) state.pollChild = null
     // beadbox-5wk: the loop's per-poll stderr file (see buildPollShellArgs).
-    if (child.pid) rmSync(join(tmpdir(), `beadbox-poll-${child.pid}`), { force: true })
+    if (child.pid) removePollStderrFiles(child.pid)
     // Exit during normal stop() is expected (we kill the child). Log
     // unexpected early exits so future bb-i4qd-class regressions are
     // greppable in sidecar stderr.

@@ -9,7 +9,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { spawn } from "node:child_process"
-import { rmSync, statSync, readFileSync, existsSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -225,10 +225,13 @@ describe("the per-poll stderr file never keeps what bd printed (it can carry cre
       beads,
     )
     const child = spawn("/bin/sh", args, { stdio: ["pipe", "ignore", "ignore"], detached: true })
-    const file = join(tmpdir(), `beadbox-poll-${child.pid}`)
+    const prefix = `beadbox-poll-${child.pid}.`
     try {
       // Let at least one full poll (and its check) complete.
       await new Promise((r) => setTimeout(r, 2_500))
+      const files = readdirSync(tmpdir()).filter((n) => n.startsWith(prefix))
+      expect(files).toHaveLength(1)
+      const file = join(tmpdir(), files[0])
       expect(existsSync(file)).toBe(true)
       expect(statSync(file).mode & 0o077).toBe(0)
       expect(readFileSync(file, "utf8")).not.toContain("S3cret-5wk-probe")
@@ -238,7 +241,50 @@ describe("the per-poll stderr file never keeps what bd printed (it can carry cre
       } catch {
         /* gone */
       }
-      rmSync(file, { force: true })
+      if (child.pid) detector.removePollStderrFiles(child.pid)
+    }
+  })
+
+  test("a file planted at the loop's pid-named path is never opened (a shared /tmp)", async () => {
+    const tmp = await mkdtemp(join(root, "tmp-"))
+    const beads = join(root, "plant", ".beads")
+    await mkdir(beads, { recursive: true })
+    await writeFile(join(beads, "metadata.json"), "{}")
+    const victim = join(root, "victim")
+    await writeFile(victim, "victim-content")
+    const fakeBd = join(root, "bd-plant")
+    await writeFile(fakeBd, `#!/bin/sh\necho "password is S3cret-5wk-probe" >&2\nexit 1\n`, {
+      mode: 0o700,
+    })
+    const args = (detector.buildPollShellArgs as (...a: unknown[]) => string[])(
+      "5wk-plant",
+      join(beads, "beads.db"),
+      fakeBd,
+      2,
+      "",
+      beads,
+    )
+    // exec keeps the pid, so the loop's $$ is this wrapper's: plant a symlink
+    // at beadbox-poll-<that pid> first, the way another local user could in /tmp.
+    const child = spawn(
+      "/bin/sh",
+      ["-c", 'ln -s "$VICTIM" "$TMPDIR/beadbox-poll-$$" && exec /bin/sh "$@"', "plant", ...args],
+      {
+        env: { ...process.env, TMPDIR: tmp, VICTIM: victim },
+        stdio: ["pipe", "ignore", "ignore"],
+        detached: true,
+      },
+    )
+    try {
+      await new Promise((r) => setTimeout(r, 2_500))
+      expect(readFileSync(victim, "utf8")).toBe("victim-content")
+    } finally {
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL")
+      } catch {
+        /* gone */
+      }
+      await rm(tmp, { recursive: true, force: true })
     }
   })
 })
