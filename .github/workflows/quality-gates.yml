@@ -482,10 +482,16 @@ jobs:
       - name: bun audit (high severity)
         # Each --ignore below was classified by DEPENDENCY PATH, not by
         # guessing from the package name. None of these parents ships:
-        #   brace-expansion, fast-uri  <- @stryker-mutator/core   (dev: mutation testing)
+        #   fast-uri                   <- @stryker-mutator/core   (dev: mutation testing)
         #   nanoid, postcss, vite      <- vite toolchain          (dev: build)
-        #   undici                     <- jsdom                   (dev: test DOM)
         #   ws                         <- happy-dom               (dev: test DOM)
+        #   braces (GHSA-vfj7-8cjw-p6xm) <- chokidar@3 <- @tanstack/router-cli
+        #                                 + @tanstack/router-plugin (dev: route
+        #     generation). No fixed release exists (3.0.3, the latest, is
+        #     affected), and the input is our own route-file globs. The way out
+        #     is the router family's move to chokidar ^5 (beadbox-9lp).
+        # brace-expansion, seroval, source-map-js and undici are not ignored:
+        # the root package.json overrides them to fixed versions (beadbox-9lp).
         # On ws specifically: kkrpc (a real production dep) lists ws only as a
         # peerDependency and we do not install it, so kkrpc does NOT pull ws
         # into the shipped tree — the only ws in the graph comes from
@@ -494,14 +500,11 @@ jobs:
         run: |
           set -euo pipefail
           bun audit --audit-level=high \
-            --ignore=GHSA-mh99-v99m-4gvg --ignore=GHSA-rgw5-rvv9-x895 \
-            --ignore=GHSA-3jxr-9vmj-r5cp \
             --ignore=GHSA-7p8r-x3mc-p8w7 --ignore=GHSA-v2hh-gcrm-f6hx \
             --ignore=GHSA-4c8g-83qw-93j6 --ignore=GHSA-q3j6-qgpj-74h6 \
             --ignore=GHSA-v39h-62p7-jpjc \
             --ignore=GHSA-28wg-ghj8-5hjv --ignore=GHSA-2v37-7h3g-55p8 \
             --ignore=GHSA-6g55-p6wh-862q --ignore=GHSA-r28c-9q8g-f849 \
             --ignore=GHSA-fx2h-pf6j-xcff \
-            --ignore=GHSA-4cwx-7wf7-3272 --ignore=GHSA-vmh5-mc38-953g \
-            --ignore=GHSA-vxpw-j846-p89q --ignore=GHSA-hm92-r4w5-c3mj \
+            --ignore=GHSA-vfj7-8cjw-p6xm \
             --ignore=GHSA-96hv-2xvq-fx4p
