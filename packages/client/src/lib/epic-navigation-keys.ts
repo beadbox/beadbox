@@ -102,11 +102,12 @@ const tryFilterBarShortcut = (e: KeyboardEvent, ctx: KeyNavContext): boolean => 
 
 const tryViewSwitchShortcut = (e: KeyboardEvent, ctx: KeyNavContext): boolean => {
   if (!(e.metaKey || e.ctrlKey)) return false
-  if (e.key !== "1" && e.key !== "2" && e.key !== "3" && e.key !== "4") return false
+  if (e.key !== "1" && e.key !== "2" && e.key !== "3" && e.key !== "4" && e.key !== "5") return false
   e.preventDefault()
   if (e.key === "2") ctx.router.push("/activity")
   if (e.key === "3") ctx.router.push("/formulas")
   if (e.key === "4" && ctx.hasTrains) ctx.router.push("/trains")
+  if (e.key === "5") ctx.router.push("/chart")
   return true
 }
 

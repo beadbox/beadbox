@@ -19,6 +19,7 @@ import {
   pourMolecule,
   setCustomStatuses,
   showFormula,
+  updateMetadata,
 } from "../lib/bd"
 import { BdArgvError, buildCommentArgs, buildUpdateArgs } from "../lib/bd-argv"
 
@@ -190,6 +191,64 @@ describe("formula names (beadbox-c29): refuse what bd would lex as a flag, pass 
     expect(await spawned()).toEqual([])
     await cookFormula("f", { café: "x=y" }, { db }).catch(() => {})
     expect((await spawned())[0]).toContain("--var=café=x=y")
+  })
+})
+
+describe("updateMetadata: one --set-metadata token; a key with '=' or a leading '-' is refused", () => {
+  const originalBdPath = process.env.BD_PATH
+  let root: string
+  let db: string
+  let log: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "beadbox-metadata-"))
+    db = join(root, ".beads")
+    await mkdir(db)
+    // A genuine workspace marker: bd is never run on a .beads without one (beadbox-fdk).
+    await writeFile(join(db, "metadata.json"), "{}")
+    log = join(root, "argv.log")
+    const fakeBd = join(root, "bd")
+    await writeFile(
+      fakeBd,
+      `#!/bin/sh\nprintf '%s\\037' "$@" >> "${log}"\nprintf '\\036' >> "${log}"\necho '{}'\n`,
+      { mode: 0o700 },
+    )
+    process.env.BD_PATH = fakeBd
+    __resetBdPathCache()
+  })
+
+  afterEach(async () => {
+    if (originalBdPath === undefined) delete process.env.BD_PATH
+    else process.env.BD_PATH = originalBdPath
+    __resetBdPathCache()
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function spawned(): Promise<string[][]> {
+    const raw = await readFile(log, "utf-8").catch(() => "")
+    return raw
+      .split("\x1e")
+      .filter(Boolean)
+      .map((rec) => rec.split("\x1f").slice(0, -1))
+  }
+
+  test("emits update <id> --set-metadata=<key>=<value>", async () => {
+    await updateMetadata("bb-1", "started_at", "2026-10-06T09:56:54Z", { db })
+    const [call] = await spawned()
+    const at = call.indexOf("update")
+    expect(call.slice(at, at + 3)).toEqual(["update", "bb-1", "--set-metadata=started_at=2026-10-06T09:56:54Z"])
+  })
+
+  test("a flag-shaped value stays inside the token", async () => {
+    await updateMetadata("bb-1", "k", HOSTILE_ID, { db })
+    expect((await spawned())[0]).toContain(`--set-metadata=k=${HOSTILE_ID}`)
+  })
+
+  test("refuses unsafe keys and ids before bd is spawned", async () => {
+    await expect(updateMetadata("bb-1", "a=b", "c", { db })).rejects.toThrow(BdArgvError)
+    await expect(updateMetadata("bb-1", "-k", "c", { db })).rejects.toThrow(BdArgvError)
+    await expect(updateMetadata(HOSTILE_ID, "k", "c", { db })).rejects.toThrow(BdArgvError)
+    expect(await spawned()).toEqual([])
   })
 })
 

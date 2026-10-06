@@ -199,6 +199,12 @@ describe("handleGlobalShortcut", () => {
     expect(ctx.router.push).toHaveBeenCalledWith("/trains")
   })
 
+  test("Cmd+5 navigates to /chart (beadbox-eic)", () => {
+    const ctx = makeCtx()
+    expect(handleGlobalShortcut(fireKey("5", { metaKey: true }), ctx)).toBe(true)
+    expect(ctx.router.push).toHaveBeenCalledWith("/chart")
+  })
+
   test("Cmd+4 does nothing when the workspace has no plans (zero footprint)", () => {
     const ctx = makeCtx({ hasTrains: false })
     handleGlobalShortcut(fireKey("4", { metaKey: true }), ctx)

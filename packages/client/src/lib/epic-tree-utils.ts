@@ -16,6 +16,22 @@ export const ERROR_CATEGORY_TITLES: Record<string, string> = {
   unknown: "Unable to load workspace",
 }
 
+export const isArchived = (bead: Bead) => Boolean(bead.labels?.includes("archived"))
+
+// beadbox-51m: the Backlog section shows backlogged work, never archived items
+// inside it (those are in Archived). Backlogged content is kept.
+export function withoutArchived(epic: Epic): Epic {
+  const keep = (beads: Bead[]): Bead[] =>
+    beads
+      .filter((bead) => !isArchived(bead))
+      .map((bead) => (bead.children ? { ...bead, children: keep(bead.children) } : bead))
+  return {
+    ...epic,
+    children: keep(epic.children ?? []),
+    childEpics: epic.childEpics?.filter((child) => !isArchived(child)).map(withoutArchived),
+  }
+}
+
 // Count all beads (issues + epics) in the epic tree recursively
 export function countAllBeads(epics: Epic[]): number {
   let count = 0

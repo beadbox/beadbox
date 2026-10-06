@@ -48,7 +48,6 @@ function readTypeFilter(workspaceId: string): string {
 }
 
 const isBacklogged = (bead: Bead) => bead.priority === "backlog"
-const isArchived = (bead: Bead) => Boolean(bead.labels?.includes("archived"))
 
 // beadbox-51m: archived epics go to the Archived section wherever they sit,
 // including nested under a milestone (#48 kept them in place). An archived
@@ -76,20 +75,6 @@ export function partitionInactiveEpics(roots: Epic[]): {
       .filter((epic) => isBacklogged(epic) && !isArchived(epic))
       .map(withoutArchived),
     archivedEpics,
-  }
-}
-
-// beadbox-51m: the Backlog section shows backlogged work, never archived items
-// inside it (those are in Archived). Backlogged content is kept.
-function withoutArchived(epic: Epic): Epic {
-  const keep = (beads: Bead[]): Bead[] =>
-    beads
-      .filter((bead) => !isArchived(bead))
-      .map((bead) => (bead.children ? { ...bead, children: keep(bead.children) } : bead))
-  return {
-    ...epic,
-    children: keep(epic.children ?? []),
-    childEpics: epic.childEpics?.filter((child) => !isArchived(child)).map(withoutArchived),
   }
 }
 
@@ -167,7 +152,9 @@ import {
   filterEpics,
   flattenEpicsToBeads,
   groupBeadsByStatus,
+  isArchived,
   matchesBead,
+  withoutArchived,
 } from "@/lib/epic-tree-utils"
 import { getVersionStatus } from "@/lib/version-requirements"
 
