@@ -5,6 +5,9 @@ import {
   HOUR_MS,
   levelScale,
   MAX_LEVEL,
+  MAX_TICKS,
+  NOW_ANCHOR,
+  nowScrollLeft,
   MIN_LEVEL,
   MIN_TICK_PX,
   PRESET_LEVEL,
@@ -113,5 +116,53 @@ describe("centeredScrollLeft (design D3)", () => {
     expect(centeredScrollLeft(0, 0, 0.001, 400, 10_000)).toBe(0)
     expect(centeredScrollLeft(1e9, 0, 0.001, 400, 10_000)).toBe(9_600)
     expect(centeredScrollLeft(5, 0, 1, 400, 300)).toBe(0) // content narrower than the view
+  })
+})
+
+describe("minute tick units (PR #53)", () => {
+  test("Hours stays hourly; one step past gives 30 minutes, two steps 15 minutes", () => {
+    expect(tickUnit(levelScale(PRESET_LEVEL.hours))).toBe("hours")
+    expect(tickUnit(levelScale(PRESET_LEVEL.hours + 1))).toBe("minutes30")
+    expect(tickUnit(levelScale(PRESET_LEVEL.hours + 2))).toBe("minutes15")
+    expect(PRESET_LEVEL.hours + 2).toBe(MAX_LEVEL) // reachable within today's zoom limit
+  })
+
+  test("minute ticks align to local quarter / half hours and are evenly spaced", () => {
+    const domain = { start: new Date(2026, 9, 1, 9, 7).getTime(), end: new Date(2026, 9, 1, 11, 0).getTime() }
+    const quarters = ticks(domain, "minutes15")
+    expect(new Date(quarters[0]).getMinutes()).toBe(15)
+    expect(quarters.every((t) => new Date(t).getMinutes() % 15 === 0)).toBe(true)
+    expect(quarters.slice(1).every((t, i) => t - quarters[i] === 15 * 60_000)).toBe(true)
+    const halves = ticks(domain, "minutes30")
+    expect(new Date(halves[0]).getMinutes()).toBe(30)
+    expect(halves.every((t) => new Date(t).getMinutes() % 30 === 0)).toBe(true)
+  })
+
+  test("labels read HH:MM, and midnight keeps its date", () => {
+    expect(tickLabel(new Date(2026, 9, 1, 14, 30).getTime(), "minutes30")).toBe("14:30")
+    expect(tickLabel(new Date(2026, 9, 1, 14, 15).getTime(), "minutes15")).toBe("14:15")
+    expect(tickLabel(new Date(2026, 9, 1, 9, 0).getTime(), "minutes15")).toBe("09:00")
+    expect(tickLabel(new Date(2026, 9, 2, 0, 0).getTime(), "minutes15")).not.toContain(":")
+  })
+
+  test("a long range at a minute scale stays within MAX_TICKS", () => {
+    const start = new Date(2026, 0, 1).getTime()
+    const out = ticks({ start, end: start + 365 * DAY_MS }, "minutes15")
+    expect(out.length).toBeLessThanOrEqual(MAX_TICKS)
+    expect(out.length).toBeGreaterThan(0)
+  })
+})
+
+describe("nowScrollLeft (PR #53)", () => {
+  test("puts now at 75% of the viewport", () => {
+    const left = nowScrollLeft(1_000_000, 0, 0.001, 400, 10_000)
+    expect(NOW_ANCHOR).toBe(0.75)
+    expect(1_000_000 * 0.001 - left).toBe(300)
+  })
+
+  test("is clamped at both ends of the scroll range", () => {
+    expect(nowScrollLeft(100_000, 0, 0.001, 400, 10_000)).toBe(0) // now near the start
+    expect(nowScrollLeft(9_950_000, 0, 0.001, 400, 10_000)).toBe(9_600) // now near the end
+    expect(nowScrollLeft(5, 0, 1, 400, 300)).toBe(0) // content narrower than the view
   })
 })
