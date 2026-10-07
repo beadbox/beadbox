@@ -1,4 +1,4 @@
-// Chart view (beadbox-eic). Like every e2e/*.spec.ts, this is ignored by
+// Chart view (PR #51). Like every e2e/*.spec.ts, this is ignored by
 // playwright.config.ts until the suite is rewritten for the Tauri runtime; it
 // records the end-to-end checks that rewrite should carry.
 

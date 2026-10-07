@@ -1,4 +1,4 @@
-// Chart view model (beadbox-eic): turns the epic tree into Gantt sections,
+// Chart view model (PR #51): turns the epic tree into Gantt sections,
 // rows, bars and dependency edges. Pure, so the SVG components only draw.
 
 import { filterEpics, isArchived, withoutArchived } from "./epic-tree-utils"

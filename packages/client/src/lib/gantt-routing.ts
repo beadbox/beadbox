@@ -1,4 +1,4 @@
-// Dependency connector routing for the Chart view (beadbox-eic, design D11).
+// Dependency connector routing for the Chart view (PR #51).
 // Pure geometry: a connector leaves the predecessor's end edge and ends on the
 // dependent's start edge, travelling only through space no bar occupies. Bars
 // are vertically centred in fixed-height rows, so the boundary between two

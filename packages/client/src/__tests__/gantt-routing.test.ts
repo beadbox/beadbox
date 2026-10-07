@@ -46,7 +46,7 @@ function expectWellFormed(path: Point[], g: RowGeometry, fromRow: number, toRow:
 
 describe("routeConnector", () => {
   test("control: the old elbow routing is caught crossing bars", () => {
-    // gantt-chart.tsx before beadbox-eic.7: bend right of both, then back left into the start.
+    // An earlier gantt-chart.tsx: bend right of both, then back left into the start.
     const g = geo([
       [0, 200],
       [50, 300],

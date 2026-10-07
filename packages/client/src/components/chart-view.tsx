@@ -1,4 +1,4 @@
-// Chart view (beadbox-eic): a Gantt per epic. Data comes the way the other
+// Chart view (PR #51): a Gantt per epic. Data comes the way the other
 // lightweight pages load it (react-query keyed on the live-update signal);
 // filters are the Beads view's own saved state, so a filter set on one view
 // applies on the other.

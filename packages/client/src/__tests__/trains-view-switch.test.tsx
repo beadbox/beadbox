@@ -1,5 +1,5 @@
 // Trains had no view-switch keys; ⌘5 must reach the Chart view from it too
-// (beadbox-eic).
+// (PR #51).
 
 import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
 import {

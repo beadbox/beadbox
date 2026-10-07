@@ -1,4 +1,4 @@
-// Gantt drawing for the Chart view (beadbox-eic). The model (lib/gantt-model)
+// Gantt drawing for the Chart view (PR #51). The model (lib/gantt-model)
 // decides what is shown; this component only lays it out: an HTML title
 // column (links, focus, truncation) beside one SVG timeline, both in a single
 // scroll container so rows stay aligned.

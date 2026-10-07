@@ -66,7 +66,7 @@ describe("gantt scale", () => {
   })
 })
 
-describe("zoom ladder (beadbox-aqn, design D2)", () => {
+describe("zoom ladder (PR #51)", () => {
   test("levels 0, 4 and 8 are today's Weeks, Days and Hours scales", () => {
     expect(levelScale(PRESET_LEVEL.weeks)).toBe(pxPerMs("weeks", { start: 0, end: 1 }, 1))
     expect(levelScale(PRESET_LEVEL.days)).toBe(pxPerMs("days", { start: 0, end: 1 }, 1))

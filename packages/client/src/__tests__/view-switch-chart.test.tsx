@@ -1,5 +1,5 @@
 // ⌘5 opens the Chart view from the Activity and Formulas views, through each
-// page's own view-switch handler (beadbox-eic).
+// page's own view-switch handler (PR #51).
 
 import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
 import {

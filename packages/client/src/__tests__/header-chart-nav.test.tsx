@@ -1,4 +1,4 @@
-// Header — Chart tab (beadbox-eic): sits after Formulas, opens /chart, and
+// Header — Chart tab (PR #51): sits after Formulas, opens /chart, and
 // shows as active there.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"

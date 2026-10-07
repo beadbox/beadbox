@@ -1,4 +1,4 @@
-// Chart view (beadbox-eic): rendering, shared filters, collapse, bar styles,
+// Chart view (PR #51): rendering, shared filters, collapse, bar styles,
 // dependency drawing, the degraded notice, and opening a bead on Beads.
 
 import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
@@ -276,7 +276,7 @@ describe("Chart view", () => {
     expect(b[0]).toBeGreaterThanOrEqual(nowX - 0.5) // the plan starts no earlier than now
   }, 20_000)
 
-  test("the timeline scroller is the only scroll container and holds no titles (beadbox-aqn.1.2)", async () => {
+  test("the timeline scroller is the only scroll container and holds no titles (PR #51)", async () => {
     // A scrollbar spans the element that scrolls; with the titles outside the
     // scroller, the scrollbars run only along the bars.
     setFiltersPreference(FILTERS)
@@ -436,7 +436,7 @@ describe("Chart view", () => {
   }, 20_000)
 })
 
-describe("Chart view — stepwise zoom (beadbox-aqn.2.2)", () => {
+describe("Chart view — stepwise zoom (PR #51)", () => {
   const pressed = () =>
     ["Fit", "Hours", "Days", "Weeks"].filter(
       (name) => screen.getByRole("button", { name }).getAttribute("aria-pressed") === "true",

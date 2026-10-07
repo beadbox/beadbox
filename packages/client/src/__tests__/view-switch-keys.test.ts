@@ -1,4 +1,4 @@
-// ⌘1–⌘5 for the pages without their own handler (Chart, Trains): beadbox-eic.
+// ⌘1–⌘5 for the pages without their own handler (Chart, Trains), from PR #51.
 
 import { describe, expect, mock, test } from "bun:test"
 import { tryViewSwitchShortcut } from "@/lib/view-switch-keys"

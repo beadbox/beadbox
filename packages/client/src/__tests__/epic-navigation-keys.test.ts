@@ -199,7 +199,7 @@ describe("handleGlobalShortcut", () => {
     expect(ctx.router.push).toHaveBeenCalledWith("/trains")
   })
 
-  test("Cmd+5 navigates to /chart (beadbox-eic)", () => {
+  test("Cmd+5 navigates to /chart (PR #51)", () => {
     const ctx = makeCtx()
     expect(handleGlobalShortcut(fireKey("5", { metaKey: true }), ctx)).toBe(true)
     expect(ctx.router.push).toHaveBeenCalledWith("/chart")

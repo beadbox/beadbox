@@ -1,4 +1,4 @@
-// Time axis for the Chart view (beadbox-eic): pixels per millisecond for a
+// Time axis for the Chart view (PR #51): pixels per millisecond for a
 // zoom level, and tick positions/labels in local time.
 
 export type Zoom = "fit" | "hours" | "days" | "weeks"
@@ -39,7 +39,7 @@ export function pxPerMs(zoom: Zoom, domain: TimeDomain, width: number): number {
   return PX_PER_UNIT[zoom] / UNIT_MS[zoom]
 }
 
-// Zoom ladder (beadbox-aqn, design D2): Weeks, Days and Hours sit on levels
+// Zoom ladder (PR #51): Weeks, Days and Hours sit on levels
 // 0, 4 and 8, with 4 equal steps (as ratios) between neighbours, so a step
 // changes the scale more in the Hours band than in the Days band, and every
 // 4th step lands exactly on a preset.

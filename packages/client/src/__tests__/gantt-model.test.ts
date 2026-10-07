@@ -323,7 +323,7 @@ describe("buildGanttModel — dependency scheduling (design D12)", () => {
   })
 })
 
-describe("buildGanttModel — blockers inherited from epics (beadbox-aqn, design D6)", () => {
+describe("buildGanttModel — blockers inherited from epics (PR #51)", () => {
   const rowBar = (m: ReturnType<typeof model>, id: string) =>
     m.sections.flatMap(function rows(sec): GanttSection["rows"] {
       return [...sec.rows, ...sec.sections.flatMap(rows)]
