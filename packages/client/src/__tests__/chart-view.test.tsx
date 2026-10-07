@@ -48,6 +48,9 @@ function bead(id: string, extra: Partial<Bead> = {}): Bead {
   }
 }
 
+// Tests that need a different hierarchy swap this; afterEach restores it.
+let treeFn: () => Epic[] = () => tree()
+
 function tree(): Epic[] {
   return [
     {
@@ -110,7 +113,7 @@ function installRpc() {
     },
     epics: new Proxy(
       {
-        incrementalRefresh: mock(() => Promise.resolve({ success: true as const, epics: tree() })),
+        incrementalRefresh: mock(() => Promise.resolve({ success: true as const, epics: treeFn() })),
         getBlocksDependencies: mock(() => Promise.resolve(blocksAnswer)),
       },
       {
@@ -175,6 +178,7 @@ afterEach(() => {
   setFiltersPreference(FILTERS)
   setSelectedBead(null)
   blocksAnswer = { blockedBy: { b: ["a"], d: ["a"] } }
+  treeFn = () => tree()
 })
 
 describe("Chart view", () => {
@@ -374,6 +378,62 @@ describe("Chart view", () => {
     await waitFor(() => expect(screen.getByText("BEADS VIEW")).toBeTruthy(), { timeout: 5_000 })
     expect(getSelectedBead()).toBe("b")
   }, 20_000)
+
+  test("clicking a bead's bar does what clicking its title does (beadbox-bvq)", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(barFor("c")!)
+    await waitFor(() => expect(screen.getByText("BEADS VIEW")).toBeTruthy(), { timeout: 5_000 })
+    expect(getSelectedBead()).toBe("c")
+  }, 20_000)
+
+  test("the title column resizes by drag between 300 and 600 px (beadbox-bvq)", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const handle = screen.getByRole("separator", { name: "Resize bead titles" })
+    const column = () => Number.parseInt((handle.parentElement as HTMLElement).style.width, 10)
+    const drag = (from: number, to: number) => {
+      fireEvent.pointerDown(handle, { pointerId: 1, clientX: from })
+      fireEvent.pointerMove(handle, { pointerId: 1, clientX: to })
+      fireEvent.pointerUp(handle, { pointerId: 1, clientX: to })
+    }
+    expect(column()).toBe(300)
+    drag(500, 650)
+    expect(column()).toBe(450)
+    expect(handle.getAttribute("aria-valuenow")).toBe("450")
+    drag(500, 2_000)
+    expect(column()).toBe(600)
+    drag(500, -2_000)
+    expect(column()).toBe(300)
+    // A move without a press does nothing.
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 900 })
+    expect(column()).toBe(300)
+  }, 20_000)
+
+  test("arrow keys resize the title column, and the width survives a remount", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const handle = () => screen.getByRole("separator", { name: "Resize bead titles" })
+    fireEvent.keyDown(handle(), { key: "ArrowRight" })
+    fireEvent.keyDown(handle(), { key: "ArrowRight" })
+    expect(handle().getAttribute("aria-valuenow")).toBe("332")
+    fireEvent.keyDown(handle(), { key: "ArrowLeft" })
+    expect(handle().getAttribute("aria-valuenow")).toBe("316")
+    cleanup()
+    queryClient.clear()
+    _resetWorkspaceSessions()
+    await mounted()
+    expect(handle().getAttribute("aria-valuenow")).toBe("316")
+  }, 20_000)
+
+  test("clicking a summary bar opens nothing", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(screen.getAllByTestId("gantt-summary-bar")[0])
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText("BEADS VIEW")).toBeNull()
+    expect(getSelectedBead()).toBeNull()
+  }, 20_000)
 })
 
 describe("Chart view — stepwise zoom (beadbox-aqn.2.2)", () => {
@@ -463,4 +523,96 @@ describe("useNow", () => {
       globalThis.clearInterval = realClear
     }
   })
+})
+
+describe("Chart view — links across epics (beadbox-bvq.4.2)", () => {
+  const toggle = () => screen.getByRole("button", { name: "Links across epics" })
+  const crossPaths = () => document.querySelectorAll('[data-testid="gantt-arrow"][data-cross="true"]')
+  const markerLabels = () => screen.queryAllByTestId("gantt-marker").map((el) => el.getAttribute("aria-label"))
+  const pathPoints = (path: Element) =>
+    path
+      .getAttribute("d")!
+      .split(/[ML]/)
+      .filter(Boolean)
+      .map((p) => p.trim().split(",").map(Number))
+  const summaryBarAt = (y: number) =>
+    screen.getAllByTestId("gantt-summary-bar").find((r) => {
+      const top = Number(r.getAttribute("y"))
+      return y >= top - 4 && y <= top + Number(r.getAttribute("height")) + 4
+    })
+
+  test("off by default: a dependency across epics is shown as dots only", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    expect(toggle().getAttribute("aria-pressed")).toBe("false")
+    expect(crossPaths()).toHaveLength(0)
+    expect(markerLabels()).toContain("Blocked by a: Title a")
+    expect(markerLabels()).toContain("Blocks d: Title d")
+  }, 20_000)
+
+  test("on: a connector from the blocker's end edge to the dependent's start edge replaces the dots", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(toggle())
+    expect(toggle().getAttribute("aria-pressed")).toBe("true")
+    const [path] = crossPaths()
+    expect(path.getAttribute("data-from")).toBe("a")
+    expect(path.getAttribute("data-to")).toBe("d")
+    const points = pathPoints(path)
+    const [first, last, beforeLast] = [points[0], points[points.length - 1], points[points.length - 2]]
+    const [a, d] = [barFor("a")!, barFor("d")!]
+    expect(first[0]).toBeCloseTo(Number(a.getAttribute("x")) + Number(a.getAttribute("width")))
+    expect(last[0]).toBeCloseTo(Number(d.getAttribute("x")))
+    expect(beforeLast[0]).toBeLessThan(last[0]) // heading right into the start edge
+    expect(markerLabels()).not.toContain("Blocked by a: Title a")
+    expect(markerLabels()).not.toContain("Blocks d: Title d")
+  }, 20_000)
+
+  test("the dependent's epic collapsed: the connector ends at that epic's summary bar", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(toggle())
+    fireEvent.click(screen.getByRole("button", { name: /Epic two/ }))
+    const [path] = crossPaths()
+    expect(path.getAttribute("data-to")).toBe("E2")
+    const last = pathPoints(path).at(-1)!
+    const bar = summaryBarAt(last[1])!
+    expect(last[0]).toBeCloseTo(Number(bar.getAttribute("x")))
+  }, 20_000)
+
+  test("both epics collapsed: several links become one connector between the headers", async () => {
+    blocksAnswer = { blockedBy: { d: ["a", "b", "c"] } }
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(toggle())
+    expect(crossPaths()).toHaveLength(3)
+    fireEvent.click(screen.getByRole("button", { name: /Epic one/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Epic two/ }))
+    expect(crossPaths()).toHaveLength(1)
+    expect([crossPaths()[0].getAttribute("data-from"), crossPaths()[0].getAttribute("data-to")]).toEqual(["E1", "E2"])
+  }, 20_000)
+
+  test("a bead in a child epic of a collapsed epic links to the outer epic's header", async () => {
+    treeFn = () => {
+      const [e1, e2] = tree()
+      const child = { ...bead("E2c", { type: "epic", title: "Child epic" }), children: [bead("n", { assignee: "bob" })], childEpics: [] }
+      return [e1, { ...e2, childEpics: [child] }]
+    }
+    blocksAnswer = { blockedBy: { n: ["a"] } }
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(toggle())
+    fireEvent.click(screen.getByRole("button", { name: /Child epic/ }))
+    expect(crossPaths()[0].getAttribute("data-to")).toBe("E2c")
+    fireEvent.click(screen.getByRole("button", { name: /Epic two/ }))
+    expect(crossPaths()[0].getAttribute("data-to")).toBe("E2")
+  }, 20_000)
+
+  test("a blocker hidden by filters keeps its dot and gets no connector", async () => {
+    setFiltersPreference({ ...FILTERS, assignee: "bob" }) // a (alice) is hidden; d (bob) is shown
+    await mounted()
+    fireEvent.click(toggle())
+    expect(crossPaths()).toHaveLength(0)
+    expect(markerLabels()).toContain("Blocked by a: Title a")
+  }, 20_000)
 })

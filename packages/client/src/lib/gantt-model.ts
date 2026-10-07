@@ -52,6 +52,9 @@ export interface GanttMarker {
 export interface GanttModel {
   sections: GanttSection[]
   edges: GanttEdge[]
+  // Edges between beads shown in different sections; drawn only while
+  // "Links across epics" is on (beadbox-bvq, design D1).
+  crossEdges: GanttEdge[]
   markers: Record<string, GanttMarker[]>
   extent: { start: number; end: number } | null
   dependenciesDegraded: boolean
@@ -261,11 +264,12 @@ function buildDependencies(
   rows: GanttRow[],
   blockedBy: Record<string, string[]> | null,
   titles: Map<string, string>,
-): { edges: GanttEdge[]; markers: Record<string, GanttMarker[]> } {
+): { edges: GanttEdge[]; crossEdges: GanttEdge[]; markers: Record<string, GanttMarker[]> } {
   const edges: GanttEdge[] = []
+  const crossEdges: GanttEdge[] = []
   // No prototype: a bead id like "constructor" must start with no markers.
   const markers: Record<string, GanttMarker[]> = Object.create(null)
-  if (!blockedBy) return { edges, markers }
+  if (!blockedBy) return { edges, crossEdges, markers }
   const sectionOf = new Map(rows.map((row) => [row.bead.id, row.sectionId]))
   const mark = (id: string, marker: GanttMarker) => {
     if (!markers[id]) markers[id] = []
@@ -282,10 +286,11 @@ function buildDependencies(
       mark(blocked, { otherId: blocker, otherTitle: titles.get(blocker) ?? blocker, relation: "blocked-by" })
       if (blockerSection !== undefined) {
         mark(blocker, { otherId: blocked, otherTitle: titles.get(blocked) ?? blocked, relation: "blocks" })
+        crossEdges.push({ from: blocker, to: blocked })
       }
     }
   }
-  return { edges, markers }
+  return { edges, crossEdges, markers }
 }
 
 export function buildGanttModel(
@@ -305,10 +310,11 @@ export function buildGanttModel(
   const sections = visible.map((epic) => buildSection(epic, 0, bars))
   const rows: GanttRow[] = []
   for (const section of sections) collectRows(section, rows)
-  const { edges, markers } = buildDependencies(rows, blockedBy, titles)
+  const { edges, crossEdges, markers } = buildDependencies(rows, blockedBy, titles)
   return {
     sections,
     edges,
+    crossEdges,
     markers,
     extent: span(sections.map((s) => s.bar)),
     dependenciesDegraded: blockedBy === null,

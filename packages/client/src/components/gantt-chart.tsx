@@ -27,7 +27,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
 
 const ROW_H = 28
 const AXIS_H = 28
-const TITLE_W = 300
+const TITLE_W = 300 // initial and minimum width of the title column
+const TITLE_MAX_W = 2 * TITLE_W
+const TITLE_KEY_STEP = 16
 const BAR_H = 14
 const SUMMARY_H = 6
 const ZOOMS: Array<[Zoom, string]> = [
@@ -39,6 +41,15 @@ const ZOOMS: Array<[Zoom, string]> = [
 
 const COLLAPSED_KEY = "beadbox:chart-collapsed"
 const ZOOM_KEY = "beadbox:chart-zoom"
+const TITLE_WIDTH_KEY = "beadbox:chart-title-width"
+const CROSS_LINKS_KEY = "beadbox:chart-cross-links"
+
+const clampTitleWidth = (w: number) => Math.min(TITLE_MAX_W, Math.max(TITLE_W, Math.round(w)))
+
+function readTitleWidth(): number {
+  const stored = readSession<unknown>(TITLE_WIDTH_KEY, TITLE_W)
+  return typeof stored === "number" && Number.isFinite(stored) ? clampTitleWidth(stored) : TITLE_W
+}
 
 // Fit, or a level on the zoom ladder (presets are levels 0, 4, 8).
 type ZoomState = { kind: "fit" } | { kind: "level"; level: number }
@@ -120,6 +131,21 @@ function flatten(sections: GanttSection[], collapsed: Set<string>, out: Line[] =
   return out
 }
 
+// For each bead, the ids of the sections containing it, outermost first, so a
+// link into a collapsed epic can be redirected to that epic's header (design D2).
+function sectionStructure(sections: GanttSection[]): { chainOf: (beadId: string) => string[] } {
+  const chains = new Map<string, string[]>()
+  const walk = (list: GanttSection[], outer: string[]) => {
+    for (const section of list) {
+      const chain = [...outer, section.id]
+      for (const row of section.rows) if (!chains.has(row.bead.id)) chains.set(row.bead.id, chain)
+      walk(section.sections, chain)
+    }
+  }
+  walk(sections, [])
+  return { chainOf: (beadId) => chains.get(beadId) ?? [] }
+}
+
 function markerText(m: GanttMarker): string {
   return `${m.relation === "blocked-by" ? "Blocked by" : "Blocks"} ${m.otherId}: ${m.otherTitle}`
 }
@@ -135,6 +161,37 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
   const [zoom, setZoom] = useState<ZoomState>(readZoom)
   const scrollRef = useRef<HTMLDivElement>(null)
   const titlesRef = useRef<HTMLDivElement>(null)
+  const [titleW, setTitleWState] = useState(readTitleWidth)
+  const [crossLinks, setCrossLinksState] = useState(() => readSession<unknown>(CROSS_LINKS_KEY, false) === true)
+  const toggleCrossLinks = () => {
+    setCrossLinksState((on) => {
+      writeSession(CROSS_LINKS_KEY, !on)
+      return !on
+    })
+  }
+  const setTitleW = (w: number) => {
+    const next = clampTitleWidth(w)
+    setTitleWState(next)
+    writeSession(TITLE_WIDTH_KEY, next)
+  }
+  const resizeDrag = useRef<{ startX: number; startW: number } | null>(null)
+  const onResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    resizeDrag.current = { startX: e.clientX, startW: titleW }
+  }
+  const onResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = resizeDrag.current
+    if (drag) setTitleW(drag.startW + e.clientX - drag.startX)
+  }
+  const onResizeEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    resizeDrag.current = null
+    e.currentTarget.releasePointerCapture?.(e.pointerId)
+  }
+  const onResizeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+    e.preventDefault()
+    setTitleW(titleW + (e.key === "ArrowRight" ? TITLE_KEY_STEP : -TITLE_KEY_STEP))
+  }
   const [viewWidth, setViewWidth] = useState(800)
   const [scrollbarH, setScrollbarH] = useState(0)
 
@@ -184,6 +241,7 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
   const chooseZoom = (z: Zoom) => applyZoom(z === "fit" ? { kind: "fit" } : { kind: "level", level: PRESET_LEVEL[z] })
 
   const lines = useMemo(() => flatten(model.sections, collapsed), [model.sections, collapsed])
+  const structure = useMemo(() => sectionStructure(model.sections), [model.sections])
 
   // +/- keep the moment at the centre of the view in place (design D3): the
   // centre time is taken before the zoom changes and restored before paint.
@@ -229,21 +287,53 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
     x(bar.start) + Math.max(x(bar.end) - x(bar.start), minWidth),
   ]
   const rowIndex = new Map<string, number>()
+  const headerIndex = new Map<string, number>()
   const obstacles = lines.map((line, i): [number, number] | null => {
     if (line.kind === "section") {
+      headerIndex.set(line.section.id, i)
       const bar = line.section.bar
       return bar ? drawn(bar, line.section.barKind === "own" ? 3 : 2) : null
     }
     rowIndex.set(line.row.bead.id, i)
     return line.row.bar ? drawn(line.row.bar, 3) : null
   })
-  const shownEdges = model.edges.filter(
-    ({ from, to }) => obstacles[rowIndex.get(from) ?? -1] && obstacles[rowIndex.get(to) ?? -1],
-  )
+  // A bead's line: its own row, or, when it is inside a collapsed epic, the
+  // header of the outermost collapsed epic containing it (design D2).
+  const anchorOf = (beadId: string): { line: number; id: string } | undefined => {
+    const row = rowIndex.get(beadId)
+    if (row !== undefined) return { line: row, id: beadId }
+    const chain = structure.chainOf(beadId) // outermost first
+    const folded = chain.find((sectionId) => collapsed.has(sectionId))
+    const header = folded === undefined ? undefined : headerIndex.get(folded)
+    return header === undefined || folded === undefined ? undefined : { line: header, id: folded }
+  }
+  const links: Array<{ fromLine: number; toLine: number; from: string; to: string; cross: boolean }> = []
+  const linked = new Set<string>()
+  for (const { from, to } of model.edges) {
+    const [a, b] = [rowIndex.get(from), rowIndex.get(to)]
+    if (a === undefined || b === undefined || !obstacles[a] || !obstacles[b]) continue
+    links.push({ fromLine: a, toLine: b, from, to, cross: false })
+    linked.add(`${a}->${b}`)
+  }
+  const drawnCrossEdges = new Set<string>()
+  if (crossLinks) {
+    for (const { from, to } of model.crossEdges) {
+      const [a, b] = [anchorOf(from), anchorOf(to)]
+      if (!a || !b || a.line === b.line || !obstacles[a.line] || !obstacles[b.line]) continue
+      drawnCrossEdges.add(`${from}->${to}`)
+      const key = `${a.line}->${b.line}`
+      if (linked.has(key)) continue
+      linked.add(key)
+      links.push({ fromLine: a.line, toLine: b.line, from: a.id, to: b.id, cross: true })
+    }
+  }
   const connectors = routeConnectors(
-    shownEdges.map(({ from, to }) => ({ fromRow: rowIndex.get(from)!, toRow: rowIndex.get(to)! })),
+    links.map(({ fromLine, toLine }) => ({ fromRow: fromLine, toRow: toLine })),
     { rowHeight: ROW_H, bars: obstacles },
   )
+  // While links across epics are drawn, their dots would say the same thing twice.
+  const markerShown = (beadId: string, m: GanttMarker) =>
+    !drawnCrossEdges.has(m.relation === "blocked-by" ? `${m.otherId}->${beadId}` : `${beadId}->${m.otherId}`)
 
   return (
     <div className="flex flex-col min-h-0 min-w-0 flex-1">
@@ -280,6 +370,18 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
             {label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={toggleCrossLinks}
+          aria-pressed={crossLinks}
+          title="Draw dependencies between beads in different epics as arrows"
+          className={cn(
+            "ml-2 px-2.5 py-1 text-xs font-medium rounded-md transition-colors",
+            crossLinks ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+          )}
+        >
+          Links across epics
+        </button>
         <Legend />
       </div>
 
@@ -287,7 +389,24 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
           container, so its scrollbars run only along the bars; the title pane
           on the left has no scrollbar and follows it vertically (design D1). */}
       <div className="relative flex flex-1 min-h-0 min-w-0 rounded-md border border-border/50" data-testid="gantt-frame">
-        <div className="flex shrink-0 flex-col bg-background border-r border-border/50" style={{ width: TITLE_W }}>
+        <div className="relative flex shrink-0 flex-col bg-background border-r border-border/50" style={{ width: titleW }}>
+          {/* Drag (or ←/→) to widen the titles, from 300 up to 600 px (design D4). */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize bead titles"
+            aria-valuemin={TITLE_W}
+            aria-valuemax={TITLE_MAX_W}
+            aria-valuenow={titleW}
+            tabIndex={0}
+            onPointerDown={onResizeStart}
+            onPointerMove={onResizeMove}
+            onPointerUp={onResizeEnd}
+            onPointerCancel={onResizeEnd}
+            onKeyDown={onResizeKey}
+            className="absolute top-0 -right-1 z-30 h-full w-2 cursor-col-resize outline-none hover:bg-border/60 focus-visible:bg-border"
+            data-testid="gantt-title-resize"
+          />
           <div className="shrink-0 border-b border-border/50" style={{ height: AXIS_H }} data-testid="gantt-corner" />
           <div
             ref={titlesRef}
@@ -389,9 +508,9 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
               if (!bar) return null
               return (
                 <g key={`r:${bead.id}`}>
-                  <BarRect bar={bar} x={x} y={midY(i)} testId="gantt-bar" beadId={bead.id} />
+                  <BarRect bar={bar} x={x} y={midY(i)} testId="gantt-bar" beadId={bead.id} onClick={() => onOpenBead(bead.id)} />
                   {/* The app's tooltip, not an SVG <title>: the desktop webview does not show native ones. */}
-                  {(model.markers[bead.id] ?? []).map((m, k) => (
+                  {(model.markers[bead.id] ?? []).filter((m) => markerShown(bead.id, m)).map((m, k) => (
                     <Tooltip key={`${m.relation}:${m.otherId}`}>
                       <TooltipTrigger asChild>
                         <g
@@ -416,10 +535,10 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
                 </g>
               )
             })}
-            {shownEdges.map(({ from, to }, k) => {
+            {links.map(({ from, to, toLine, cross }, k) => {
               const points = connectors[k]
               if (points.length < 2) return null
-              const target = lines[rowIndex.get(to)!]
+              const target = lines[toLine]
               const hollow =
                 target.kind === "row" && (target.row.bar?.style === "waiting" || target.row.bar?.style === "blocked")
               return (
@@ -432,6 +551,7 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
                   data-testid="gantt-arrow"
                   data-from={from}
                   data-to={to}
+                  data-cross={cross ? "true" : undefined}
                 />
               )
             })}
@@ -449,12 +569,15 @@ function BarRect({
   y,
   testId,
   beadId,
+  onClick,
 }: {
   bar: GanttBar
   x: (t: number) => number
   y: number
   testId: string
   beadId?: string
+  // Bead rows only: a pointer shortcut for the title button (design D3).
+  onClick?: () => void
 }) {
   const hollow = bar.style === "waiting" || bar.style === "blocked"
   return (
@@ -471,6 +594,8 @@ function BarRect({
       data-style={`${hollow ? `${bar.style} hollow` : bar.style}${bar.inferred ? " inferred" : ""}`}
       data-testid={testId}
       data-bead-id={beadId}
+      onClick={onClick}
+      style={onClick ? { cursor: "pointer" } : undefined}
     />
   )
 }
@@ -504,7 +629,7 @@ const LEGEND: Array<{ key: string; label: string; swatch: React.ReactNode }> = [
   },
   {
     key: "connector",
-    label: "Blocks (same epic)",
+    label: "Blocks",
     swatch: (
       <>
         <line x1={1} y1={6} x2={17} y2={6} className={CONNECTOR_CLASS} />

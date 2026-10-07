@@ -209,6 +209,28 @@ describe("buildGanttModel — dependencies", () => {
   })
 })
 
+describe("buildGanttModel — cross edges (beadbox-bvq, design D1)", () => {
+  test("a dependency across sections is kept as a cross edge, with the same markers as before", () => {
+    const m = model([epic("A", [bead("a")]), epic("B", [bead("b")])], FILTERS, { b: ["a"] })
+    expect(m.crossEdges).toEqual([{ from: "a", to: "b" }])
+    expect(m.edges).toEqual([])
+    expect(m.markers.b).toEqual([{ otherId: "a", otherTitle: "Title a", relation: "blocked-by" }])
+    expect(m.markers.a).toEqual([{ otherId: "b", otherTitle: "Title b", relation: "blocks" }])
+  })
+
+  test("a blocker hidden by filters gives a marker but no cross edge", () => {
+    const filters = { ...FILTERS, assignee: "alice" }
+    const m = model([epic("A", [bead("a")]), epic("B", [bead("b", { assignee: "alice" })])], filters, { b: ["a"] })
+    expect(m.crossEdges).toEqual([])
+    expect(m.markers.b).toEqual([{ otherId: "a", otherTitle: "Title a", relation: "blocked-by" }])
+  })
+
+  test("same-section and missing dependency data give no cross edges", () => {
+    expect(model([epic("A", [bead("a"), bead("b")])], FILTERS, { b: ["a"] }).crossEdges).toEqual([])
+    expect(model([epic("A", [bead("a")]), epic("B", [bead("b")])], FILTERS, null).crossEdges).toEqual([])
+  })
+})
+
 describe("buildGanttModel — dependency scheduling (design D12)", () => {
   const rowBar = (m: ReturnType<typeof model>, id: string) =>
     m.sections.flatMap(function rows(sec): GanttSection["rows"] {
@@ -339,5 +361,46 @@ describe("buildGanttModel — blockers inherited from epics (beadbox-aqn, design
   test("an empty epic used as a blocker finishes at the end of its own bar", () => {
     const m = model([epic("Empty", [], [], { estimatedMinutes: 30 }), epic("G", [bead("t")])], FILTERS, { G: ["Empty"] })
     expect(rowBar(m, "t").start).toBe(NOW + 30 * 60_000)
+  })
+})
+
+describe("buildGanttModel — cross-epic blockers in the schedule (beadbox-bvq)", () => {
+  const rowBar = (m: ReturnType<typeof model>, id: string) =>
+    m.sections.flatMap((s) => s.rows).find((r) => r.bead.id === id)!.bar!
+
+  test("a planned task starts where a planned blocker in another epic ends", () => {
+    const m = model([epic("E1", [bead("a", { estimatedMinutes: 120 })]), epic("E2", [bead("b")])], FILTERS, { b: ["a"] })
+    expect(rowBar(m, "a").end).toBe(NOW + 2 * HOUR)
+    expect(rowBar(m, "b").start).toBe(NOW + 2 * HOUR)
+  })
+
+  test("a planned task starts at now when its blocker in another epic is still running", () => {
+    const running = bead("a", { status: "in_progress", startedAt: day(3) })
+    const m = model([epic("E1", [running]), epic("E2", [bead("b")])], FILTERS, { b: ["a"] })
+    expect(rowBar(m, "a").end).toBe(NOW)
+    expect(rowBar(m, "b").start).toBe(NOW)
+  })
+
+  test("a finished task without a recorded start starts after its blocker's close and before its own", () => {
+    const m = model(
+      [
+        epic("E1", [bead("a", { status: "closed", closedAt: day(2) })]),
+        epic("E2", [bead("b", { status: "closed", closedAt: day(4) })]),
+      ],
+      FILTERS,
+      { b: ["a"] },
+    )
+    const b = rowBar(m, "b")
+    expect(b.start).toBeGreaterThanOrEqual(day(2).getTime())
+    expect(b.start).toBeLessThanOrEqual(day(4).getTime())
+  })
+
+  test("a recorded start wins over a blocker in another epic", () => {
+    const m = model(
+      [epic("E1", [bead("a", { estimatedMinutes: 120 })]), epic("E2", [bead("b", { status: "in_progress", startedAt: day(3) })])],
+      FILTERS,
+      { b: ["a"] },
+    )
+    expect(rowBar(m, "b").start).toBe(day(3).getTime())
   })
 })
