@@ -9,6 +9,7 @@ import type { BarStyle, GanttBar, GanttMarker, GanttModel, GanttRow, GanttSectio
 import { routeConnectors } from "@/lib/gantt-routing"
 import {
   centeredScrollLeft,
+  nowScrollLeft,
   levelScale,
   MAX_LEVEL,
   MIN_LEVEL,
@@ -238,23 +239,24 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
     setZoom(next)
     writeSession(ZOOM_KEY, next)
   }
-  const chooseZoom = (z: Zoom) => applyZoom(z === "fit" ? { kind: "fit" } : { kind: "level", level: PRESET_LEVEL[z] })
 
   const lines = useMemo(() => flatten(model.sections, collapsed), [model.sections, collapsed])
   const structure = useMemo(() => sectionStructure(model.sections), [model.sections])
 
-  // +/- keep the moment at the centre of the view in place (design D3): the
-  // centre time is taken before the zoom changes and restored before paint.
+  // Every zoom change but Fit lands with now at 75% of the view (beadbox-kjf,
+  // design D4); when now is not on the timeline, +/- keep the centre instead.
+  // The anchor is taken before the zoom changes and applied before paint.
   const geometry = useRef({ domainStart: 0, scale: 1, contentW: 0 })
-  const pendingCentre = useRef<number | null>(null)
+  const pendingAnchor = useRef<{ kind: "now" | "centre"; t: number } | null>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per zoom change; geometry is read from the ref
   useLayoutEffect(() => {
     const scroller = scrollRef.current
-    const t = pendingCentre.current
-    if (!scroller || t === null) return
-    pendingCentre.current = null
+    const anchor = pendingAnchor.current
+    if (!scroller || anchor === null) return
+    pendingAnchor.current = null
     const { domainStart, scale, contentW } = geometry.current
-    scroller.scrollLeft = centeredScrollLeft(t, domainStart, scale, scroller.clientWidth, contentW)
+    const place = anchor.kind === "now" ? nowScrollLeft : centeredScrollLeft
+    scroller.scrollLeft = place(anchor.t, domainStart, scale, scroller.clientWidth, contentW)
   }, [zoom])
 
   if (!model.extent) {
@@ -270,10 +272,19 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
   const canZoomIn = zoom.kind === "fit" ? scale < levelScale(MAX_LEVEL) : zoom.level < MAX_LEVEL
   const canZoomOut = zoom.kind === "fit" ? scale > levelScale(MIN_LEVEL) : zoom.level > MIN_LEVEL
   geometry.current = { domainStart: domain.start, scale, contentW: Math.max((domain.end - domain.start) * scale, viewWidth) }
+  const nowOnTimeline = now >= domain.start && now <= domain.end
   const zoomBy = (direction: 1 | -1) => {
     const scroller = scrollRef.current
-    if (scroller) pendingCentre.current = domain.start + (scroller.scrollLeft + scroller.clientWidth / 2) / scale
+    if (nowOnTimeline) pendingAnchor.current = { kind: "now", t: now }
+    else if (scroller) {
+      pendingAnchor.current = { kind: "centre", t: domain.start + (scroller.scrollLeft + scroller.clientWidth / 2) / scale }
+    }
     applyZoom({ kind: "level", level: stepTo(direction) })
+  }
+  const chooseZoom = (z: Zoom) => {
+    if (z === "fit") return applyZoom({ kind: "fit" })
+    if (nowOnTimeline) pendingAnchor.current = { kind: "now", t: now }
+    applyZoom({ kind: "level", level: PRESET_LEVEL[z] })
   }
   const unit = tickUnit(scale)
   const x = (t: number) => (t - domain.start) * scale

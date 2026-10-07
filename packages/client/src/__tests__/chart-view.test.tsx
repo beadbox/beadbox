@@ -479,20 +479,75 @@ describe("Chart view — stepwise zoom (beadbox-aqn.2.2)", () => {
     expect(zoomIn().disabled).toBe(false)
   }, 20_000)
 
-  test("+ keeps the moment at the centre of the view in place", async () => {
+  // Zoom changes put now at 75% of the visible timeline (beadbox-kjf, design D4).
+  const VIEW_W = 400
+  const fixViewport = () => {
+    const scroller = screen.getByTestId("gantt-scroll")
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: VIEW_W })
+    return scroller
+  }
+  const nowX = () => Number(screen.getByTestId("gantt-now").getAttribute("x1"))
+  const expectNowAtThreeQuarters = (scroller: HTMLElement) => {
+    expect(nowX() - scroller.scrollLeft).toBeCloseTo(0.75 * VIEW_W, 6)
+  }
+
+  test("+ puts now at 75% of the view", async () => {
     setFiltersPreference(FILTERS)
     await mounted()
     fireEvent.click(screen.getByRole("button", { name: "Hours" }))
-    const scroller = screen.getByTestId("gantt-scroll")
-    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: 400 })
+    const scroller = fixViewport()
+    scroller.scrollLeft = 0
+    fireEvent.click(zoomIn())
+    expectNowAtThreeQuarters(scroller)
+  }, 20_000)
+
+  test("near the end of the timeline the view scrolls as far as it can, with now still visible", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(screen.getByRole("button", { name: "Days" }))
+    const scroller = fixViewport()
+    scroller.scrollLeft = 0
+    fireEvent.click(zoomIn()) // little timeline left after now at this scale
+    const contentW = Number(screen.getByTestId("gantt-timeline").getAttribute("width"))
+    expect(scroller.scrollLeft).toBeCloseTo(Math.max(contentW - VIEW_W, 0), 6)
+    expect(nowX() - scroller.scrollLeft).toBeGreaterThan(0.75 * VIEW_W)
+    expect(nowX() - scroller.scrollLeft).toBeLessThanOrEqual(VIEW_W)
+  }, 20_000)
+
+  test("choosing a preset puts now at 75% of the view; Fit leaves the scroll alone", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const scroller = fixViewport()
+    scroller.scrollLeft = 0
+    fireEvent.click(screen.getByRole("button", { name: "Hours" }))
+    expectNowAtThreeQuarters(scroller)
+    scroller.scrollLeft = 123
+    fireEvent.click(screen.getByRole("button", { name: "Fit" }))
+    expect(scroller.scrollLeft).toBe(123)
+  }, 20_000)
+
+  test("with every bead in the past, + keeps the moment at the centre in place", async () => {
+    treeFn = () => [
+      {
+        ...bead("P", { type: "epic", title: "Past epic", status: "closed", closedAt: day(5) }),
+        children: [bead("p1", { status: "closed", closedAt: day(3) }), bead("p2", { status: "closed", closedAt: day(5) })],
+        childEpics: [],
+      },
+    ]
+    blocksAnswer = { blockedBy: {} }
+    setFiltersPreference(FILTERS)
+    await mounted()
+    expect(screen.queryByTestId("gantt-now")).toBeNull() // now is not on this timeline
+    fireEvent.click(screen.getByRole("button", { name: "Hours" }))
+    const scroller = fixViewport()
     const width = () => Number(screen.getByTestId("gantt-timeline").getAttribute("width"))
     const before = width()
     scroller.scrollLeft = 3_000
-    const centreFraction = (3_000 + 200) / before
+    const centreFraction = (3_000 + VIEW_W / 2) / before
     fireEvent.click(zoomIn())
     const after = width()
     expect(after).toBeGreaterThan(before * 2) // one Hours-band step is about ×2.13
-    expect((scroller.scrollLeft + 200) / after).toBeCloseTo(centreFraction, 6)
+    expect((scroller.scrollLeft + VIEW_W / 2) / after).toBeCloseTo(centreFraction, 6)
   }, 20_000)
 
   test("a preset name stored before the ladder restores that preset", async () => {
@@ -614,5 +669,22 @@ describe("Chart view — links across epics (beadbox-bvq.4.2)", () => {
     fireEvent.click(toggle())
     expect(crossPaths()).toHaveLength(0)
     expect(markerLabels()).toContain("Blocked by a: Title a")
+  }, 20_000)
+})
+
+describe("Chart view — minute labels past Hours (beadbox-kjf)", () => {
+  const axisLabels = () =>
+    Array.from(screen.getByTestId("gantt-header-row").querySelectorAll("text")).map((t) => t.textContent ?? "")
+  const minutesOf = (labels: string[]) => new Set(labels.filter((l) => /^\d\d:\d\d$/.test(l)).map((l) => l.slice(3)))
+
+  test("Hours labels full hours; + once adds :30, + twice adds :15 and :45", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(screen.getByRole("button", { name: "Hours" }))
+    expect([...minutesOf(axisLabels())]).toEqual(["00"])
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }))
+    expect(minutesOf(axisLabels())).toEqual(new Set(["00", "30"]))
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }))
+    expect(minutesOf(axisLabels())).toEqual(new Set(["00", "15", "30", "45"]))
   }, 20_000)
 })
