@@ -254,3 +254,150 @@ describe("TakenX", () => {
     }
   })
 })
+
+// PR #54: the layout from a user's screenshot, with "Links across epics"
+// on. Every stretch between the two ends of 3.3 -> 5.1 is covered in some row
+// in between, and the old single-vertical router sent whichever connector was
+// routed second on a detour of more than 800 px around all the bars.
+describe("routeConnectors — stacked epics (screenshot regression)", () => {
+  const bars: Array<[number, number] | null> = [
+    [3, 850], [748, 850], [748, 850], [543, 748], [645, 748], [543, 645], [135, 237],
+    [135, 237], [237, 543], [440, 543], [339, 440], [237, 339], [3, 135], [32, 135], [0, 32],
+  ]
+  const inEpic = [
+    { fromRow: 5, toRow: 4 },
+    { fromRow: 11, toRow: 10 },
+    { fromRow: 10, toRow: 9 },
+    { fromRow: 14, toRow: 13 },
+  ]
+  const crossEpic = [
+    { fromRow: 9, toRow: 2 }, // 3.3 -> final check (the one from the screenshot)
+    { fromRow: 4, toRow: 2 },
+    { fromRow: 13, toRow: 2 },
+    { fromRow: 7, toRow: 2 },
+  ]
+  const permutations = <T,>(items: T[]): T[][] =>
+    items.length <= 1 ? [items] : items.flatMap((x, i) => permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [x, ...rest]))
+
+  // Local: no further left than the leftmost bar end it joins, and no further
+  // right than the rightmost one, each with two stubs of slack (design D3).
+  const offBounds = (edge: { fromRow: number; toRow: number }, path: Point[]) => {
+    const from = bars[edge.fromRow]!
+    const to = bars[edge.toRow]!
+    const lo = Math.min(from[0], to[0]) - 2 * 8
+    const hi = Math.max(from[1], to[1]) + 2 * 8
+    const xs = path.map(([x]) => x)
+    return Math.min(...xs) < lo || Math.max(...xs) > hi ? `${edge.fromRow}->${edge.toRow} spans ${Math.min(...xs)}..${Math.max(...xs)}, allowed ${lo}..${hi}` : null
+  }
+
+  test("in every routing order, every connector stays local, enters no bar and shares no segment", () => {
+    const g = geo(bars)
+    for (const order of permutations(crossEpic)) {
+      const edges = [...inEpic, ...order]
+      const paths = routeConnectors(edges, g)
+      const problems = [
+        ...edges.map((e, i) => offBounds(e, paths[i])).filter(Boolean),
+        ...paths.flatMap((p) => crossings(p, g)),
+        ...sharedSegments(paths).map(([a, b]) => `shared segment between ${a} and ${b}`),
+      ]
+      if (problems.length) throw new Error(`order ${order.map((e) => `${e.fromRow}->${e.toRow}`).join(", ")}: ${problems.join("; ")}`)
+    }
+  })
+})
+
+// PR #54: dense charts, as with "Links across epics" on.
+// A soft lane cost (113 of these layouts) and a gap path forced onto a taken
+// position produced shared segments, and six runs overlapping on one row
+// boundary made the lane post-pass loop forever.
+describe("routeConnectors — dense layouts", () => {
+  // Vertical stretches two connectors share; crossing at a point is fine.
+  const sharedVerticals = (paths: Point[][]) => {
+    const verticals = paths.flatMap((path, p) =>
+      path.slice(1).flatMap((b, k) => (path[k][0] === b[0] ? [{ p, x: b[0], lo: Math.min(path[k][1], b[1]), hi: Math.max(path[k][1], b[1]) }] : [])),
+    )
+    return verticals.filter((s, i) => verticals.some((t, j) => j > i && t.p !== s.p && t.x === s.x && t.lo < s.hi && s.lo < t.hi))
+  }
+
+  test("5,000 layouts with 6-20 rows and 4-12 connectors finish, cross no bar, and share at most a rare boundary stretch", () => {
+    let seed = 99
+    const rand = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648
+      return seed / 2_147_483_648
+    }
+    let withShared = 0
+    for (let n = 0; n < 5_000; n++) {
+      const rows = 6 + Math.floor(rand() * 15)
+      const bars: Array<[number, number]> = []
+      for (let r = 0; r < rows; r++) {
+        const start = Math.round(rand() * 400)
+        bars.push([start, start + 3 + Math.round(rand() * 200)])
+      }
+      const edges: Array<{ fromRow: number; toRow: number }> = []
+      const count = 4 + Math.floor(rand() * 9)
+      for (let e = 0; e < count; e++) {
+        const a = Math.floor(rand() * rows)
+        let b = Math.floor(rand() * rows)
+        if (a === b) b = (b + 1) % rows
+        if (!edges.some((x) => x.fromRow === a && x.toRow === b)) edges.push({ fromRow: a, toRow: b })
+      }
+      const g = geo(bars)
+      const paths = routeConnectors(edges, g)
+      const hits = paths.flatMap((path) => crossings(path, g))
+      const verticals = sharedVerticals(paths)
+      if (hits.length || verticals.length) throw new Error(`layout ${n}: ${JSON.stringify({ bars, edges, hits, verticals })}`)
+      if (sharedSegments(paths).length) withShared++
+    }
+    // Only an overflowing boundary (more runs than its five lanes) may share.
+    expect(withShared).toBeLessThanOrEqual(25)
+    // 5,000 layouts take several seconds, past bun's 5 s default on a loaded machine.
+  }, 60_000)
+})
+
+// beadbox-6iy (sec FIX-B): the staircase is a DP over every line a connector
+// crosses, ~R^3 work per connector, rerun on every render. One dependency
+// spanning hundreds of lines (one large epic, or a link across epics) froze the
+// window. Past a work budget the connector takes the single-vertical route.
+describe("routeConnector — long connectors stay bounded", () => {
+  // Bars with distinct edges on every line, so the staircase's candidate set
+  // really is ~10 per line; the dependent starts left of where its blocker
+  // ends, so the single-vertical gap path is never available.
+  function longLayout(span: number): RowGeometry {
+    const bars: Array<[number, number] | null> = []
+    bars.push([400, 600]) // blocker, row 0
+    for (let r = 1; r < span; r++) {
+      const start = (r * 37) % 500
+      bars.push([start, start + 120 + (r % 7) * 10])
+    }
+    bars.push([100, 300]) // dependent, row `span`
+    return geo(bars)
+  }
+
+  for (const span of [300, 1_000]) {
+    test(`a connector across ${span} lines routes in well under a second, crossing no bar`, () => {
+      const g = longLayout(span)
+      const started = performance.now()
+      const path = routeConnector({ fromRow: 0, toRow: span }, g)
+      const elapsed = performance.now() - started
+      expect(elapsed).toBeLessThan(1_000) // unbounded, this ran for minutes
+      expectWellFormed(path, g, 0, span)
+    })
+  }
+
+  test("routeConnectors with several long links across epics stays bounded too", () => {
+    const g = longLayout(1_000)
+    const edges = [0, 1, 2, 3, 4].map((k) => ({ fromRow: k, toRow: 1_000 - k }))
+    const started = performance.now()
+    const paths = routeConnectors(edges, g)
+    expect(performance.now() - started).toBeLessThan(2_000)
+    for (const path of paths) expect(crossings(path, g)).toEqual([])
+  })
+
+  test("a short connector still gets the staircase (the budget only catches long ones)", () => {
+    // Same shape as the long layout, but only 6 lines between the bars.
+    const g = longLayout(7)
+    const path = routeConnector({ fromRow: 0, toRow: 7 }, g)
+    expectWellFormed(path, g, 0, 7)
+    const verticals = path.slice(1).filter((p, i) => p[0] === path[i][0]).length
+    expect(verticals).toBeGreaterThan(1) // stepped, not a single vertical run
+  })
+})
