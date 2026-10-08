@@ -1,6 +1,6 @@
 {
   "name": "beadbox",
-  "version": "0.28.1",
+  "version": "0.28.2",
   "description": "Web interface for viewing and managing beads issue tracking databases",
   "license": "MIT",
   "repository": {
