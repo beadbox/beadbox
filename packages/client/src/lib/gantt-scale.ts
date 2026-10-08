@@ -48,8 +48,8 @@ export const PRESET_LEVEL: Record<Preset, number> = { weeks: 0, days: 4, hours: 
 export const STEPS_BETWEEN_PRESETS = 4
 // -1: the last step whose week ticks are still far enough apart to label.
 export const MIN_LEVEL = -1
-// 10: two Hours-band steps past Hours.
-export const MAX_LEVEL = 10
+// 11: three Hours-band steps past Hours, about 464 px per hour (PR #54).
+export const MAX_LEVEL = 11
 
 const presetScale = (preset: Preset) => PX_PER_UNIT[preset] / UNIT_MS[preset]
 
@@ -62,6 +62,16 @@ export function levelScale(level: number): number {
   const hours = presetScale("hours")
   if (level < PRESET_LEVEL.days) return weeks * (days / weeks) ** (level / STEPS_BETWEEN_PRESETS)
   return days * (hours / days) ** ((level - PRESET_LEVEL.days) / STEPS_BETWEEN_PRESETS)
+}
+
+// The (fractional) ladder level of a scale: the inverse of levelScale, per
+// band, so a pinch can leave the zoom between steps (PR #54).
+export function levelOf(scale: number): number {
+  const weeks = presetScale("weeks")
+  const days = presetScale("days")
+  const hours = presetScale("hours")
+  if (scale < days) return (STEPS_BETWEEN_PRESETS * Math.log(scale / weeks)) / Math.log(days / weeks)
+  return PRESET_LEVEL.days + (STEPS_BETWEEN_PRESETS * Math.log(scale / days)) / Math.log(hours / days)
 }
 
 export function presetAt(level: number): Preset | null {
@@ -90,9 +100,16 @@ export function stepFrom(scale: number, direction: 1 | -1): number {
 
 // scrollLeft that puts time `t` at the centre of a viewport `viewW` wide,
 // clamped to the scroll range of content `contentW` wide (design D3).
-export function centeredScrollLeft(t: number, domainStart: number, scale: number, viewW: number, contentW: number): number {
-  const ideal = (t - domainStart) * scale - viewW / 2
+// scrollLeft that puts time t at offsetPx from the viewport's left edge,
+// clamped to the scroll range (PR #54: centre, now and the pinch pointer are
+// all just offsets).
+export function keepAt(t: number, offsetPx: number, domainStart: number, scale: number, viewW: number, contentW: number): number {
+  const ideal = (t - domainStart) * scale - offsetPx
   return Math.min(Math.max(ideal, 0), Math.max(contentW - viewW, 0))
+}
+
+export function centeredScrollLeft(t: number, domainStart: number, scale: number, viewW: number, contentW: number): number {
+  return keepAt(t, viewW / 2, domainStart, scale, viewW, contentW)
 }
 
 // Where a zoom change puts the current time: this fraction of the visible
@@ -102,8 +119,7 @@ export const NOW_ANCHOR = 0.75
 // scrollLeft that puts `now` at NOW_ANCHOR of a viewport `viewW` wide,
 // clamped to the scroll range of content `contentW` wide.
 export function nowScrollLeft(now: number, domainStart: number, scale: number, viewW: number, contentW: number): number {
-  const ideal = (now - domainStart) * scale - NOW_ANCHOR * viewW
-  return Math.min(Math.max(ideal, 0), Math.max(contentW - viewW, 0))
+  return keepAt(now, NOW_ANCHOR * viewW, domainStart, scale, viewW, contentW)
 }
 
 // The finest unit whose ticks are still at least MIN_TICK_PX apart.

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import {
   centeredScrollLeft,
   DAY_MS,
+  keepAt,
+  levelOf,
   HOUR_MS,
   levelScale,
   MAX_LEVEL,
@@ -101,7 +103,7 @@ describe("zoom ladder (PR #51)", () => {
   test("the zoom-out limit keeps week ticks labellable; one more step would not", () => {
     expect(levelScale(MIN_LEVEL) * WEEK_MS).toBeGreaterThanOrEqual(MIN_TICK_PX)
     expect(levelScale(MIN_LEVEL - 1) * WEEK_MS).toBeLessThan(MIN_TICK_PX)
-    expect(MAX_LEVEL - PRESET_LEVEL.hours).toBe(2)
+    expect(MAX_LEVEL - PRESET_LEVEL.hours).toBe(3)
   })
 })
 
@@ -124,7 +126,8 @@ describe("minute tick units (PR #53)", () => {
     expect(tickUnit(levelScale(PRESET_LEVEL.hours))).toBe("hours")
     expect(tickUnit(levelScale(PRESET_LEVEL.hours + 1))).toBe("minutes30")
     expect(tickUnit(levelScale(PRESET_LEVEL.hours + 2))).toBe("minutes15")
-    expect(PRESET_LEVEL.hours + 2).toBe(MAX_LEVEL) // reachable within today's zoom limit
+    expect(PRESET_LEVEL.hours + 2).toBeLessThan(MAX_LEVEL) // reachable within the zoom limit
+    expect(tickUnit(levelScale(MAX_LEVEL))).toBe("minutes15") // the extra step keeps 15-minute labels
   })
 
   test("minute ticks align to local quarter / half hours and are evenly spaced", () => {
@@ -164,5 +167,24 @@ describe("nowScrollLeft (PR #53)", () => {
     expect(nowScrollLeft(100_000, 0, 0.001, 400, 10_000)).toBe(0) // now near the start
     expect(nowScrollLeft(9_950_000, 0, 0.001, 400, 10_000)).toBe(9_600) // now near the end
     expect(nowScrollLeft(5, 0, 1, 400, 300)).toBe(0) // content narrower than the view
+  })
+})
+
+describe("fractional levels (PR #54)", () => {
+  test("levelOf inverts levelScale, for whole and fractional levels in every band", () => {
+    for (const level of [MIN_LEVEL, -0.5, 0, 1.3, 4, 5.5, 8, 9.25, MAX_LEVEL]) {
+      expect(levelOf(levelScale(level))).toBeCloseTo(level, 9)
+    }
+  })
+
+  test("from between steps, stepFrom goes to the next whole level either way", () => {
+    expect(stepFrom(levelScale(8.5), 1)).toBe(9)
+    expect(stepFrom(levelScale(8.5), -1)).toBe(8)
+  })
+
+  test("keepAt is the shared base of the centre and now helpers", () => {
+    expect(keepAt(1_000_000, 200, 0, 0.001, 400, 10_000)).toBe(centeredScrollLeft(1_000_000, 0, 0.001, 400, 10_000))
+    expect(keepAt(1_000_000, 300, 0, 0.001, 400, 10_000)).toBe(nowScrollLeft(1_000_000, 0, 0.001, 400, 10_000))
+    expect(keepAt(1_000_000, 123, 0, 0.001, 400, 10_000)).toBe(1_000 - 123)
   })
 })
