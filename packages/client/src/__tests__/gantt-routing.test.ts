@@ -309,6 +309,35 @@ describe("routeConnectors — stacked epics (screenshot regression)", () => {
 // A soft lane cost (113 of these layouts) and a gap path forced onto a taken
 // position produced shared segments, and six runs overlapping on one row
 // boundary made the lane post-pass loop forever.
+// The v0.28.0/v0.28.1 hang (beadbox-6iy). Six blockers feeding one dependent
+// that starts before they end put six runs on the dependent's top boundary;
+// the lane search tried laneOffset(0, 1, 2, ...) until one was free, but
+// laneOffset has only five distinct slots, so the sixth run never got one and
+// routeConnectors never returned. Random dense layouts rarely produce this
+// shape (the old router fails them on shared verticals instead), so it is
+// pinned here: with the v0.28.1 router this test never finishes.
+describe("routeConnectors — six runs on one boundary (the v0.28.x hang)", () => {
+  test("six blockers feeding one dependent return, crossing no bar", () => {
+    const g = geo([[0, 200], [1, 200], [2, 200], [3, 200], [4, 200], [5, 200], [50, 200]])
+    const edges = [0, 1, 2, 3, 4, 5].map((row) => ({ fromRow: row, toRow: 6 }))
+    const paths = routeConnectors(edges, g)
+    expect(paths).toHaveLength(6)
+    for (const path of paths) {
+      expect(path.length).toBeGreaterThan(1)
+      expect(crossings(path, g)).toEqual([])
+    }
+  })
+
+  test("ten into one returns too (the lane search is bounded, not just wide enough for six)", () => {
+    const bars: Array<[number, number]> = Array.from({ length: 10 }, (_, i) => [i, 200])
+    bars.push([50, 200])
+    const g = geo(bars)
+    const paths = routeConnectors(Array.from({ length: 10 }, (_, row) => ({ fromRow: row, toRow: 10 })), g)
+    expect(paths).toHaveLength(10)
+    for (const path of paths) expect(crossings(path, g)).toEqual([])
+  })
+})
+
 describe("routeConnectors — dense layouts", () => {
   // Vertical stretches two connectors share; crossing at a point is fine.
   const sharedVerticals = (paths: Point[][]) => {
