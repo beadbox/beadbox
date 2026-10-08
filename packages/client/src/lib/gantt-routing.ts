@@ -90,6 +90,12 @@ export interface RouteOptions {
   // so several connectors on one edge of a bar stay apart.
   yOut?: number
   yIn?: number
+  // Vertical positions other connectors use, per line they run through; a
+  // staircase crossing there would share a segment (beadbox-a0p, design D2).
+  takenByRow?: Map<number, TakenX>
+  // Horizontal runs other connectors make along each row boundary (keyed by
+  // the boundary's y), so a staircase can avoid crowding one (design D2b).
+  boundaryRuns?: Map<number, Array<[number, number]>>
 }
 
 // Candidate x positions for the vertical run between rows a and b: near the
@@ -139,7 +145,10 @@ export function routeConnector(edge: ConnectorEdge, geo: RowGeometry, opts: Rout
   const lo = fromX + stubOut
   const hi = toX - stubIn
   if (hi >= lo) {
-    const inRange = (x: number) => x >= lo && x <= hi && clearBetween(x, edge.fromRow, edge.toRow, geo)
+    // Only a free position: when every clear one is taken, the staircase below
+    // steps around instead of sharing a segment.
+    const inRange = (x: number) =>
+      x >= lo && x <= hi && clearBetween(x, edge.fromRow, edge.toRow, geo) && !taken.near(x)
     const x = pick(candidates([hi, lo], edge.fromRow, edge.toRow, geo), inRange, () => 0, taken)
     if (x !== null) return simplify([[fromX, yA], [x, yA], [x, yB], [toX, yB]])
   }
@@ -165,30 +174,118 @@ export function routeConnector(edge: ConnectorEdge, geo: RowGeometry, opts: Rout
       [toX, yB],
     ])
   }
-  // The vertical run crosses every line strictly between the two bars.
-  const clear = (x: number) => clearBetween(x, edge.fromRow, edge.toRow, geo)
-  let leftmost = Math.min(exitX, entryX)
-  for (let r = Math.min(edge.fromRow, edge.toRow) + 1; r < Math.max(edge.fromRow, edge.toRow); r++) {
+  // Staircase (beadbox-a0p, design D1): cross the lines between the two bars
+  // one at a time, each where that line has no bar, moving sideways in the
+  // gaps between lines. A lone vertical run clear of every line is only the
+  // special case with no sideways step.
+  const steps = staircase(
+    edge,
+    geo,
+    exitX,
+    entryX,
+    (row, x) => (opts.takenByRow?.get(row)?.near(x) ? SHARED_COST : 0),
+    (y, lo, hi) => crowdCost(opts.boundaryRuns?.get(y), lo, hi),
+  )
+  const points: Point[] = [[fromX, yA], [exitX, yA], [exitX, boundaryA]]
+  for (const { x, from: y0, to: y1 } of steps) points.push([x, y0], [x, y1])
+  points.push([entryX, boundaryB], [entryX, yB], [toX, yB])
+  return simplify(points)
+}
+
+const BEND = 24 // cost of one bend, in px of path length: keeps staircases to few steps
+// Crossing a line where another connector already runs. Far above a sidestep
+// (a few px plus two bends), so sharing is never preferred (design D2).
+const SHARED_COST = 1_000
+// A row boundary has 7px of free space on each side: lanes at 0, ±3, ±6.
+const LANE_CAPACITY = 5
+// Per run already on a boundary over the same stretch: spreads routes over
+// neighbouring boundaries before one fills up (design D2b).
+const CROWD_COST = 8
+
+function crowdCost(runs: Array<[number, number]> | undefined, lo: number, hi: number): number {
+  if (!runs) return 0
+  let overlapping = 0
+  for (const [a, b] of runs) if (a < hi && lo < b) overlapping++
+  return overlapping >= LANE_CAPACITY ? SHARED_COST : overlapping * CROWD_COST
+}
+
+// Is x clear of the bar in one line?
+function clearOf(x: number, row: number, geo: RowGeometry): boolean {
+  const bar = geo.bars[row]
+  return !bar || x < bar[0] - CLEARANCE || x > bar[1] + CLEARANCE
+}
+
+// Dynamic programming over the boundaries between the lines strictly between
+// the two bars, from the source side to the target side. Returns, per crossed
+// line, the x where it is crossed and the boundary ys it runs between.
+function staircase(
+  edge: ConnectorEdge,
+  geo: RowGeometry,
+  exitX: number,
+  entryX: number,
+  crossCost: (row: number, x: number) => number,
+  runCost: (boundaryY: number, lo: number, hi: number) => number,
+): Array<{ x: number; from: number; to: number }> {
+  const down = edge.toRow > edge.fromRow
+  const rows: number[] = []
+  for (let r = edge.fromRow + (down ? 1 : -1); r !== edge.toRow; r += down ? 1 : -1) rows.push(r)
+  if (rows.length === 0) return []
+  const boundary = (i: number) => (down ? edge.fromRow + 1 + i : edge.fromRow - i) * geo.rowHeight
+
+  const seeds = [exitX, entryX]
+  for (const r of rows) {
     const bar = geo.bars[r]
-    if (bar) leftmost = Math.min(leftmost, bar[0] - CLEARANCE - 1)
+    if (bar) seeds.push(bar[0] - CLEARANCE - 1, bar[1] + CLEARANCE + 1)
   }
-  const xv =
-    pick(
-      candidates([exitX, entryX, leftmost], edge.fromRow, edge.toRow, geo),
-      clear,
-      (x) => Math.abs(x - exitX) + Math.abs(x - entryX),
-      taken,
-    ) ?? leftmost
-  return simplify([
-    [fromX, yA],
-    [exitX, yA],
-    [exitX, boundaryA],
-    [xv, boundaryA],
-    [xv, boundaryB],
-    [entryX, boundaryB],
-    [entryX, yB],
-    [toX, yB],
-  ])
+  const xs = [...new Set(seeds.flatMap((x) => [x, x - LANE, x + LANE, x - 2 * LANE, x + 2 * LANE]))]
+  const move = (a: number, b: number, y: number) =>
+    a === b ? 0 : Math.abs(a - b) + 2 * BEND + runCost(y, Math.min(a, b), Math.max(a, b))
+
+  // arrive[j]: cheapest cost to stand at xs[j] on the current boundary.
+  let arrive = xs.map((x) => (x === exitX ? 0 : Number.POSITIVE_INFINITY))
+  const choice: number[][] = [] // per crossed line: chosen xs index for each arrival index
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const next = xs.map(() => Number.POSITIVE_INFINITY)
+    const via = xs.map(() => -1)
+    for (let to = 0; to < xs.length; to++) {
+      if (!clearOf(xs[to], row, geo)) continue
+      // Best way to reach xs[to] along this boundary, then cross the line there.
+      let best = Number.POSITIVE_INFINITY
+      let bestFrom = -1
+      for (let from = 0; from < xs.length; from++) {
+        if (!Number.isFinite(arrive[from])) continue
+        const c = arrive[from] + move(xs[from], xs[to], boundary(i))
+        if (c < best) {
+          best = c
+          bestFrom = from
+        }
+      }
+      if (bestFrom < 0) continue
+      next[to] = best + geo.rowHeight + crossCost(row, xs[to])
+      via[to] = bestFrom
+    }
+    choice.push(via)
+    arrive = next
+  }
+
+  // Finish: along the last boundary to entryX.
+  let end = -1
+  let endCost = Number.POSITIVE_INFINITY
+  for (let j = 0; j < xs.length; j++) {
+    const c = arrive[j] + move(xs[j], entryX, boundary(rows.length))
+    if (c < endCost) {
+      endCost = c
+      end = j
+    }
+  }
+  // Every line has free space beside its bar, so a route always exists.
+  const crossings: number[] = []
+  for (let i = rows.length - 1, j = end; i >= 0; i--) {
+    crossings.unshift(j)
+    j = choice[i][j]
+  }
+  return crossings.map((j, i) => ({ x: xs[j], from: boundary(i), to: boundary(i + 1) }))
 }
 
 // Offsets 0, -d, +d, -2d, +2d, ... capped at ±max (cycles once exhausted).
@@ -224,6 +321,22 @@ export function routeConnectors(edges: ConnectorEdge[], geo: RowGeometry): Point
     ranks.set(i, { out: o, in: n })
   }
   const takenX = new TakenX()
+  const takenByRow = new Map<number, TakenX>()
+  const boundaryRuns = new Map<number, Array<[number, number]>>()
+  // A vertical ending on a boundary also claims the lane margin past it: the
+  // post-pass below may shift a neighbour's run along that boundary by up to
+  // BOUNDARY_MAX, which would otherwise stretch its vertical into this one.
+  const occupy = (x: number, y0: number, y1: number) => {
+    const [top, bottom] = [Math.min(y0, y1) - BOUNDARY_MAX, Math.max(y0, y1) + BOUNDARY_MAX]
+    for (let row = Math.floor(top / geo.rowHeight); row * geo.rowHeight < bottom; row++) {
+      let lane = takenByRow.get(row)
+      if (!lane) {
+        lane = new TakenX()
+        takenByRow.set(row, lane)
+      }
+      lane.add(x)
+    }
+  }
   const paths = edges.map((edge, i) => {
     const r = ranks.get(i)!
     const path = routeConnector(edge, geo, {
@@ -232,9 +345,19 @@ export function routeConnectors(edges: ConnectorEdge[], geo: RowGeometry): Point
       yOut: laneOffset(r.out, EDGE_SPREAD, EDGE_MAX),
       yIn: laneOffset(r.in, EDGE_SPREAD, EDGE_MAX),
       takenX,
+      takenByRow,
+      boundaryRuns,
     })
     for (let k = 0; k + 1 < path.length; k++) {
-      if (path[k][0] === path[k + 1][0]) takenX.add(path[k][0])
+      const [a, b] = [path[k], path[k + 1]]
+      if (horizontalOnBoundary(a, b, geo.rowHeight)) {
+        const runs = boundaryRuns.get(a[1]) ?? []
+        runs.push([Math.min(a[0], b[0]), Math.max(a[0], b[0])])
+        boundaryRuns.set(a[1], runs)
+      }
+      if (path[k][0] !== path[k + 1][0]) continue
+      takenX.add(path[k][0])
+      occupy(path[k][0], path[k][1], path[k + 1][1])
     }
     return path
   })
@@ -253,9 +376,20 @@ export function routeConnectors(edges: ConnectorEdge[], geo: RowGeometry): Point
   for (const [y, runs] of byY) {
     const placed: Array<{ lo: number; hi: number; offset: number }> = []
     for (const run of runs) {
-      let lane = 0
-      while (placed.some((q) => q.offset === laneOffset(lane, LANE / 2 + 1, BOUNDARY_MAX) && q.lo < run.hi && run.lo < q.hi)) lane++
-      const offset = laneOffset(lane, LANE / 2 + 1, BOUNDARY_MAX)
+      // The first free lane; with all LANE_CAPACITY taken over this stretch,
+      // the least crowded one. (An unbounded search never ended once six
+      // runs overlapped: laneOffset wraps around, design D2b.)
+      let offset = laneOffset(0, LANE / 2 + 1, BOUNDARY_MAX)
+      let fewest = Number.POSITIVE_INFINITY
+      for (let lane = 0; lane < LANE_CAPACITY; lane++) {
+        const candidate = laneOffset(lane, LANE / 2 + 1, BOUNDARY_MAX)
+        const overlaps = placed.filter((q) => q.offset === candidate && q.lo < run.hi && run.lo < q.hi).length
+        if (overlaps < fewest) {
+          fewest = overlaps
+          offset = candidate
+        }
+        if (overlaps === 0) break
+      }
       placed.push({ lo: run.lo, hi: run.hi, offset })
       if (offset !== 0) {
         paths[run.path][run.k] = [paths[run.path][run.k][0], y + offset]

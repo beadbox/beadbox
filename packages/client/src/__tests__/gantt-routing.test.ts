@@ -254,3 +254,100 @@ describe("TakenX", () => {
     }
   })
 })
+
+// beadbox-a0p: the layout from a user's screenshot, with "Links across epics"
+// on. Every stretch between the two ends of 3.3 -> 5.1 is covered in some row
+// in between, and the old single-vertical router sent whichever connector was
+// routed second on a detour of more than 800 px around all the bars.
+describe("routeConnectors — stacked epics (screenshot regression)", () => {
+  const bars: Array<[number, number] | null> = [
+    [3, 850], [748, 850], [748, 850], [543, 748], [645, 748], [543, 645], [135, 237],
+    [135, 237], [237, 543], [440, 543], [339, 440], [237, 339], [3, 135], [32, 135], [0, 32],
+  ]
+  const inEpic = [
+    { fromRow: 5, toRow: 4 },
+    { fromRow: 11, toRow: 10 },
+    { fromRow: 10, toRow: 9 },
+    { fromRow: 14, toRow: 13 },
+  ]
+  const crossEpic = [
+    { fromRow: 9, toRow: 2 }, // 3.3 -> final check (the one from the screenshot)
+    { fromRow: 4, toRow: 2 },
+    { fromRow: 13, toRow: 2 },
+    { fromRow: 7, toRow: 2 },
+  ]
+  const permutations = <T,>(items: T[]): T[][] =>
+    items.length <= 1 ? [items] : items.flatMap((x, i) => permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [x, ...rest]))
+
+  // Local: no further left than the leftmost bar end it joins, and no further
+  // right than the rightmost one, each with two stubs of slack (design D3).
+  const offBounds = (edge: { fromRow: number; toRow: number }, path: Point[]) => {
+    const from = bars[edge.fromRow]!
+    const to = bars[edge.toRow]!
+    const lo = Math.min(from[0], to[0]) - 2 * 8
+    const hi = Math.max(from[1], to[1]) + 2 * 8
+    const xs = path.map(([x]) => x)
+    return Math.min(...xs) < lo || Math.max(...xs) > hi ? `${edge.fromRow}->${edge.toRow} spans ${Math.min(...xs)}..${Math.max(...xs)}, allowed ${lo}..${hi}` : null
+  }
+
+  test("in every routing order, every connector stays local, enters no bar and shares no segment", () => {
+    const g = geo(bars)
+    for (const order of permutations(crossEpic)) {
+      const edges = [...inEpic, ...order]
+      const paths = routeConnectors(edges, g)
+      const problems = [
+        ...edges.map((e, i) => offBounds(e, paths[i])).filter(Boolean),
+        ...paths.flatMap((p) => crossings(p, g)),
+        ...sharedSegments(paths).map(([a, b]) => `shared segment between ${a} and ${b}`),
+      ]
+      if (problems.length) throw new Error(`order ${order.map((e) => `${e.fromRow}->${e.toRow}`).join(", ")}: ${problems.join("; ")}`)
+    }
+  })
+})
+
+// beadbox-a0p (design D2, D2b): dense charts, as with "Links across epics" on.
+// A soft lane cost (113 of these layouts) and a gap path forced onto a taken
+// position produced shared segments, and six runs overlapping on one row
+// boundary made the lane post-pass loop forever.
+describe("routeConnectors — dense layouts", () => {
+  // Vertical stretches two connectors share; crossing at a point is fine.
+  const sharedVerticals = (paths: Point[][]) => {
+    const verticals = paths.flatMap((path, p) =>
+      path.slice(1).flatMap((b, k) => (path[k][0] === b[0] ? [{ p, x: b[0], lo: Math.min(path[k][1], b[1]), hi: Math.max(path[k][1], b[1]) }] : [])),
+    )
+    return verticals.filter((s, i) => verticals.some((t, j) => j > i && t.p !== s.p && t.x === s.x && t.lo < s.hi && s.lo < t.hi))
+  }
+
+  test("5,000 layouts with 6-20 rows and 4-12 connectors finish, cross no bar, and share at most a rare boundary stretch", () => {
+    let seed = 99
+    const rand = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648
+      return seed / 2_147_483_648
+    }
+    let withShared = 0
+    for (let n = 0; n < 5_000; n++) {
+      const rows = 6 + Math.floor(rand() * 15)
+      const bars: Array<[number, number]> = []
+      for (let r = 0; r < rows; r++) {
+        const start = Math.round(rand() * 400)
+        bars.push([start, start + 3 + Math.round(rand() * 200)])
+      }
+      const edges: Array<{ fromRow: number; toRow: number }> = []
+      const count = 4 + Math.floor(rand() * 9)
+      for (let e = 0; e < count; e++) {
+        const a = Math.floor(rand() * rows)
+        let b = Math.floor(rand() * rows)
+        if (a === b) b = (b + 1) % rows
+        if (!edges.some((x) => x.fromRow === a && x.toRow === b)) edges.push({ fromRow: a, toRow: b })
+      }
+      const g = geo(bars)
+      const paths = routeConnectors(edges, g)
+      const hits = paths.flatMap((path) => crossings(path, g))
+      const verticals = sharedVerticals(paths)
+      if (hits.length || verticals.length) throw new Error(`layout ${n}: ${JSON.stringify({ bars, edges, hits, verticals })}`)
+      if (sharedSegments(paths).length) withShared++
+    }
+    // Only an overflowing boundary (more runs than its five lanes) may share.
+    expect(withShared).toBeLessThanOrEqual(25)
+  })
+})
