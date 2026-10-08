@@ -9,6 +9,8 @@ import type { BarStyle, GanttBar, GanttMarker, GanttModel, GanttRow, GanttSectio
 import { routeConnectors } from "@/lib/gantt-routing"
 import {
   centeredScrollLeft,
+  keepAt,
+  levelOf,
   nowScrollLeft,
   levelScale,
   MAX_LEVEL,
@@ -44,6 +46,21 @@ const COLLAPSED_KEY = "beadbox:chart-collapsed"
 const ZOOM_KEY = "beadbox:chart-zoom"
 const TITLE_WIDTH_KEY = "beadbox:chart-title-width"
 const CROSS_LINKS_KEY = "beadbox:chart-cross-links"
+// Ctrl+wheel pinch: zoom factor per pixel of wheel delta (e^(−delta × rate)).
+const PINCH_WHEEL_RATE = 0.01
+// The visible window, kept for the session so coming back from another view
+// shows the same place (beadbox-ct5, design D1). A time, not pixels, so new
+// or changed beads don't shift it.
+const VIEW_KEY = "beadbox:chart-view"
+
+function readView(): { leftTime: number; scrollTop: number } | null {
+  const stored = readSession<unknown>(VIEW_KEY, null)
+  if (typeof stored !== "object" || stored === null) return null
+  const { leftTime, scrollTop } = stored as { leftTime?: unknown; scrollTop?: unknown }
+  return typeof leftTime === "number" && Number.isFinite(leftTime) && typeof scrollTop === "number" && Number.isFinite(scrollTop)
+    ? { leftTime, scrollTop }
+    : null
+}
 
 const clampTitleWidth = (w: number) => Math.min(TITLE_MAX_W, Math.max(TITLE_W, Math.round(w)))
 
@@ -64,7 +81,7 @@ function readZoom(): ZoomState {
     typeof stored === "object" &&
     stored !== null &&
     (stored as ZoomState).kind === "level" &&
-    Number.isInteger((stored as { level: unknown }).level)
+    Number.isFinite((stored as { level: unknown }).level)
   ) {
     const level = (stored as { level: number }).level
     return { kind: "level", level: Math.min(MAX_LEVEL, Math.max(MIN_LEVEL, level)) }
@@ -175,17 +192,34 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
     setTitleWState(next)
     writeSession(TITLE_WIDTH_KEY, next)
   }
-  const resizeDrag = useRef<{ startX: number; startW: number } | null>(null)
+  const resizeDrag = useRef<{ startX: number; startW: number; userSelect: string } | null>(null)
+  // Restores the body's user-select saved when the drag began (beadbox-ct5).
+  const endResizeDrag = () => {
+    const drag = resizeDrag.current
+    if (drag) document.body.style.userSelect = drag.userSelect
+    resizeDrag.current = null
+  }
+  useEffect(
+    () => () => {
+      const drag = resizeDrag.current
+      if (drag) document.body.style.userSelect = drag.userSelect
+    },
+    [],
+  )
   const onResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Cancelling the default keeps the drag from starting a text selection.
+    e.preventDefault()
     e.currentTarget.setPointerCapture?.(e.pointerId)
-    resizeDrag.current = { startX: e.clientX, startW: titleW }
+    endResizeDrag()
+    resizeDrag.current = { startX: e.clientX, startW: titleW, userSelect: document.body.style.userSelect }
+    document.body.style.userSelect = "none"
   }
   const onResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const drag = resizeDrag.current
     if (drag) setTitleW(drag.startW + e.clientX - drag.startX)
   }
   const onResizeEnd = (e: React.PointerEvent<HTMLDivElement>) => {
-    resizeDrag.current = null
+    endResizeDrag()
     e.currentTarget.releasePointerCapture?.(e.pointerId)
   }
   const onResizeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -213,7 +247,26 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
   const onScrollerScroll = () => {
     const [scroller, titles] = [scrollRef.current, titlesRef.current]
     if (scroller && titles && titles.scrollTop !== scroller.scrollTop) titles.scrollTop = scroller.scrollTop
+    saveViewSoon()
   }
+  // At most one write per animation frame while scrolling.
+  const saveFrame = useRef<number | null>(null)
+  const saveViewSoon = () => {
+    if (saveFrame.current !== null) return
+    saveFrame.current = requestAnimationFrame(() => {
+      saveFrame.current = null
+      const scroller = scrollRef.current
+      if (!scroller) return
+      const { domainStart, scale } = geometry.current
+      writeSession(VIEW_KEY, { leftTime: domainStart + scroller.scrollLeft / scale, scrollTop: scroller.scrollTop })
+    })
+  }
+  useEffect(
+    () => () => {
+      if (saveFrame.current !== null) cancelAnimationFrame(saveFrame.current)
+    },
+    [],
+  )
   // Keyboard focus moving to an off-screen title scrolls the title pane.
   const onTitlesScroll = () => {
     const [scroller, titles] = [scrollRef.current, titlesRef.current]
@@ -247,7 +300,7 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
   // when now is not on the timeline, +/- keep the centre instead.
   // The anchor is taken before the zoom changes and applied before paint.
   const geometry = useRef({ domainStart: 0, scale: 1, contentW: 0 })
-  const pendingAnchor = useRef<{ kind: "now" | "centre"; t: number } | null>(null)
+  const pendingAnchor = useRef<{ kind: "now" | "centre"; t: number } | { kind: "point"; t: number; offset: number } | null>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per zoom change; geometry is read from the ref
   useLayoutEffect(() => {
     const scroller = scrollRef.current
@@ -255,9 +308,82 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
     if (!scroller || anchor === null) return
     pendingAnchor.current = null
     const { domainStart, scale, contentW } = geometry.current
+    if (anchor.kind === "point") {
+      scroller.scrollLeft = keepAt(anchor.t, anchor.offset, domainStart, scale, scroller.clientWidth, contentW)
+      return
+    }
     const place = anchor.kind === "now" ? nowScrollLeft : centeredScrollLeft
     scroller.scrollLeft = place(anchor.t, domainStart, scale, scroller.clientWidth, contentW)
   }, [zoom])
+
+  // Back from another view: once per mount, as soon as the timeline is drawn,
+  // return to the saved window. The browser clamps both values to the range.
+  const hasTimeline = model.extent !== null
+  const restored = useRef(false)
+  useLayoutEffect(() => {
+    const [scroller, titles] = [scrollRef.current, titlesRef.current]
+    if (!hasTimeline || restored.current || !scroller) return
+    restored.current = true
+    const view = readView()
+    if (!view) return
+    const { domainStart, scale } = geometry.current
+    scroller.scrollLeft = (view.leftTime - domainStart) * scale
+    scroller.scrollTop = view.scrollTop
+    if (titles) titles.scrollTop = scroller.scrollTop
+  }, [hasTimeline])
+
+  // Pinch to zoom (beadbox-ct5, design D3): smooth, keeping the time under the
+  // pointer in place, within the button limits. Native non-passive listeners,
+  // since React's wheel listener cannot cancel the page's own pinch zoom.
+  // WebKit (the macOS app) sends gesture events; Chromium and WebKitGTK send
+  // a wheel event with ctrlKey. The handler always reads the latest render.
+  const pinch = useRef<(factor: number, clientX: number | undefined) => void>(() => {})
+  pinch.current = (factor, clientX) => {
+    const scroller = scrollRef.current
+    if (!scroller || !Number.isFinite(factor) || factor <= 0) return
+    const { domainStart, scale } = geometry.current
+    const level = Math.min(MAX_LEVEL, Math.max(MIN_LEVEL, levelOf(scale * factor)))
+    const left = scroller.getBoundingClientRect().left
+    const offset = Math.min(Math.max((clientX ?? left + scroller.clientWidth / 2) - left, 0), scroller.clientWidth)
+    pendingAnchor.current = { kind: "point", t: domainStart + (scroller.scrollLeft + offset) / scale, offset }
+    applyZoom({ kind: "level", level })
+  }
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!hasTimeline || !el) return
+    let gestureScale: number | null = null
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey || gestureScale !== null) return
+      e.preventDefault()
+      const dy = e.deltaMode === 1 ? e.deltaY * ROW_H : e.deltaY
+      pinch.current(Math.exp(-dy * PINCH_WHEEL_RATE), e.clientX)
+    }
+    const onGestureStart = (e: Event) => {
+      e.preventDefault()
+      gestureScale = 1
+    }
+    const onGestureChange = (e: Event) => {
+      e.preventDefault()
+      const { scale, clientX } = e as Event & { scale?: number; clientX?: number }
+      if (typeof scale !== "number" || !(scale > 0)) return
+      pinch.current(scale / (gestureScale ?? 1), clientX)
+      gestureScale = scale
+    }
+    const onGestureEnd = (e: Event) => {
+      e.preventDefault()
+      gestureScale = null
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    el.addEventListener("gesturestart", onGestureStart)
+    el.addEventListener("gesturechange", onGestureChange)
+    el.addEventListener("gestureend", onGestureEnd)
+    return () => {
+      el.removeEventListener("wheel", onWheel)
+      el.removeEventListener("gesturestart", onGestureStart)
+      el.removeEventListener("gesturechange", onGestureChange)
+      el.removeEventListener("gestureend", onGestureEnd)
+    }
+  }, [hasTimeline])
 
   if (!model.extent) {
     return <p className="text-sm text-muted-foreground px-1 py-8">No beads match the current filters.</p>
@@ -266,9 +392,12 @@ export function GanttChart({ model, now, onOpenBead }: GanttChartProps) {
   const domain = paddedDomain(model.extent)
   const scale = zoom.kind === "fit" ? pxPerMs("fit", domain, viewWidth) : levelScale(zoom.level)
   const activeZoom: Zoom | null = zoom.kind === "fit" ? "fit" : presetAt(zoom.level)
-  // From Fit the next step is the nearest level past Fit's scale; otherwise one level.
+  // From Fit or from between steps (after a pinch) the next step is the next
+  // whole level past the current scale; otherwise one level.
   const stepTo = (direction: 1 | -1) =>
-    zoom.kind === "fit" ? stepFrom(scale, direction) : Math.min(MAX_LEVEL, Math.max(MIN_LEVEL, zoom.level + direction))
+    zoom.kind === "fit" || !Number.isInteger(zoom.level)
+      ? stepFrom(scale, direction)
+      : Math.min(MAX_LEVEL, Math.max(MIN_LEVEL, zoom.level + direction))
   const canZoomIn = zoom.kind === "fit" ? scale < levelScale(MAX_LEVEL) : zoom.level < MAX_LEVEL
   const canZoomOut = zoom.kind === "fit" ? scale > levelScale(MIN_LEVEL) : zoom.level > MIN_LEVEL
   geometry.current = { domainStart: domain.start, scale, contentW: Math.max((domain.end - domain.start) * scale, viewWidth) }

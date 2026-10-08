@@ -410,6 +410,31 @@ describe("Chart view", () => {
     expect(column()).toBe(300)
   }, 20_000)
 
+  test("dragging the title handle selects no text, and selection works again afterwards", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const handle = () => screen.getByRole("separator", { name: "Resize bead titles" })
+    const column = () => Number.parseInt((handle().parentElement as HTMLElement).style.width, 10)
+    document.body.style.userSelect = "text"
+    // fireEvent returns false when the handler cancelled the default.
+    expect(fireEvent.pointerDown(handle(), { pointerId: 1, clientX: 500 })).toBe(false)
+    expect(document.body.style.userSelect).toBe("none")
+    fireEvent.pointerMove(handle(), { pointerId: 1, clientX: 600 })
+    expect(column()).toBe(400)
+    fireEvent.pointerUp(handle(), { pointerId: 1, clientX: 600 })
+    expect(document.body.style.userSelect).toBe("text")
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientX: 500 })
+    expect(document.body.style.userSelect).toBe("none")
+    fireEvent.pointerCancel(handle(), { pointerId: 1 })
+    expect(document.body.style.userSelect).toBe("text")
+    // Unmounting mid-drag restores it too.
+    fireEvent.pointerDown(handle(), { pointerId: 1, clientX: 500 })
+    expect(document.body.style.userSelect).toBe("none")
+    cleanup()
+    expect(document.body.style.userSelect).toBe("text")
+    document.body.style.userSelect = ""
+  }, 20_000)
+
   test("arrow keys resize the title column, and the width survives a remount", async () => {
     setFiltersPreference(FILTERS)
     await mounted()
@@ -470,6 +495,8 @@ describe("Chart view — stepwise zoom (PR #51)", () => {
     await mounted()
     fireEvent.click(screen.getByRole("button", { name: "Hours" }))
     fireEvent.click(zoomIn())
+    fireEvent.click(zoomIn())
+    expect(zoomIn().disabled).toBe(false) // three steps past Hours now (beadbox-ct5)
     fireEvent.click(zoomIn())
     expect(zoomIn().disabled).toBe(true)
     expect(zoomOut().disabled).toBe(false)
@@ -548,6 +575,24 @@ describe("Chart view — stepwise zoom (PR #51)", () => {
     const after = width()
     expect(after).toBeGreaterThan(before * 2) // one Hours-band step is about ×2.13
     expect((scroller.scrollLeft + VIEW_W / 2) / after).toBeCloseTo(centreFraction, 6)
+  }, 20_000)
+
+  test("a fractional zoom (left by a pinch) restores unhighlighted, and +/- go to the next whole step", async () => {
+    sessionStorage.setItem("beadbox:chart-zoom", JSON.stringify({ kind: "level", level: 8.5 }))
+    setFiltersPreference(FILTERS)
+    await mounted()
+    expect(pressed()).toEqual([])
+    fireEvent.click(zoomOut()) // 8.5 -> 8 = Hours
+    expect(pressed()).toEqual(["Hours"])
+    sessionStorage.setItem("beadbox:chart-zoom", JSON.stringify({ kind: "level", level: 8.5 }))
+    cleanup()
+    queryClient.clear()
+    _resetWorkspaceSessions()
+    await mounted()
+    fireEvent.click(zoomIn()) // 8.5 -> 9
+    expect(pressed()).toEqual([])
+    fireEvent.click(zoomOut()) // 9 -> 8 = Hours
+    expect(pressed()).toEqual(["Hours"])
   }, 20_000)
 
   test("a preset name stored before the ladder restores that preset", async () => {
@@ -686,5 +731,133 @@ describe("Chart view — minute labels past Hours (PR #53)", () => {
     expect(minutesOf(axisLabels())).toEqual(new Set(["00", "30"]))
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }))
     expect(minutesOf(axisLabels())).toEqual(new Set(["00", "15", "30", "45"]))
+  }, 20_000)
+})
+
+describe("Chart view — keeps its view across views (beadbox-ct5)", () => {
+  const scroller = () => screen.getByTestId("gantt-scroll")
+  const nowX = () => Number(screen.getByTestId("gantt-now").getAttribute("x1"))
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60)) // one animation frame and then some
+  const remount = async () => {
+    cleanup()
+    queryClient.clear()
+    _resetWorkspaceSessions()
+    await mounted()
+  }
+  // Scroll somewhere at Hours and return the now line's offset in the view,
+  // which pins down the visible time window independently of the domain.
+  const leaveAt = async (left: number, top: number) => {
+    fireEvent.click(screen.getByRole("button", { name: "Hours" }))
+    scroller().scrollLeft = left
+    scroller().scrollTop = top
+    fireEvent.scroll(scroller())
+    await settle()
+    return nowX() - left
+  }
+
+  test("coming back restores the zoom, the time window and the vertical position", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const offset = await leaveAt(500, 56)
+    await remount()
+    expect(screen.getByRole("button", { name: "Hours" }).getAttribute("aria-pressed")).toBe("true")
+    expect(nowX() - scroller().scrollLeft).toBeCloseTo(offset, 0)
+    expect(scroller().scrollTop).toBe(56)
+    expect(screen.getByTestId("gantt-titles").scrollTop).toBe(56)
+  }, 20_000)
+
+  test("with an earlier bead added meanwhile, the same time window comes back", async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    const offset = await leaveAt(500, 0)
+    const domainBefore = nowX()
+    treeFn = () => {
+      const [e1, e2] = tree()
+      return [{ ...e1, children: [...e1.children, bead("old", { status: "closed", createdAt: day(-5), closedAt: day(-4) })] }, e2]
+    }
+    await remount()
+    expect(nowX()).toBeGreaterThan(domainBefore) // the timeline now starts earlier
+    expect(nowX() - scroller().scrollLeft).toBeCloseTo(offset, 0)
+  }, 20_000)
+
+  test("a missing or garbled saved view leaves the default view", async () => {
+    sessionStorage.setItem("beadbox:chart-view", JSON.stringify({ leftTime: "yesterday", scrollTop: 10 }))
+    setFiltersPreference(FILTERS)
+    await mounted()
+    expect(scroller().scrollLeft).toBe(0)
+    expect(scroller().scrollTop).toBe(0)
+  }, 20_000)
+})
+
+describe("Chart view — pinch to zoom (beadbox-ct5)", () => {
+  const VIEW_W = 400
+  const setup = async () => {
+    setFiltersPreference(FILTERS)
+    await mounted()
+    fireEvent.click(screen.getByRole("button", { name: "Hours" }))
+    const scroller = screen.getByTestId("gantt-scroll")
+    Object.defineProperty(scroller, "clientWidth", { configurable: true, value: VIEW_W })
+    return scroller
+  }
+  const width = () => Number(screen.getByTestId("gantt-timeline").getAttribute("width"))
+  const pressed = () =>
+    ["Fit", "Hours", "Days", "Weeks"].filter((name) => screen.getByRole("button", { name }).getAttribute("aria-pressed") === "true")
+  const gesture = (el: Element, type: string, props: Record<string, number> = {}) => {
+    const e = Object.assign(new Event(type, { bubbles: true, cancelable: true }), props)
+    act(() => {
+      el.dispatchEvent(e)
+    })
+    return e
+  }
+  // happy-dom drops ctrlKey and clientX from WheelEvent's init; real webviews set them.
+  const pinchWheel = (el: Element, deltaY: number, clientX: number) => {
+    const e = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY })
+    Object.defineProperty(e, "ctrlKey", { value: true })
+    Object.defineProperty(e, "clientX", { value: clientX })
+    act(() => {
+      el.dispatchEvent(e)
+    })
+    return e
+  }
+
+  test("Ctrl+wheel zooms in smoothly, keeps the time under the pointer, and leaves no preset highlighted", async () => {
+    const scroller = await setup()
+    scroller.scrollLeft = 1_000
+    const before = width()
+    const pointer = 100
+    const fraction = (1_000 + pointer) / before // where the pointer is on the timeline
+    const wheel = pinchWheel(scroller, -30, pointer)
+    expect(wheel.defaultPrevented).toBe(true) // the page itself must not zoom
+    const after = width()
+    expect(after / before).toBeCloseTo(Math.exp(0.3), 3) // smooth, not a ladder step
+    expect((scroller.scrollLeft + pointer) / after).toBeCloseTo(fraction, 6)
+    expect(pressed()).toEqual([])
+  }, 20_000)
+
+  test("a WebKit gesture with scale 2 doubles the scale", async () => {
+    const scroller = await setup()
+    const before = width()
+    gesture(scroller, "gesturestart")
+    const change = gesture(scroller, "gesturechange", { scale: 2, clientX: 200 })
+    gesture(scroller, "gestureend")
+    expect(change.defaultPrevented).toBe(true)
+    expect(width() / before).toBeCloseTo(2, 3)
+  }, 20_000)
+
+  test("pinching past the limit stops there and disables +", async () => {
+    const scroller = await setup()
+    pinchWheel(scroller, -2_000, 100)
+    expect((screen.getByRole("button", { name: "Zoom in" }) as HTMLButtonElement).disabled).toBe(true)
+    pinchWheel(scroller, 5_000, 100)
+    expect((screen.getByRole("button", { name: "Zoom out" }) as HTMLButtonElement).disabled).toBe(true)
+  }, 20_000)
+
+  test("a plain wheel (no Ctrl) does not zoom", async () => {
+    const scroller = await setup()
+    const before = width()
+    const notPrevented = fireEvent.wheel(scroller, { deltaY: -30, clientX: 100 })
+    expect(notPrevented).toBe(true)
+    expect(width()).toBe(before)
+    expect(pressed()).toEqual(["Hours"])
   }, 20_000)
 })
