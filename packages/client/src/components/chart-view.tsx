@@ -23,7 +23,6 @@ import { extractAssignees, extractRigNames, flattenEpicsToBeads } from "@/lib/ep
 import { buildGanttModel } from "@/lib/gantt-model"
 import { setSelectedBead as persistSelectedBead } from "@/lib/local-storage"
 import { rpc } from "@/lib/rpc"
-import { useSubscriptionChangeSignal } from "@/lib/subscribe"
 import { tryViewSwitchShortcut } from "@/lib/view-switch-keys"
 
 const NOW_TICK_MS = 60_000
@@ -58,9 +57,12 @@ export function useNow(intervalMs = NOW_TICK_MS): number {
 }
 
 function useChartData(dbPath: string | undefined, includeSystem: boolean) {
-  const changeSignal = useSubscriptionChangeSignal()
+  // No live-update counter in these keys: a change event already calls
+  // invalidateQueries(), which refetches them in place. With the counter in the
+  // key, every change made a new cache entry holding a full copy of the tree
+  // until gcTime evicted it, and a busy workspace held hundreds (beadbox-005).
   const epicsQuery = useQuery({
-    queryKey: ["chart-epics", dbPath, includeSystem, changeSignal],
+    queryKey: ["chart-epics", dbPath, includeSystem],
     queryFn: async () => {
       const result = await rpc.epics.incrementalRefresh(dbPath, includeSystem)
       if (!result.success) throw new Error(result.bdLoadError.message)
@@ -71,7 +73,7 @@ function useChartData(dbPath: string | undefined, includeSystem: boolean) {
   })
   // A degraded answer is shown as a notice, never read as "no blockers".
   const blocksQuery = useQuery({
-    queryKey: ["chart-blocks", dbPath, changeSignal],
+    queryKey: ["chart-blocks", dbPath],
     queryFn: () => rpc.epics.getBlocksDependencies(dbPath),
     enabled: Boolean(dbPath),
     placeholderData: (previous) => previous,

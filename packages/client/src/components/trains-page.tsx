@@ -7,7 +7,6 @@ import { usePreferences } from "../hooks/use-preferences"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import { setSelectedBead as persistSelectedBead } from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
-import { useSubscriptionChangeSignal } from "../lib/subscribe"
 import { tryViewSwitchShortcut } from "../lib/view-switch-keys"
 import type { Workspace } from "../lib/types"
 import { getWorkspaceCookie } from "../lib/workspace-cookie"
@@ -199,21 +198,24 @@ function TrainsBody({
   )
 }
 
-/** The three train queries + their empty defaults, keyed on the change signal so plan edits refetch. */
+/**
+ * The three train queries + their empty defaults. A change event refetches them
+ * through invalidateQueries(); the live-update counter is not in the keys, or
+ * every change would leave another cached copy behind (beadbox-005).
+ */
 function useTrainsData(dbPath: string | undefined) {
-  const changeSignal = useSubscriptionChangeSignal()
   const trainsQuery = useQuery({
-    queryKey: ["trains", dbPath, changeSignal],
+    queryKey: ["trains", dbPath],
     queryFn: async () => unwrap(await rpc.trains.loadTrains(dbPath)),
     enabled: Boolean(dbPath),
   })
   const readyQuery = useQuery({
-    queryKey: ["trains-ready", dbPath, changeSignal],
+    queryKey: ["trains-ready", dbPath],
     queryFn: async () => unwrap(await rpc.trains.loadReady(dbPath)),
     enabled: Boolean(dbPath),
   })
   const couplerQuery = useQuery({
-    queryKey: ["trains-couplers", dbPath, changeSignal],
+    queryKey: ["trains-couplers", dbPath],
     queryFn: async () => unwrap(await rpc.trains.loadCouplers(dbPath)),
     enabled: Boolean(dbPath),
   })

@@ -16,7 +16,8 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@t
 import { StartupGate } from "../components/startup-gate"
 import { getSelectedBead, setFiltersPreference, setSelectedBead } from "../lib/local-storage"
 import { queryClient } from "../lib/query-client"
-import { _setRpc, type RemoteApi } from "../lib/rpc"
+import { _setRpc, rpc, type RemoteApi } from "../lib/rpc"
+import { _emitChangeForTests } from "../lib/subscribe"
 import type { Bead, Epic, Filters, Workspace } from "../lib/types"
 import { clearWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
 import { _resetWorkspaceSessions } from "../lib/workspace-session-cache"
@@ -860,4 +861,35 @@ describe("Chart view — pinch to zoom (PR #54)", () => {
     expect(width()).toBe(before)
     expect(pressed()).toEqual(["Hours"])
   }, 20_000)
+})
+
+// beadbox-005: the Chart's queries carried the live-update counter in their
+// keys, so every change created a NEW cache entry, each holding a full copy of
+// the epic tree until gcTime (5 min) evicted it. On a workspace that changes
+// every couple of seconds that is ~150 trees held at once: the web content
+// process grew to gigabytes and WebKit killed it. A change must refetch in
+// place (invalidateQueries already does that for useQuery consumers).
+describe("Chart view — live updates keep one cached copy per query (beadbox-005)", () => {
+  test("20 change events leave one chart-epics / chart-blocks / trains-present entry, refetched each time", async () => {
+    await mounted()
+    const refresh = (rpc.epics as unknown as { incrementalRefresh: { mock: { calls: unknown[] } } }).incrementalRefresh
+    const before = refresh.mock.calls.length
+    const changes = 20
+    for (let i = 0; i < changes; i++) {
+      const calls = refresh.mock.calls.length
+      await act(async () => {
+        _emitChangeForTests()
+      })
+      await waitFor(() => expect(refresh.mock.calls.length).toBeGreaterThan(calls), { timeout: 3_000 })
+    }
+    // Live updates still work: one tree refetch per change.
+    expect(refresh.mock.calls.length - before).toBeGreaterThanOrEqual(changes)
+    // Entries for the workspace's database (an empty, disabled entry from before
+    // the workspace resolved has a null path and never grows).
+    const entries = (key: string) =>
+      queryClient.getQueryCache().findAll({ queryKey: [key] }).filter((q) => q.queryKey[1] != null).length
+    expect(entries("chart-epics")).toBe(1)
+    expect(entries("chart-blocks")).toBe(1)
+    expect(entries("trains-present")).toBe(1)
+  }, 60_000)
 })
