@@ -24,6 +24,7 @@ import * as formulas from "./formulas"
 import * as health from "./health"
 import * as molecules from "./molecules"
 import * as recovery from "./recovery"
+import * as session from "./session"
 import * as subscribe from "./subscribe"
 import * as system from "./system"
 import * as trains from "./trains"
@@ -47,6 +48,7 @@ export const handlers = {
   health: wrapNamespace(health, "health"),
   molecules: wrapNamespace(molecules, "molecules"),
   recovery: wrapNamespace(recovery, "recovery"),
+  session: wrapNamespace(session, "session"),
   subscribe,
   system: wrapNamespace(system, "system"),
   trains: wrapNamespace(trains, "trains"),

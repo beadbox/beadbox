@@ -49,12 +49,132 @@ fn is_refresh_combo(ctrl: bool, shift: bool, key_is_r: bool, key_is_f5: bool) ->
     }
 }
 
+// beadbox-z04: WebKit may terminate the page's content process on its own
+// (inactive-page memory limit, a WebKit or GPU-process crash). The window then
+// shows only its background while the host and the sidecar keep running. The
+// termination hook reloads the page, capped so a page that dies again on load
+// cannot loop; past the cap the window shows a plain "quit and reopen" page.
+// Contract: systemdesign §5.2 "Web content process termination".
+#[allow(dead_code)] // the hook is macOS-only; the budget is tested everywhere
+const MAX_CONTENT_RELOADS: usize = 3;
+#[allow(dead_code)]
+const CONTENT_RELOAD_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+
+#[allow(dead_code)]
+#[derive(Debug, PartialEq, Eq)]
+enum TerminationAction {
+    Reload,
+    GiveUp,
+}
+
+/// Per-window reload budget: at most MAX_CONTENT_RELOADS reloads in any
+/// CONTENT_RELOAD_WINDOW. Giving up is final for the window: once the stopped
+/// page shows, a later termination does not start the cycle again.
+#[allow(dead_code)]
+#[derive(Default)]
+struct ReloadBudget {
+    reloads: Vec<std::time::Instant>,
+    given_up: bool,
+}
+
+#[allow(dead_code)]
+impl ReloadBudget {
+    fn record(&mut self, now: std::time::Instant) -> TerminationAction {
+        if self.given_up {
+            return TerminationAction::GiveUp;
+        }
+        self.reloads
+            .retain(|t| now.saturating_duration_since(*t) < CONTENT_RELOAD_WINDOW);
+        if self.reloads.len() < MAX_CONTENT_RELOADS {
+            self.reloads.push(now);
+            TerminationAction::Reload
+        } else {
+            self.given_up = true;
+            TerminationAction::GiveUp
+        }
+    }
+}
+
+/// The app's own page with `stopped=1` added: the client renders only the
+/// "quit and reopen" message there. Same origin as the app, so the navigation
+/// filter, CSP and capabilities apply unchanged (a data: URL would be refused
+/// by our own on_navigation filter).
+#[allow(dead_code)]
+fn stopped_page_url(current: &tauri::Url) -> tauri::Url {
+    let mut url = current.clone();
+    let kept: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(k, _)| k != "stopped")
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    url.query_pairs_mut()
+        .clear()
+        .extend_pairs(kept)
+        .append_pair("stopped", "1");
+    url.set_fragment(None);
+    url
+}
+
+/// One line in the unified log under the host pid, beside WebKit's own
+/// processDidTerminate line (which carries the reason; the hook gets none).
+#[cfg(target_os = "macos")]
+fn log_unified(message: &str) {
+    if let Ok(line) = std::ffi::CString::new(format!("[beadbox] {message}")) {
+        // SAFETY: a constant "%s" format and a NUL-terminated argument.
+        unsafe { libc::syslog(libc::LOG_NOTICE, c"%s".as_ptr(), line.as_ptr()) };
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // ── Desktop: kkrpc bridge to the Bun sidecar via tauri-plugin-js ──
     #[cfg(not(target_os = "ios"))]
     {
-        let app = tauri::Builder::default()
+        let builder = tauri::Builder::default();
+
+        // beadbox-z04: reload the page when WebKit terminates its content
+        // process (macOS only; Tauri exposes the hook from 2.11). The budget
+        // is per window label.
+        #[cfg(target_os = "macos")]
+        let builder = {
+            let budgets: std::sync::Mutex<std::collections::HashMap<String, ReloadBudget>> =
+                Default::default();
+            builder.on_web_content_process_terminate(move |webview: &tauri::Webview| {
+                let label = webview.label().to_string();
+                let action = budgets
+                    .lock()
+                    .map(|mut b| b.entry(label.clone()).or_default().record(std::time::Instant::now()))
+                    .unwrap_or(TerminationAction::GiveUp);
+                match action {
+                    TerminationAction::Reload => {
+                        log_unified(&format!(
+                            "web content process terminated (window {label}); reloading the page \
+                             (at most {MAX_CONTENT_RELOADS} reloads per {} min)",
+                            CONTENT_RELOAD_WINDOW.as_secs() / 60
+                        ));
+                        if let Err(e) = webview.reload() {
+                            log_unified(&format!("reload of window {label} failed: {e}"));
+                        }
+                    }
+                    TerminationAction::GiveUp => {
+                        log_unified(&format!(
+                            "web content process terminated (window {label}); reload cap reached, \
+                             showing the stopped page"
+                        ));
+                        match webview.url() {
+                            Ok(url) => {
+                                if let Err(e) = webview.navigate(stopped_page_url(&url)) {
+                                    log_unified(&format!("stopped page for window {label} failed: {e}"));
+                                }
+                            }
+                            Err(e) => log_unified(&format!("no URL for window {label}: {e}")),
+                        }
+                    }
+                }
+            })
+        };
+
+        let app = builder
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_process::init())
             // kkrpc bridge between WebView and the Bun sidecar (P4.1).
@@ -337,5 +457,69 @@ mod tests {
     fn refresh_combo_r_without_ctrl_is_not_refresh() {
         // Bare 'r' keypress without Ctrl shouldn't trigger refresh.
         assert!(!is_refresh_combo(false, false, true, false));
+    }
+
+    // ─── ReloadBudget (beadbox-z04) ──────────────────────────────────────
+
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn reload_cap_is_three_per_ten_minutes() {
+        // The contract in systemdesign §5.2; changing it is a spec change.
+        assert_eq!(MAX_CONTENT_RELOADS, 3);
+        assert_eq!(CONTENT_RELOAD_WINDOW, Duration::from_secs(600));
+    }
+
+    #[test]
+    fn reload_budget_reloads_three_times_then_gives_up() {
+        let t0 = Instant::now();
+        let mut b = ReloadBudget::default();
+        for i in 0..3 {
+            assert_eq!(b.record(t0 + Duration::from_secs(60 * i)), TerminationAction::Reload);
+        }
+        assert_eq!(b.record(t0 + Duration::from_secs(180)), TerminationAction::GiveUp);
+    }
+
+    #[test]
+    fn reload_budget_window_slides() {
+        let t0 = Instant::now();
+        let mut b = ReloadBudget::default();
+        for i in 0..3 {
+            assert_eq!(b.record(t0 + Duration::from_secs(60 * i)), TerminationAction::Reload);
+        }
+        // Past ten minutes from the first reload, that one no longer counts.
+        assert_eq!(b.record(t0 + Duration::from_secs(600)), TerminationAction::Reload);
+    }
+
+    #[test]
+    fn reload_budget_giving_up_is_final() {
+        let t0 = Instant::now();
+        let mut b = ReloadBudget::default();
+        for _ in 0..3 {
+            b.record(t0);
+        }
+        assert_eq!(b.record(t0), TerminationAction::GiveUp);
+        // An hour later the window is still on the stopped page: no new cycle.
+        assert_eq!(b.record(t0 + Duration::from_secs(3600)), TerminationAction::GiveUp);
+    }
+
+    // ─── stopped_page_url (beadbox-z04) ──────────────────────────────────
+
+    #[test]
+    fn stopped_page_keeps_origin_path_and_params() {
+        let u = tauri::Url::parse("tauri://localhost/index.html?sidecar=1#/chart").unwrap();
+        let s = stopped_page_url(&u);
+        assert_eq!(s.as_str(), "tauri://localhost/index.html?sidecar=1&stopped=1");
+        // Still an internal navigation: the on_navigation filter lets it through.
+        assert!(is_internal_navigation(s.scheme(), s.host_str().unwrap_or("")));
+    }
+
+    #[test]
+    fn stopped_page_does_not_repeat_the_flag() {
+        let u = tauri::Url::parse("tauri://localhost/index.html?sidecar=1&stopped=1").unwrap();
+        assert_eq!(
+            stopped_page_url(&u).as_str(),
+            "tauri://localhost/index.html?sidecar=1&stopped=1"
+        );
     }
 }

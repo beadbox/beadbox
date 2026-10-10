@@ -17,7 +17,7 @@
 // same in-flight promise.
 
 import type { handlers as serverHandlers } from "@beadbox/server/handlers"
-import { createChannel, kill, onExit, spawn } from "tauri-plugin-js-api"
+import { createChannel, getStatus, kill, onExit, spawn } from "tauri-plugin-js-api"
 import type { BdCommandEvent } from "./console-types"
 import { hydrateSavedPasswords } from "./tauri-credentials"
 
@@ -125,6 +125,13 @@ interface SidecarRuntime {
   spawn: () => Promise<unknown>
   kill: () => Promise<unknown>
   connect: () => Promise<SidecarSession>
+  /**
+   * Whether a sidecar is already running for this app instance. Asked once
+   * per page lifetime, before the first spawn: after the host reloads a page
+   * WebKit killed (beadbox-z04), the sidecar the previous page spawned is
+   * still running, and the new page attaches to it instead of spawning.
+   */
+  isRunning?: () => Promise<boolean>
 }
 
 interface SidecarManagerOptions {
@@ -139,6 +146,13 @@ interface SidecarManagerOptions {
    * timeout is logged and the session is used anyway.
    */
   onConnect?: (api: RemoteApi) => Promise<void>
+  /**
+   * Runs once, before onConnect, when this page attached to a sidecar that
+   * was already running (beadbox-z04): the previous page's subscriptions are
+   * still registered there and must go before this page subscribes. Bounded
+   * like onConnect.
+   */
+  onAttach?: (api: RemoteApi) => Promise<void>
   onConnectTimeoutMs?: number
   /**
    * How long `call` waits for a reply. Must exceed the sidecar's own 30s
@@ -184,6 +198,7 @@ export function createSidecarManager(
     windowMs = 60_000,
     now = Date.now,
     onConnect,
+    onAttach,
     onConnectTimeoutMs = 5_000,
     callDeadlineMs = 45_000,
     maxConsecutiveMisses = 1,
@@ -204,6 +219,9 @@ export function createSidecarManager(
   // A restart's kill must finish before the next spawn: the plugin refuses a
   // second process under a name that is still registered.
   let pendingKill: Promise<unknown> | null = null
+  // Only the first start of a page lifetime may attach; every later start
+  // follows a loss this page saw, so it spawns (beadbox-z04).
+  let attachChecked = false
 
   // Counts an exit or a restart against the respawn budget and says whether
   // subscribers may be told to re-attach right away.
@@ -247,7 +265,12 @@ export function createSidecarManager(
       await ensureExitListener()
       if (pendingKill) await pendingKill
       if (generation !== expectedGeneration) throw new Error("Sidecar exited during startup")
-      await runtime.spawn()
+      let attached = false
+      if (!attachChecked) {
+        attachChecked = true
+        attached = (await runtime.isRunning?.().catch(() => false)) ?? false
+      }
+      if (!attached) await runtime.spawn()
       if (generation !== expectedGeneration) throw new Error("Sidecar exited during startup")
       let nextSession: SidecarSession
       try {
@@ -263,6 +286,8 @@ export function createSidecarManager(
         throw new Error("Sidecar exited during startup")
       }
       session = nextSession
+      if (attached && onAttach)
+        await runOnConnect(onAttach, nextSession.api, onConnectTimeoutMs, "onAttach")
       if (onConnect) await runOnConnect(onConnect, nextSession.api, onConnectTimeoutMs)
       if (resubscribeOnConnect) {
         resubscribeOnConnect = false
@@ -384,6 +409,7 @@ async function runOnConnect(
   onConnect: (api: RemoteApi) => Promise<void>,
   api: RemoteApi,
   timeoutMs: number,
+  label = "onConnect",
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<"timeout">((resolve) => {
@@ -391,23 +417,35 @@ async function runOnConnect(
   })
   try {
     const outcome = await Promise.race([onConnect(api).then(() => "done" as const), timeout])
-    if (outcome === "timeout")
-      console.warn(`[rpc] sidecar onConnect timed out after ${timeoutMs}ms`)
+    if (outcome === "timeout") console.warn(`[rpc] sidecar ${label} timed out after ${timeoutMs}ms`)
   } catch (err) {
-    console.warn("[rpc] sidecar onConnect failed:", err)
+    console.warn(`[rpc] sidecar ${label} failed:`, err)
   } finally {
     clearTimeout(timer)
   }
 }
 
-// Restore saved server passwords on every new sidecar (beadbox-ct1).
-export const SIDECAR_MANAGER_OPTIONS: SidecarManagerOptions = { onConnect: hydrateSavedPasswords }
+// Restore saved server passwords on every new sidecar (beadbox-ct1). On
+// attaching to a running sidecar after a reload, first drop the previous
+// page's subscriptions (beadbox-z04).
+export const SIDECAR_MANAGER_OPTIONS: SidecarManagerOptions = {
+  onConnect: hydrateSavedPasswords,
+  onAttach: async (api) => {
+    await api.session.attached()
+  },
+}
 
 const sidecarManager = createSidecarManager(
   {
     onExit: (callback) => onExit(SIDECAR_NAME, callback),
     spawn: () => spawn(SIDECAR_NAME, { sidecar: SIDECAR_NAME }),
     kill: () => kill(SIDECAR_NAME),
+    // getStatus rejects when no process is registered under the name.
+    isRunning: () =>
+      getStatus(SIDECAR_NAME).then(
+        (status) => status.running,
+        () => false,
+      ),
     connect: async () => {
       const { api, channel, io } = await createChannel<Record<string, never>, RemoteApi>(
         SIDECAR_NAME,
@@ -513,6 +551,7 @@ function buildTauriRpc(): RemoteApi {
     health: namespaceProxy("health"),
     molecules: namespaceProxy("molecules"),
     recovery: namespaceProxy("recovery"),
+    session: namespaceProxy("session"),
     subscribe: namespaceProxy("subscribe"),
     system: namespaceProxy("system"),
     trains: namespaceProxy("trains"),
@@ -545,6 +584,7 @@ function buildStubRpc(): RemoteApi {
     health: namespaceStub("health"),
     molecules: namespaceStub("molecules"),
     recovery: namespaceStub("recovery"),
+    session: namespaceStub("session"),
     subscribe: namespaceStub("subscribe"),
     system: namespaceStub("system"),
     trains: namespaceStub("trains"),

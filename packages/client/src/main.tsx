@@ -10,6 +10,7 @@ import { QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router"
 import { StrictMode } from "react"
 import ReactDOM from "react-dom/client"
+import { isStoppedPage, StoppedPage } from "./components/stopped-page"
 import { isTauriRuntime } from "./lib/rpc"
 import { queryClient } from "./lib/query-client"
 import { startSidecarShutdownStamp } from "./lib/sidecar-shutdown-stamp"
@@ -18,22 +19,29 @@ import { installWindowBd } from "./lib/window-bd"
 import { routeTree } from "./routeTree.gen"
 import "./index.css"
 
-// bb-x0il: subscribe early so the very first [bb-x0il-state] line emitted
-// by the sidecar at boot lands in window.__BEADBOX__.watcher.
-// No-op outside the Tauri runtime.
-startSidecarWatcherStamp()
+// beadbox-z04: the host shows the stopped page (`stopped=1`) once WebKit has
+// killed the page's content process past the reload cap. That page starts
+// nothing: no stamps, no sidecar, no router.
+const stopped = isStoppedPage(window.location.search)
 
-// bb-0vlu: subscribe to [bb-0vlu] sigterm_received / shutdown_watchdog_escalating
-// lines so DevTools can see the SIGTERM source data when the sidecar is asked
-// to shut down. No-op outside the Tauri runtime.
-startSidecarShutdownStamp()
+if (!stopped) {
+  // bb-x0il: subscribe early so the very first [bb-x0il-state] line emitted
+  // by the sidecar at boot lands in window.__BEADBOX__.watcher.
+  // No-op outside the Tauri runtime.
+  startSidecarWatcherStamp()
 
-// bb-tu1m: install window.bd() helper at module-load (idempotent). Previously
-// planted via console-logo.tsx's mount effect, which was deleted with the
-// rest of the dev-console cosmetic noise (BEADBX ASCII + bd-help tip). The
-// helper is a plain side-effect, so module-level boot here matches the same
-// shape as the sidecar-stamp installers above.
-installWindowBd()
+  // bb-0vlu: subscribe to [bb-0vlu] sigterm_received / shutdown_watchdog_escalating
+  // lines so DevTools can see the SIGTERM source data when the sidecar is asked
+  // to shut down. No-op outside the Tauri runtime.
+  startSidecarShutdownStamp()
+
+  // bb-tu1m: install window.bd() helper at module-load (idempotent). Previously
+  // planted via console-logo.tsx's mount effect, which was deleted with the
+  // rest of the dev-console cosmetic noise (BEADBX ASCII + bd-help tip). The
+  // helper is a plain side-effect, so module-level boot here matches the same
+  // shape as the sidecar-stamp installers above.
+  installWindowBd()
+}
 
 // bb-eze7 (P0 v0.25-RC blocker): under the Tauri asset protocol, the WebView
 // loads `tauri://localhost/index.html?sidecar=1` (per src-tauri/src/lib.rs's
@@ -66,8 +74,12 @@ if (!rootEl) throw new Error("#root not found")
 
 ReactDOM.createRoot(rootEl).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    {stopped ? (
+      <StoppedPage />
+    ) : (
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    )}
   </StrictMode>,
 )
