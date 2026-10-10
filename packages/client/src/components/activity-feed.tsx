@@ -99,6 +99,16 @@ interface ActivityFeedProps {
   onClearCrossFilter?: () => void
 }
 
+// Newest events a feed keeps from live updates. Each change prepends what it
+// brought, and the list is mirrored into the session cache, so a feed left
+// open on a busy workspace otherwise grew for as long as the app ran
+// (beadbox-005). Trimmed events stay reachable through "load more".
+export const MAX_FEED_EVENTS = 500
+
+function keepNewest(events: ActivityEvent[]): ActivityEvent[] {
+  return events.length > MAX_FEED_EVENTS ? events.slice(0, MAX_FEED_EVENTS) : events
+}
+
 export function ActivityFeed({
   dbPath,
   workspaceId,
@@ -263,14 +273,20 @@ export function ActivityFeed({
         setEvents((prev) => {
           const prevKeys = new Set(prev.map(eventKey))
           const deduped = newEvents.filter((e) => !prevKeys.has(eventKey(e)))
-          return deduped.length > 0 ? [...deduped, ...prev] : prev
+          if (deduped.length === 0) return prev
+          const next = [...deduped, ...prev]
+          if (next.length > MAX_FEED_EVENTS) setHasMore(true)
+          return keepNewest(next)
         })
       } else {
         // User is scrolled down: buffer new events (dedup against existing pending)
         setPendingEvents((prev) => {
           const prevKeys = new Set(prev.map(eventKey))
           const deduped = newEvents.filter((e) => !prevKeys.has(eventKey(e)))
-          return deduped.length > 0 ? [...prev, ...deduped] : prev
+          if (deduped.length === 0) return prev
+          // Pending events are newest-last; keep the newest MAX_FEED_EVENTS.
+          const next = [...prev, ...deduped]
+          return next.length > MAX_FEED_EVENTS ? next.slice(next.length - MAX_FEED_EVENTS) : next
         })
       }
     } finally {
@@ -327,7 +343,9 @@ export function ActivityFeed({
     setEvents((prev) => {
       const existingKeys = new Set(prev.map(eventKey))
       const deduped = pendingEvents.filter((e) => !existingKeys.has(eventKey(e)))
-      return [...deduped, ...prev]
+      const next = [...deduped, ...prev]
+      if (next.length > MAX_FEED_EVENTS) setHasMore(true)
+      return keepNewest(next)
     })
     setPendingEvents([])
     feedRef.current?.scrollTo({ top: 0, behavior: "smooth" })
