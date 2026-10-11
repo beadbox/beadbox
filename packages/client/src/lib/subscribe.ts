@@ -81,6 +81,11 @@ export function _resetRuntimeCheck(): void {
 let subscriptionChangeCount = 0
 const subscriptionListeners = new Set<() => void>()
 
+// beadbox-bez: counts only, for the memory diagnostic line.
+export function getSubscriptionListenerCount(): number {
+  return subscriptionListeners.size + pausedListeners.size
+}
+
 function bumpSubscriptionChange(): void {
   subscriptionChangeCount++
   for (const listener of subscriptionListeners) listener()

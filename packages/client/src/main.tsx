@@ -11,6 +11,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { StrictMode } from "react"
 import ReactDOM from "react-dom/client"
 import { isStoppedPage, StoppedPage } from "./components/stopped-page"
+import { startMemoryDiagnostic } from "./lib/memory-diagnostic"
 import { isTauriRuntime } from "./lib/rpc"
 import { queryClient } from "./lib/query-client"
 import { startSidecarShutdownStamp } from "./lib/sidecar-shutdown-stamp"
@@ -67,6 +68,12 @@ declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router
   }
+}
+
+// beadbox-bez: counts of the page's main caches to the sidecar log every 5
+// minutes (Tauri only; the stopped page starts nothing).
+if (!stopped && isTauriRuntime()) {
+  startMemoryDiagnostic({ getPathname: () => router.state.location.pathname })
 }
 
 const rootEl = document.getElementById("root")

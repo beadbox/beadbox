@@ -25,6 +25,13 @@ export interface WorkspaceSessionCache<T> {
   get(workspaceId: string | undefined): T | null
   set(workspaceId: string | undefined, value: T): void
   clear(workspaceId: string | undefined): void
+  /**
+   * beadbox-bez: counts only, for the memory diagnostic line. `items` sums
+   * the lengths of array values (a non-array value counts as one).
+   */
+  stats(): { entries: number; items: number }
+  /** beadbox-bez: a number summed over the cached values (counts only). */
+  sumOver(count: (value: T) => number): number
   /** @internal Test-only reset. */
   reset(): void
 }
@@ -60,6 +67,16 @@ export function createWorkspaceSessionCache<T>(
     },
     clear(workspaceId) {
       if (workspaceId) entries.delete(workspaceId)
+    },
+    sumOver(count) {
+      let total = 0
+      for (const value of entries.values()) total += count(value)
+      return total
+    },
+    stats() {
+      let items = 0
+      for (const value of entries.values()) items += Array.isArray(value) ? value.length : 1
+      return { entries: entries.size, items }
     },
     reset() {
       entries.clear()

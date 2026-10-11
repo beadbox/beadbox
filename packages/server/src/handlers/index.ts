@@ -22,6 +22,7 @@ import * as diagnostics from "./diagnostics"
 import * as epics from "./epics"
 import * as formulas from "./formulas"
 import * as health from "./health"
+import * as memory from "./memory"
 import * as molecules from "./molecules"
 import * as recovery from "./recovery"
 import * as session from "./session"
@@ -46,6 +47,7 @@ export const handlers = {
   epics: wrapNamespace(epics, "epics"),
   formulas: wrapNamespace(formulas, "formulas"),
   health: wrapNamespace(health, "health"),
+  memory: wrapNamespace(memory, "memory"),
   molecules: wrapNamespace(molecules, "molecules"),
   recovery: wrapNamespace(recovery, "recovery"),
   session: wrapNamespace(session, "session"),
