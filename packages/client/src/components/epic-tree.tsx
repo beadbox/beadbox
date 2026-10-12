@@ -1383,7 +1383,11 @@ function EpicRow({
             }
           }}
         >
-          {!isStandalone && !isMobile && <CopyableId id={epic.id} className="w-28 shrink-0" />}
+          {/* 13 mono chars at text-sm (~109px) fit the w-28 (112px) column, so
+              the type icon never paints over the id (beadbox-d0d). */}
+          {!isStandalone && !isMobile && (
+            <CopyableId id={epic.id} maxChars={13} className="w-28 shrink-0" />
+          )}
 
           {!isStandalone && epic.type === "convoy" && (
             <Tooltip>

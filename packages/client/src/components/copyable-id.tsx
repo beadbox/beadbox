@@ -2,23 +2,22 @@ import { Check } from "lucide-react"
 import type React from "react"
 import { useState } from "react"
 import { useViewport } from "../hooks/use-viewport"
+import { shortenId } from "../lib/shorten-id"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
-
-const TRUNCATE_THRESHOLD = 14
-
-function truncateId(id: string): string {
-  if (id.length <= TRUNCATE_THRESHOLD) return id
-  return `${id.slice(0, 8)}...${id.slice(-6)}`
-}
 
 interface CopyableIdProps {
   id: string
   className?: string
   onCopy?: () => void
+  /**
+   * Most characters the id may show (beadbox-d0d). Longer ids are shortened
+   * to fit; the tooltip and the copy action always use the full id.
+   */
+  maxChars?: number
 }
 
-export function CopyableId({ id, className = "", onCopy }: CopyableIdProps) {
-  const displayId = truncateId(id)
+export function CopyableId({ id, className = "", onCopy, maxChars = 14 }: CopyableIdProps) {
+  const displayId = shortenId(id, maxChars)
   const isTruncated = displayId !== id
   const { isMobile } = useViewport()
   const [copied, setCopied] = useState(false)
@@ -65,7 +64,11 @@ export function CopyableId({ id, className = "", onCopy }: CopyableIdProps) {
               <span className="text-xs">Copied</span>
             </span>
           ) : (
-            <span className="transition-opacity whitespace-nowrap">{displayId}</span>
+            // Clipped inside the id box, so a wider font can never paint
+            // under the next item in the row (beadbox-d0d).
+            <span className="min-w-0 overflow-hidden text-ellipsis transition-opacity whitespace-nowrap">
+              {displayId}
+            </span>
           )}
         </span>
       </TooltipTrigger>
