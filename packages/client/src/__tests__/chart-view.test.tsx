@@ -17,7 +17,7 @@ import { StartupGate } from "../components/startup-gate"
 import { getSelectedBead, setFiltersPreference, setSelectedBead } from "../lib/local-storage"
 import { queryClient } from "../lib/query-client"
 import { _setRpc, rpc, type RemoteApi } from "../lib/rpc"
-import { _emitChangeForTests } from "../lib/subscribe"
+import { _emitChangeForTests, _resetSubscriptionChangeCount } from "../lib/subscribe"
 import type { Bead, Epic, Filters, Workspace } from "../lib/types"
 import { clearWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
 import { _resetWorkspaceSessions } from "../lib/workspace-session-cache"
@@ -173,6 +173,7 @@ const barFor = (id: string) => document.querySelector(`[data-testid="gantt-bar"]
 afterEach(() => {
   cleanup()
   queryClient.clear()
+  _resetSubscriptionChangeCount()
   _resetWorkspaceSessions()
   clearWorkspaceCookie()
   sessionStorage.clear()

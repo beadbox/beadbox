@@ -20,6 +20,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react"
 
 import { useWorkspaceRail, type WorkspaceRailController } from "../hooks/use-workspace-rail"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
+import { _emitChangeForTests, _resetSubscriptionChangeCount } from "../lib/subscribe"
 import type { WorkspaceCard } from "../lib/types"
 import {
   clearWorkspaceCookie,
@@ -121,6 +122,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   _resetRpc()
+  _resetSubscriptionChangeCount()
   clearWorkspaceCookie()
   localStorage.clear()
 })
@@ -261,6 +263,31 @@ describe("useWorkspaceRail", () => {
     registry.push(beta)
     await act(async () => {
       publishWorkspaceRegistryChange()
+    })
+
+    await waitFor(() => {
+      expect(seen.current?.workspaces.map((w) => w.id)).toEqual([alpha.id, beta.id])
+    })
+    expect(mocks.getRegisteredWorkspacesForSelector).toHaveBeenCalledTimes(2)
+  })
+
+  test("a rail mounted after earlier change events loads the registry once (beadbox-deg)", async () => {
+    // The change counter is app-global and only grows, so a rail that mounts
+    // after any change sees a nonzero signal. The mount effect already loads
+    // the list; the signal's value at mount must not load it a second time.
+    for (let i = 0; i < 3; i++) _emitChangeForTests()
+    const { mocks } = await railAt("/", [alpha, beta])
+    await act(async () => {})
+    expect(mocks.getRegisteredWorkspacesForSelector).toHaveBeenCalledTimes(1)
+  })
+
+  test("a change event after mount re-reads the registry (beadbox-deg)", async () => {
+    const registry = [alpha]
+    const { mocks, seen } = await railAt("/", registry)
+
+    registry.push(beta)
+    await act(async () => {
+      _emitChangeForTests()
     })
 
     await waitFor(() => {

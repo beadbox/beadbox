@@ -121,11 +121,14 @@ export function useWorkspaceRail(): WorkspaceRailController {
   useEffect(() => subscribeWorkspaceRegistryChange(() => void refresh()), [refresh])
 
   // bb-1xi2 replay: a `bd init` / registry edit outside the app shows up as
-  // a subscription change signal. Skip the initial 0 — the mount effect
-  // above already loaded the list once.
+  // a subscription change signal. Skip the value seen at mount — the mount
+  // effect above already loaded the list once. The counter is app-global and
+  // only grows, so that value is not 0 for a rail mounted after any change
+  // (beadbox-deg).
   const subscriptionSignal = useSubscriptionChangeSignal()
+  const signalAtMountRef = useRef(subscriptionSignal)
   useEffect(() => {
-    if (subscriptionSignal === 0) return
+    if (subscriptionSignal === signalAtMountRef.current) return
     void refresh()
   }, [subscriptionSignal, refresh])
 
