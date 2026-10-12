@@ -79,6 +79,45 @@ export function partitionInactiveEpics(roots: Epic[]): {
 }
 
 /**
+ * The Backlog section's loose "Beads" table: P4 beads from anywhere in the
+ * tree, EXCEPT inside an epic the Backlog section itself renders
+ * (`backlogEpics`). That epic's row shows its whole subtree, so collecting
+ * from it as well would list each of its P4 beads twice (beadbox-44u). A P4
+ * epic nested in an active milestone is not one of those: it stays in the
+ * active tree with its P4 beads filtered out, so they are collected here.
+ */
+export function collectBacklogBeads(epics: Epic[], backlogEpics: Epic[]): Bead[] {
+  const renderedInBacklog = new Set(backlogEpics.map((epic) => epic.id))
+  const result: Bead[] = []
+
+  function extractBackloggedBeads(beads: Bead[]) {
+    for (const bead of beads) {
+      if (isBacklogged(bead) && !isArchived(bead)) {
+        result.push(bead)
+      }
+      if (bead.children) {
+        extractBackloggedBeads(bead.children)
+      }
+    }
+  }
+
+  function extractFromEpic(epic: Epic) {
+    if (renderedInBacklog.has(epic.id)) return
+    if (epic.children) {
+      extractBackloggedBeads(epic.children)
+    }
+    if (epic.childEpics) {
+      epic.childEpics.forEach(extractFromEpic)
+    }
+  }
+
+  // Scan all epics (including standalone)
+  epics.forEach(extractFromEpic)
+
+  return result
+}
+
+/**
  * beadbox-51m: the grouped (by-status) view's two parts. `live` feeds the
  * status groups and never contains an archived item; `archived` is its own
  * collapsible Archived group (archived epics with their contents, plus
@@ -357,35 +396,10 @@ function BeadsEpicsViewer() {
     [sortedEpics],
   )
 
-  // Extract ALL backlogged beads from anywhere in the tree
-  const backlogBeads = useMemo(() => {
-    const result: Bead[] = []
-
-    function extractBackloggedBeads(beads: Bead[]) {
-      for (const bead of beads) {
-        if (isBacklogged(bead) && !isArchived(bead)) {
-          result.push(bead)
-        }
-        if (bead.children) {
-          extractBackloggedBeads(bead.children)
-        }
-      }
-    }
-
-    function extractFromEpic(epic: Epic) {
-      if (epic.children) {
-        extractBackloggedBeads(epic.children)
-      }
-      if (epic.childEpics) {
-        epic.childEpics.forEach(extractFromEpic)
-      }
-    }
-
-    // Scan all epics (including standalone)
-    sortedEpics.forEach(extractFromEpic)
-
-    return result
-  }, [sortedEpics])
+  const backlogBeads = useMemo(
+    () => collectBacklogBeads(sortedEpics, backlogEpics),
+    [sortedEpics, backlogEpics],
+  )
 
   // Extract ALL archived beads from anywhere in the tree (mirrors backlogBeads pattern)
   const archivedBeads = useMemo(() => {
