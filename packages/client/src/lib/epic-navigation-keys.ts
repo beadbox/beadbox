@@ -76,6 +76,14 @@ const focusSearchInput = (): void => {
 const isTypingTarget = (target: EventTarget | null): boolean =>
   target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
 
+// beadbox-813: a key pressed inside an open dropdown, menu or dialog belongs
+// to that layer (Radix renders popovers as role="dialog"). Without this, the
+// arrows moved the list selection and Space opened a bead while a filter's
+// rows had focus. Global shortcuts run before this guard and still work.
+const FLOATING_LAYER = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'
+const isInsideFloatingLayer = (target: EventTarget | null): boolean =>
+  target instanceof Element && target.closest(FLOATING_LAYER) !== null
+
 const popActivityNavBack = (): boolean => {
   if (sessionStorage.getItem("beadbox-nav-from-activity")) {
     sessionStorage.removeItem("beadbox-nav-from-activity")
@@ -354,6 +362,7 @@ export const dispatchKeyDown = (e: KeyboardEvent, ctx: KeyNavContext): void => {
   if (handleSlashSearch(e, ctx)) return
 
   if (isTypingTarget(e.target)) return
+  if (isInsideFloatingLayer(e.target)) return
   if (ctx.settingsOpen) return
 
   if (ctx.focusedPanel === "right" && ctx.selectedBead) {

@@ -577,6 +577,53 @@ describe("dispatchKeyDown (orchestrator)", () => {
     expect(ctx.setFocusedItemId).not.toHaveBeenCalled()
   })
 
+  // beadbox-813: keys pressed inside an open dropdown (Radix popovers render
+  // role="dialog") belong to the dropdown. The list's navigation must not also
+  // act on them: Space opened a bead and the arrows moved the list selection
+  // while the Priority/Status filter's rows had focus.
+  describe("keys from inside an open dropdown or dialog (beadbox-813)", () => {
+    const buttonIn = (role: string | null): HTMLButtonElement => {
+      const host = document.createElement("div")
+      if (role) host.setAttribute("role", role)
+      const button = document.createElement("button")
+      host.appendChild(button)
+      document.body.appendChild(host)
+      return button
+    }
+    const fromTarget = (key: string, target: Element, init: KeyboardEventInit = {}) => {
+      const e = fireKey(key, init)
+      Object.defineProperty(e, "target", { value: target })
+      return e
+    }
+    afterEach(() => {
+      document.body.innerHTML = ""
+    })
+
+    for (const role of ["dialog", "menu", "listbox"]) {
+      test(`ArrowDown and Space inside role=${role} leave the list alone`, () => {
+        const ctx = makeCtx({ focusedItemId: "b1" })
+        const target = buttonIn(role)
+        dispatchKeyDown(fromTarget("ArrowDown", target), ctx)
+        dispatchKeyDown(fromTarget(" ", target), ctx)
+        dispatchKeyDown(fromTarget("Enter", target), ctx)
+        expect(ctx.setFocusedItemId).not.toHaveBeenCalled()
+        expect(ctx.handleBeadClick).not.toHaveBeenCalled()
+      })
+    }
+
+    test("global shortcuts still work from inside a dropdown", () => {
+      const ctx = makeCtx()
+      dispatchKeyDown(fromTarget(",", buttonIn("dialog"), { metaKey: true }), ctx)
+      expect(ctx.onOpenSettings).toHaveBeenCalledTimes(1)
+    })
+
+    test("control: the same button outside any dialog still drives the list", () => {
+      const ctx = makeCtx({ focusedItemId: "e1" })
+      dispatchKeyDown(fromTarget("ArrowDown", buttonIn(null)), ctx)
+      expect(ctx.setFocusedItemId).toHaveBeenCalledWith("b1")
+    })
+  })
+
   test("settingsOpen gates panel keys", () => {
     const ctx = makeCtx({ focusedItemId: "e1", settingsOpen: true })
     dispatchKeyDown(fireKey("ArrowDown"), ctx)
