@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router"
+import { type GroupedSection, groupedNavigationOrder } from "@/lib/grouped-layout"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Filters } from "@/components/filter-bar"
 import { dispatchKeyDown, type KeyNavContext } from "@/lib/epic-navigation-keys"
@@ -20,6 +21,8 @@ import type { Bead, Epic, Workspace } from "@/lib/types"
 const getBeadDetail = rpc.epics.getBeadDetail
 
 interface UseEpicNavigationOpts {
+  /** beadbox-2wi: when the Grouped view is on, the layout it renders (else null). */
+  groupedLayout: GroupedSection[] | null
   epics: Epic[]
   currentWorkspace: Workspace | null
   filters: Filters
@@ -52,6 +55,7 @@ interface UseEpicNavigationOpts {
 
 export function useEpicNavigation(opts: UseEpicNavigationOpts) {
   const {
+    groupedLayout,
     epics,
     currentWorkspace,
     filters,
@@ -278,6 +282,19 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
       }
     }
 
+    if (groupedLayout) {
+      // beadbox-2wi: Grouped view, in display order. Each card header is its
+      // own stop (an epic can have a card in several groups, so the stop is
+      // the card's key; Enter still opens the epic), then the card's rows when
+      // it is open, then the group's loose rows. Rows have no children here.
+      for (const item of groupedNavigationOrder(groupedLayout, expandedEpics)) {
+        indexMap.set(item.id, items.length)
+        items.push(item)
+      }
+      archivedBeads.forEach(addBead)
+      return { navigableItems: items, itemIndexMap: indexMap }
+    }
+
     // In flat mode (no real epics), add beads directly; otherwise use epic hierarchy
     if (!hasRealEpics && flatBeads.length > 0) {
       flatBeads.forEach(addBead)
@@ -295,6 +312,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     archivedEpics.forEach(addEpic)
     return { navigableItems: items, itemIndexMap: indexMap }
   }, [
+    groupedLayout,
     hasRealEpics,
     flatBeads,
     activeEpicsFiltered,

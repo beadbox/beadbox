@@ -1115,7 +1115,7 @@ export function EpicTree({
   )
 }
 
-interface EpicRowProps {
+export interface EpicRowProps {
   epic: Epic
   depth: number
   expandedEpics: Set<string>
@@ -1149,6 +1149,12 @@ interface EpicRowProps {
   selectedIds?: Set<string>
   onToggleSelect?: (beadId: string) => void
   onToggleSelectAll?: (visibleIds: string[]) => void
+  // beadbox-2wi, Grouped view: the card's own key (one epic can have a card in
+  // several status groups) and the rows of that group under this epic. When
+  // groupedRows is set the card lists exactly those rows and no child epics
+  // (child epics are their own cards there).
+  focusKey?: string
+  groupedRows?: Bead[]
 }
 
 // A row is archived/backlogged when its section says so OR its own labels or
@@ -1165,7 +1171,7 @@ function rowPlacement(
   }
 }
 
-function EpicRow({
+export function EpicRow({
   epic,
   depth,
   expandedEpics,
@@ -1195,15 +1201,23 @@ function EpicRow({
   selectedIds,
   onToggleSelect,
   onToggleSelectAll,
+  focusKey,
+  groupedRows,
 }: EpicRowProps) {
   const isExpanded = expandedEpics.has(epic.id)
   const { closed: closedCount, total: totalCount } = getAggregatedCounts(epic)
   const progress = totalCount > 0 ? (closedCount / totalCount) * 100 : 0
 
-  const hasChildEpics = epic.childEpics && epic.childEpics.length > 0
-  const hasChildBeads = (epic.children?.length ?? 0) > 0
-  const hasContent = hasChildEpics || hasChildBeads
-  const isEmpty = !hasContent
+  const grouped = groupedRows !== undefined
+  const itemKey = focusKey ?? epic.id
+  // The epic's real contents decide "empty" (the delete affordance), whatever
+  // one status group happens to show of it.
+  const isEmpty = !((epic.childEpics?.length ?? 0) > 0 || (epic.children?.length ?? 0) > 0)
+  const rows = grouped ? groupedRows : (epic.children ?? [])
+  const hasChildEpics = !grouped && (epic.childEpics?.length ?? 0) > 0
+  const hasChildBeads = rows.length > 0
+  // A grouped card always opens (to its rows, or to an "empty here" line).
+  const hasContent = grouped || hasChildEpics || hasChildBeads
 
   // Calculate left margin based on depth (for nested epics)
   // Mobile: 6px per level, capped at 2 levels (max 12px) to save space
@@ -1287,11 +1301,11 @@ function EpicRow({
 
   return (
     <div
-      data-item-id={epic.id}
+      data-item-id={itemKey}
       className={cn(
         "overflow-hidden border-l-2",
         borderColor,
-        focusedItemId === epic.id && "ring-1 ring-primary/60",
+        focusedItemId === itemKey && "ring-1 ring-primary/60",
       )}
       style={{ marginLeft: depthMargin }}
     >
@@ -1649,7 +1663,7 @@ function EpicRow({
             <div className={cn(hasChildEpics && "border-t border-border/30")}>
               {isMoleculePresentation(epic) ? (
                 <MoleculePhaseView
-                  beads={epic.children ?? []}
+                  beads={rows}
                   epicId={epic.id}
                   onBeadClick={onBeadClick}
                   onArchive={onArchiveBead}
@@ -1670,7 +1684,7 @@ function EpicRow({
                 />
               ) : (
                 <BeadTable
-                  beads={epic.children ?? []}
+                  beads={rows}
                   onBeadClick={onBeadClick}
                   onArchive={onArchiveBead}
                   onDelete={onRequestDelete}
@@ -1691,6 +1705,9 @@ function EpicRow({
                 />
               )}
             </div>
+          )}
+          {grouped && !hasChildBeads && (
+            <div className="px-3 py-2 text-xs text-muted-foreground">No beads with this status</div>
           )}
         </div>
       )}

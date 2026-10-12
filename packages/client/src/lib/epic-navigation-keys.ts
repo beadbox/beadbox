@@ -247,8 +247,9 @@ const expandOrFocusRight = (e: KeyboardEvent, ctx: KeyNavContext): void => {
   if (!ctx.focusedItemId) return
   const idx = ctx.itemIndexMap.get(ctx.focusedItemId) ?? -1
   const item = ctx.navigableItems[idx]
-  if (item?.type === "epic" && !ctx.expandedEpics.has(ctx.focusedItemId)) {
-    ctx.handleToggleEpic(ctx.focusedItemId)
+  // An epic's stop can be a grouped card's key (beadbox-2wi): toggle the epic itself.
+  if (item?.type === "epic" && !ctx.expandedEpics.has(item.bead.id)) {
+    ctx.handleToggleEpic(item.bead.id)
   } else if (item?.type === "bead" && !ctx.expandedBeads.has(ctx.focusedItemId)) {
     ctx.handleToggleBead(ctx.focusedItemId)
   }
@@ -260,8 +261,8 @@ const collapseFocused = (e: KeyboardEvent, ctx: KeyNavContext): void => {
   if (!ctx.focusedItemId) return
   const idx = ctx.itemIndexMap.get(ctx.focusedItemId) ?? -1
   const item = ctx.navigableItems[idx]
-  if (item?.type === "epic" && ctx.expandedEpics.has(ctx.focusedItemId)) {
-    ctx.handleToggleEpic(ctx.focusedItemId)
+  if (item?.type === "epic" && ctx.expandedEpics.has(item.bead.id)) {
+    ctx.handleToggleEpic(item.bead.id)
   } else if (item?.type === "bead" && ctx.expandedBeads.has(ctx.focusedItemId)) {
     ctx.handleToggleBead(ctx.focusedItemId)
   }

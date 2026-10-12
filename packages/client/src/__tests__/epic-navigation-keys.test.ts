@@ -669,3 +669,22 @@ describe("dispatchKeyDown (orchestrator)", () => {
     expect(ctx.captureShortcut).not.toHaveBeenCalled()
   })
 })
+
+// beadbox-2wi: in the Grouped view an epic's stop is its card key; expanding or
+// collapsing it must act on the epic itself.
+test("grouped card stop: ArrowRight and ArrowLeft toggle the EPIC, not the card key", () => {
+  const card = { id: "grouped:open:A", type: "epic" as const, bead: makeBead("A") }
+  const items = [card]
+  const toggleEpic = mock((_id: string) => {})
+  const ctx = makeCtx({
+    focusedItemId: card.id,
+    navigableItems: items,
+    itemIndexMap: makeIndex(items),
+    handleToggleEpic: toggleEpic,
+  })
+  handleLeftPanelKey(new KeyboardEvent("keydown", { key: "ArrowRight" }), ctx)
+  expect(toggleEpic.mock.calls.map((c) => c[0])).toEqual(["A"])
+  const expanded = makeCtx({ ...ctx, expandedEpics: new Set(["A"]) })
+  handleLeftPanelKey(new KeyboardEvent("keydown", { key: "ArrowLeft" }), expanded)
+  expect(toggleEpic.mock.calls.map((c) => c[0])).toEqual(["A", "A"])
+})

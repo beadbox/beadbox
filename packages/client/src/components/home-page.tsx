@@ -5,6 +5,7 @@ import { BeadTable } from "@/components/bead-table"
 import { BeadTableBulkToolbar } from "@/components/bead-table-bulk-toolbar"
 import { EpicTree } from "@/components/epic-tree"
 import { FilterBar, type Filters } from "@/components/filter-bar"
+import { GroupedStatusView } from "@/components/grouped-status-view"
 import { Header } from "@/components/header"
 import {
   getAnalyticsEnabled,
@@ -190,11 +191,11 @@ import {
   extractRigNames,
   filterEpics,
   flattenEpicsToBeads,
-  groupBeadsByStatus,
   isArchived,
   matchesBead,
   withoutArchived,
 } from "@/lib/epic-tree-utils"
+import { groupTreeByStatus } from "@/lib/grouped-layout"
 import { getVersionStatus } from "@/lib/version-requirements"
 
 function BeadsEpicsViewer() {
@@ -463,12 +464,58 @@ function BeadsEpicsViewer() {
     return standalone?.children ?? []
   }, [hasRealEpics, activeEpicsWithFilteredStandalone])
 
+  // beadbox-2wi: the Grouped (by status) layout, computed once. The view
+  // renders it and keyboard navigation follows it, so display order and key
+  // order cannot drift apart. The rows come from the filtered tree with
+  // archived items removed and backlog (P4) items kept: grouped mode has no
+  // Backlog section. Each card's header is the epic exactly as the tree shows
+  // it, so its progress and n/m match Grouped OFF.
+  const groupedLayout = useMemo(() => {
+    if (!filters.grouped) return null
+    const groupedFilters: Filters = {
+      ...filters,
+      rig: filters.rig !== "all" && rigNames.length === 0 ? "all" : filters.rig,
+    }
+    const shownAs = new Map<string, Epic>()
+    const index = (epic: Epic) => {
+      shownAs.set(epic.id, epic)
+      epic.childEpics?.forEach(index)
+    }
+    for (const epic of [
+      ...activeEpicsWithFilteredStandalone,
+      ...activeMilestonesFiltered,
+      ...activeMoleculesFiltered,
+      ...activeConvoysFiltered,
+      ...backlogEpics,
+    ]) {
+      index(epic)
+    }
+    const roots = sortedEpics.filter((epic) => !isArchived(epic)).map(withoutArchived)
+    return groupTreeByStatus(
+      roots,
+      customStatusChain,
+      (bead) => matchesBead(bead, groupedFilters),
+      (epic) => shownAs.get(epic.id) ?? epic,
+    )
+  }, [
+    filters,
+    rigNames,
+    sortedEpics,
+    activeEpicsWithFilteredStandalone,
+    activeMilestonesFiltered,
+    activeMoleculesFiltered,
+    activeConvoysFiltered,
+    backlogEpics,
+    customStatusChain,
+  ])
+
   // Ref bridge: useEpicNavigation needs updateBeadInEpics for detail fetching,
   // but useBeadActions (which provides it) needs selectedBead from the nav hook.
   // The ref is only read inside async .then() callbacks, so it's always current.
   const updateBeadInEpicsRef = useRef<(beadId: string, fn: (bead: Bead) => Bead) => void>(() => {})
 
   const nav = useEpicNavigation({
+    groupedLayout,
     epics,
     currentWorkspace,
     filters,
@@ -871,35 +918,36 @@ function BeadsEpicsViewer() {
   // The status filter has already applied (filterEpics drops non-matching
   // beads), so the input here is the already-narrowed set; grouping is
   // purely layout.
-  const renderGroupedFlatView = (sourceBeads: Bead[], archived: Bead[] = []) => (
+  const renderGroupedFlatView = (archived: Bead[] = []) => (
     <div className="space-y-3">
-      {groupBeadsByStatus(sourceBeads, customStatusChain).map((group) => (
-        <div key={group.status} className="space-y-1">
-          <div className="px-3 pt-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {group.label} <span className="font-normal">({group.beads.length})</span>
-          </div>
-          <BeadTable
-            beads={group.beads}
-            epicId={`_grouped_${group.status}`}
-            onBeadClick={handleBeadClick}
-            onArchive={handleArchiveBead}
-            onDelete={setDeleteConfirmId}
-            expandedBeads={expandedBeads}
-            onToggleBead={handleToggleBead}
-            focusedItemId={focusedItemId}
-            onFocusItem={setFocusedItemId}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-            draggedBeadId={draggedBeadId}
-            selectedBeadId={beadIdParam}
-            showWaves={filters.showWaves}
-            readState={readState}
-            selectedIds={beadSelection.selectedIds}
-            onToggleSelect={beadSelection.toggle}
-            onToggleSelectAll={beadSelection.toggleAll}
-          />
-        </div>
-      ))}
+      <GroupedStatusView
+        sections={groupedLayout ?? []}
+        expandedEpics={expandedEpics}
+        onToggleEpic={handleToggleEpic}
+        onBeadClick={handleBeadClick}
+        onRequestDelete={setDeleteConfirmId}
+        onArchiveBead={handleArchiveBead}
+        onArchiveEpic={handleArchive}
+        onBacklogEpic={handleBacklog}
+        onBeadMove={handleBeadMove}
+        canMoveEpic={canMoveEpic}
+        dragOverEpicId={dragOverEpicId}
+        onDragOver={handleDragOver}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        draggedBeadId={draggedBeadId}
+        expandedBeads={expandedBeads}
+        onToggleBead={handleToggleBead}
+        focusedItemId={focusedItemId}
+        onFocusItem={setFocusedItemId}
+        selectedBeadId={beadIdParam}
+        showWaves={filters.showWaves}
+        readState={readState}
+        selectedIds={beadSelection.selectedIds}
+        onToggleSelect={beadSelection.toggle}
+        onToggleSelectAll={beadSelection.toggleAll}
+        isMobile={isMobileLayout}
+      />
       {/* beadbox-51m: archived items, hidden by default; the state persists. */}
       {archived.length > 0 && (
         <div className="space-y-1 border-t border-border/40 pt-2">
@@ -1101,7 +1149,7 @@ function BeadsEpicsViewer() {
                    beadbox-brg: when filters.grouped is on, render via the
                    shared status-grouped helper instead of a single table. */
                   filters.grouped ? (
-                    renderGroupedFlatView(flatBeads)
+                    renderGroupedFlatView()
                   ) : (
                     <div className="space-y-1">
                       <BeadTable
@@ -1137,7 +1185,7 @@ function BeadsEpicsViewer() {
                   archivedEpics.length > 0 ||
                   archivedBeads.length > 0 ? (
                   filters.grouped ? (
-                    renderGroupedFlatView(groupedBeads.live, groupedBeads.archived)
+                    renderGroupedFlatView(groupedBeads.archived)
                   ) : (
                     <EpicTree
                       epics={activeEpicsWithFilteredStandalone}
@@ -1226,7 +1274,7 @@ function BeadsEpicsViewer() {
                   backlogBeads.length === 0 ? (
                   /* Flat table for workspaces with no epics (e.g. Gastown) */
                   filters.grouped ? (
-                    renderGroupedFlatView(flatBeads)
+                    renderGroupedFlatView()
                   ) : (
                     <div className="space-y-1">
                       <BeadTable
@@ -1259,7 +1307,7 @@ function BeadsEpicsViewer() {
                   archivedEpics.length > 0 ||
                   archivedBeads.length > 0 ? (
                   filters.grouped ? (
-                    renderGroupedFlatView(groupedBeads.live, groupedBeads.archived)
+                    renderGroupedFlatView(groupedBeads.archived)
                   ) : (
                     <EpicTree
                       epics={activeEpicsWithFilteredStandalone}
