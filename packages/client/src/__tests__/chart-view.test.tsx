@@ -78,7 +78,7 @@ let blocksAnswer: BlocksPayload = { blockedBy: { b: ["a"], d: ["a"] } }
 const FILTERS: Filters = {
   status: ["open", "in_progress", "closed", "blocked", "deferred"],
   assignee: "all",
-  priority: "all",
+  priority: [],
   showMessages: false,
   showWaves: false,
   hasSpec: false,

@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { MultiSelectFilter, MultiSelectRow } from "@/components/multi-select-filter"
 import {
   Select,
   SelectContent,
@@ -28,7 +28,7 @@ import { TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui
 import { useViewport } from "@/hooks/use-viewport"
 import { getAnalyticsEnabled } from "@/lib/local-storage"
 import { safeCapture } from "@/lib/posthog-safe"
-import type { BeadPriority, BeadStatus, Filters } from "@/lib/types"
+import { ALL_PRIORITIES, type BeadPriority, type BeadStatus, type Filters, priorityFilterNarrows } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export type { Filters }
@@ -78,6 +78,16 @@ const sortOptions = [
   { value: "status:desc", label: "Status (Closed first)" },
 ]
 
+// beadbox-813: the Priority filter's rows, P0 first.
+const PRIORITY_LABELS: Record<BeadPriority, string> = {
+  critical: "P0 - Critical",
+  high: "P1 - High",
+  medium: "P2 - Medium",
+  low: "P3 - Low",
+  backlog: "P4 - Backlog",
+}
+const PRIORITY_OPTIONS = ALL_PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABELS[p] }))
+
 // Human-readable labels for status values
 const STATUS_LABELS: Record<string, string> = {
   open: "Open",
@@ -120,7 +130,7 @@ export function FilterBar({
     // an active filter; empty = no filter. `grouped` is a display mode (not
     // a filter narrowing the bead set), so it doesn't bump the badge.
     if (filters.status.length > 0) count++
-    if (filters.priority !== "all") count++
+    if (priorityFilterNarrows(filters.priority)) count++
     if (filters.assignee !== "all") count++
     if (filters.showMessages) count++
     if (filters.showWaves) count++
@@ -162,73 +172,53 @@ export function FilterBar({
     return `${filters.status.length} statuses`
   }
 
+  // beadbox-813: priority multi-select, on the same control as Status. Unlike
+  // status, an empty selection means "All Priority" (never a blank list), and
+  // so does all five; the master row resets to All.
+  const priorityNarrows = priorityFilterNarrows(filters.priority)
+
+  function togglePriority(priority: BeadPriority): void {
+    const current = filters.priority
+    const next = current.includes(priority)
+      ? current.filter((p) => p !== priority)
+      : [...current, priority]
+    updateFilter("priority", next)
+  }
+
+  function priorityTriggerLabel(): string {
+    if (!priorityNarrows) return "All Priority"
+    if (filters.priority.length === 1) return PRIORITY_LABELS[filters.priority[0]]
+    return `${filters.priority.length} priorities`
+  }
+
+  const triggerClassName = cn(
+    "justify-between font-normal",
+    isDesktop
+      ? "w-[160px] h-9 px-3 bg-transparent border-0 rounded-none"
+      : "w-full min-h-[44px] bg-transparent border border-border/50",
+  )
+
   const filterControls = (
     <>
       {/* Status Filter — beadbox-brg multi-select + Grouped toggle */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            variant="ghost"
-            className={cn(
-              "justify-between font-normal",
-              isDesktop
-                ? "w-[160px] h-9 px-3 bg-transparent border-0 rounded-none"
-                : "w-full min-h-[44px] bg-transparent border border-border/50",
-            )}
-          >
-            <span className="truncate">{statusTriggerLabel()}</span>
-            <SlidersHorizontal className="h-3.5 w-3.5 opacity-50 shrink-0" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-56 p-0" align="start">
-          <div className="py-1">
-            <button
-              type="button"
-              onClick={toggleAllStatuses}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
-            >
-              <Checkbox
-                checked={allSelected ? true : filters.status.length === 0 ? false : "indeterminate"}
-                className="pointer-events-none"
-                aria-label="All Status"
-              />
-              <span className="font-medium">All Status</span>
-            </button>
-            <div className="my-1 border-t border-border" />
-            {allStatuses.map((s) => {
-              const checked = filters.status.includes(s as BeadStatus)
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => toggleStatus(s as BeadStatus)}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
-                >
-                  <Checkbox
-                    checked={checked}
-                    className="pointer-events-none"
-                    aria-label={statusLabel(s)}
-                  />
-                  <span>{statusLabel(s)}</span>
-                </button>
-              )
-            })}
-            <div className="my-1 border-t border-border" />
-            <button
-              type="button"
-              onClick={() => updateFilter("grouped", !filters.grouped)}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent rounded-sm text-left"
-            >
-              <Checkbox
-                checked={filters.grouped}
-                className="pointer-events-none"
-                aria-label="Grouped"
-              />
-              <span>Grouped</span>
-            </button>
-          </div>
-        </PopoverContent>
-      </Popover>
+      <MultiSelectFilter
+        triggerLabel={statusTriggerLabel()}
+        triggerClassName={triggerClassName}
+        ariaLabel="Status filter"
+        allLabel="All Status"
+        allState={allSelected ? true : filters.status.length === 0 ? false : "indeterminate"}
+        onToggleAll={toggleAllStatuses}
+        options={allStatuses.map((s) => ({ value: s as BeadStatus, label: statusLabel(s) }))}
+        selected={filters.status}
+        onToggle={toggleStatus}
+        footer={
+          <MultiSelectRow
+            label="Grouped"
+            checked={filters.grouped}
+            onClick={() => updateFilter("grouped", !filters.grouped)}
+          />
+        }
+      />
 
       {/* Issue Type Filter */}
       {onTypeChange && (
@@ -268,29 +258,18 @@ export function FilterBar({
         </label>
       )}
 
-      {/* Priority Filter */}
-      <Select
-        value={filters.priority}
-        onValueChange={(value) => updateFilter("priority", value as BeadPriority | "all")}
-      >
-        <SelectTrigger
-          className={
-            isDesktop
-              ? "w-[140px] h-9 bg-transparent border-0 rounded-none"
-              : "w-full min-h-[44px] bg-transparent border-border/50"
-          }
-        >
-          <SelectValue placeholder="Priority" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All Priority</SelectItem>
-          <SelectItem value="critical">P0 - Critical</SelectItem>
-          <SelectItem value="high">P1 - High</SelectItem>
-          <SelectItem value="medium">P2 - Medium</SelectItem>
-          <SelectItem value="low">P3 - Low</SelectItem>
-          <SelectItem value="backlog">P4 - Backlog</SelectItem>
-        </SelectContent>
-      </Select>
+      {/* Priority Filter — beadbox-813 multi-select (same control as Status) */}
+      <MultiSelectFilter
+        triggerLabel={priorityTriggerLabel()}
+        triggerClassName={triggerClassName}
+        ariaLabel="Priority filter"
+        allLabel="All Priority"
+        allState={priorityNarrows ? "indeterminate" : true}
+        onToggleAll={() => updateFilter("priority", [])}
+        options={PRIORITY_OPTIONS}
+        selected={filters.priority}
+        onToggle={togglePriority}
+      />
 
       {/* Assignee Filter */}
       <Select value={filters.assignee} onValueChange={(value) => updateFilter("assignee", value)}>

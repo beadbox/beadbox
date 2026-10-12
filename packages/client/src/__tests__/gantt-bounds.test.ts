@@ -11,7 +11,7 @@ import type { Bead, Epic, Filters } from "@/lib/types"
 const FILTERS: Filters = {
   status: ["open", "in_progress", "closed", "blocked", "deferred"],
   assignee: "all",
-  priority: "all",
+  priority: [],
   showMessages: false,
   showWaves: false,
   hasSpec: false,

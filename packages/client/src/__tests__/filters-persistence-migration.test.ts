@@ -98,7 +98,40 @@ describe("getFiltersPreference migration (beadbox-brg)", () => {
     localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: ["open"] }))
     const f = getFiltersPreference()
     expect(f.grouped).toBe(false)
-    expect(f.priority).toBe("all")
+    expect(f.priority).toEqual([])
     expect(f.assignee).toBe("all")
+  })
+})
+
+// beadbox-813: priority went from a single value ('all' | 'high' | ...) to a
+// multi-select array, where empty means "All Priority". A stored single value
+// must load as the same view: 'all' as [], one priority as a one-item list.
+describe("getFiltersPreference priority migration (beadbox-813)", () => {
+  test("no stored value → [] (All Priority)", () => {
+    expect(getFiltersPreference().priority).toEqual([])
+  })
+
+  test("legacy priority='all' → [] (the user keeps seeing every priority)", () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: ["open"], priority: "all" }))
+    expect(getFiltersPreference().priority).toEqual([])
+  })
+
+  test("legacy single priority='high' → ['high']", () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: ["open"], priority: "high" }))
+    expect(getFiltersPreference().priority).toEqual(["high"])
+  })
+
+  test("new shape round-trips", () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: ["open"], priority: ["critical", "high"] }))
+    expect(getFiltersPreference().priority).toEqual(["critical", "high"])
+  })
+
+  test("unknown entries are dropped; malformed values → []", () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ priority: ["high", "urgent", 3] }))
+    expect(getFiltersPreference().priority).toEqual(["high"])
+    for (const bad of [null, { not: "a list" }, "urgent", 7]) {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify({ priority: bad }))
+      expect(getFiltersPreference().priority).toEqual([])
+    }
   })
 })

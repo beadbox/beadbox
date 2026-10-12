@@ -8,6 +8,17 @@ type CoreStatus = "open" | "in_progress" | "closed"
 export type BeadStatus = CoreStatus | (string & {})
 export type BeadPriority = "critical" | "high" | "medium" | "low" | "backlog"
 
+/** Every priority, highest first (P0 - Critical .. P4 - Backlog). */
+export const ALL_PRIORITIES: readonly BeadPriority[] = ["critical", "high", "medium", "low", "backlog"]
+
+/**
+ * True when a priority selection actually narrows the list: neither empty nor
+ * all five (both mean "All Priority").
+ */
+export function priorityFilterNarrows(selected: readonly BeadPriority[]): boolean {
+  return selected.length > 0 && !ALL_PRIORITIES.every((p) => selected.includes(p))
+}
+
 export interface Comment {
   id: string
   author: string
@@ -276,7 +287,11 @@ export interface Filters {
   // (formerly 'all'); non-empty = bead matches if its status is in the list.
   status: BeadStatus[]
   assignee: string
-  priority: BeadPriority | "all"
+  // beadbox-813: priority filter is multi-select. UNLIKE status, an empty
+  // array means no filter ("All Priority"), and so does selecting all five:
+  // the list is never blank because of this filter. Otherwise a bead matches
+  // if its priority is in the list.
+  priority: BeadPriority[]
   search: string
   showMessages: boolean
   showWaves: boolean

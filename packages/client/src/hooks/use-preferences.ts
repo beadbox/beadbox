@@ -47,7 +47,7 @@ export function usePreferences() {
       "deferred",
     ],
     assignee: "all",
-    priority: "all",
+    priority: [],
     showMessages: false,
     showWaves: false,
     hasSpec: false,
@@ -77,7 +77,7 @@ export function usePreferences() {
       // !== newFilters[key] handles array identity correctly.
       const tracked: { key: keyof Filters; label: string; defaultVal: string }[] = [
         { key: "status", label: "status", defaultVal: "" },
-        { key: "priority", label: "priority", defaultVal: "all" },
+        { key: "priority", label: "priority", defaultVal: "" },
         { key: "assignee", label: "assignee", defaultVal: "all" },
         { key: "showMessages", label: "show_messages", defaultVal: "false" },
         { key: "showWaves", label: "show_waves", defaultVal: "false" },

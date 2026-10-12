@@ -16,7 +16,7 @@ describe("issue type display", () => {
     const innerEpic: Epic = { ...task, id: "epic-1", type: "epic", title: "Inner epic", children: [nestedEpic] }
     const decision: Bead = { ...task, id: "decision-1", type: "decision", title: "Decision", children: [innerEpic] }
     const root: Epic = { ...task, id: "_standalone", type: "epic", title: "Standalone", children: [decision] }
-    const filters: Filters = { status: ["open"], assignee: "all", priority: "all", search: "", showMessages: false, showWaves: false, hasSpec: false, hasDeadline: false, rig: "all", grouped: false, type: "task" }
+    const filters: Filters = { status: ["open"], assignee: "all", priority: [], search: "", showMessages: false, showWaves: false, hasSpec: false, hasDeadline: false, rig: "all", grouped: false, type: "task" }
     const filtered = filterEpics([root], filters)
     expect(findBeadById(filtered, "task-1")?.title).toBe("Leaf task")
     expect(findParentPath(filtered, "task-1")?.map((parent) => parent.id)).toEqual(["_standalone", "decision-1", "epic-1", "epic-2"])

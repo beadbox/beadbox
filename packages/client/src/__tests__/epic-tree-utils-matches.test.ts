@@ -39,7 +39,8 @@ const baseFilters = (over: Partial<Filters> = {}): Filters => ({
     "deferred",
   ],
   assignee: "all",
-  priority: "all",
+  // beadbox-813: empty = no priority filter.
+  priority: [],
   search: "",
   showMessages: false,
   showWaves: false,
@@ -102,12 +103,45 @@ describe("matchesBead", () => {
   })
 
   test("priority filter excludes mismatched beads", () => {
-    expect(matchesBead(baseBead({ priority: "critical" }), baseFilters({ priority: "high" }))).toBe(
+    expect(matchesBead(baseBead({ priority: "critical" }), baseFilters({ priority: ["high"] }))).toBe(
       false,
     )
-    expect(matchesBead(baseBead({ priority: "high" }), baseFilters({ priority: "high" }))).toBe(
+    expect(matchesBead(baseBead({ priority: "high" }), baseFilters({ priority: ["high"] }))).toBe(
       true,
     )
+  })
+
+  // beadbox-813: multi-select priority. Several selected = match ANY; empty or
+  // all five = no filtering (never a blank list), so beads with no or unknown
+  // priority show exactly as they did under the old "All Priority".
+  describe("multi-select priority (beadbox-813)", () => {
+    const ALL = ["critical", "high", "medium", "low", "backlog"] as Filters["priority"]
+    test("several selected: a bead matching ANY of them shows, others do not", () => {
+      const f = baseFilters({ priority: ["critical", "high"] })
+      expect(matchesBead(baseBead({ priority: "critical" }), f)).toBe(true)
+      expect(matchesBead(baseBead({ priority: "high" }), f)).toBe(true)
+      expect(matchesBead(baseBead({ priority: "medium" }), f)).toBe(false)
+      expect(matchesBead(baseBead({ priority: "backlog" }), f)).toBe(false)
+    })
+    test("empty selection means All: every priority shows", () => {
+      for (const p of ALL) expect(matchesBead(baseBead({ priority: p }), baseFilters({ priority: [] }))).toBe(true)
+    })
+    test("all five selected means All too", () => {
+      for (const p of ALL) expect(matchesBead(baseBead({ priority: p }), baseFilters({ priority: ALL }))).toBe(true)
+    })
+    test("a bead with no or an unknown priority shows under All (empty or all five), as before", () => {
+      const missing = baseBead({ priority: undefined as unknown as Bead["priority"] })
+      const unknown = baseBead({ priority: "urgent" as unknown as Bead["priority"] })
+      for (const f of [baseFilters({ priority: [] }), baseFilters({ priority: ALL })]) {
+        expect(matchesBead(missing, f)).toBe(true)
+        expect(matchesBead(unknown, f)).toBe(true)
+      }
+    })
+    test("a narrowing selection hides beads with no or an unknown priority", () => {
+      const f = baseFilters({ priority: ["critical", "high"] })
+      expect(matchesBead(baseBead({ priority: undefined as unknown as Bead["priority"] }), f)).toBe(false)
+      expect(matchesBead(baseBead({ priority: "urgent" as unknown as Bead["priority"] }), f)).toBe(false)
+    })
   })
 
   test("assignee filter excludes mismatched beads", () => {
@@ -156,13 +190,13 @@ describe("matchesBead", () => {
     expect(
       matchesBead(
         baseBead({ status: "open", priority: "critical" }),
-        baseFilters({ status: ["open"], priority: "high" }),
+        baseFilters({ status: ["open"], priority: ["high"] }),
       ),
     ).toBe(false)
     expect(
       matchesBead(
         baseBead({ status: "open", priority: "critical" }),
-        baseFilters({ status: ["open"], priority: "critical" }),
+        baseFilters({ status: ["open"], priority: ["critical"] }),
       ),
     ).toBe(true)
   })

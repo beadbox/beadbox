@@ -1,4 +1,4 @@
-import type { Bead, Epic, Filters } from "./types"
+import { type Bead, type Epic, type Filters, priorityFilterNarrows } from "./types"
 
 // bb-pyv8: toastError moved to ./notifications.ts (pure-helper hygiene per
 // bb-78qr arch audit). This file no longer imports posthog-js or sonner.
@@ -131,7 +131,9 @@ const BEAD_FILTER_PREDICATES: BeadFilterPredicate[] = [
   // convention). The FilterBar populates a sensible default on first paint
   // so empty only happens via explicit "deselect all".
   (b, f) => f.status.includes(b.status),
-  (b, f) => f.priority === "all" || b.priority === f.priority,
+  // beadbox-813: multi-select priority. Empty or all five = no filtering (so
+  // beads with no or an unknown priority still show); otherwise match ANY.
+  (b, f) => !priorityFilterNarrows(f.priority) || f.priority.includes(b.priority),
   (b, f) => !f.type || f.type === "all" || b.type === f.type,
   (b, f) => f.assignee === "all" || b.assignee === f.assignee,
   (b, f) => !f.hasSpec || Boolean(b.specId),

@@ -7,7 +7,7 @@ const ALL_STATUSES = ["open", "in_progress", "closed", "blocked", "deferred", "r
 const FILTERS: Filters = {
   status: ALL_STATUSES,
   assignee: "all",
-  priority: "all",
+  priority: [],
   showMessages: false,
   showWaves: false,
   hasSpec: false,

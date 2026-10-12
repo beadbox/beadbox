@@ -1,4 +1,4 @@
-import type { Bead, Filters, ReadState, SortOption } from "./types"
+import { ALL_PRIORITIES, type Bead, type BeadPriority, type Filters, type ReadState, type SortOption } from "./types"
 
 export type ThemeVariant = "blue" | "gray" | "green"
 
@@ -44,7 +44,7 @@ const DEFAULT_STATUSES = [
 const DEFAULT_FILTERS: Filters = {
   status: [...DEFAULT_STATUSES],
   assignee: "all",
-  priority: "all",
+  priority: [],
   showMessages: false,
   showWaves: false,
   hasSpec: false,
@@ -81,6 +81,17 @@ export function setSortPreference(sort: SortOption): void {
   }
 }
 
+// beadbox-813: priority went from one value ('all' | 'high' | ...) to a
+// multi-select list where empty means "All Priority". A stored single value
+// keeps showing the same view: 'all' becomes [], one priority a one-item list.
+// Unknown entries are dropped and anything malformed means All.
+function migratePriority(stored: unknown): BeadPriority[] {
+  const known = (v: unknown): v is BeadPriority => ALL_PRIORITIES.includes(v as BeadPriority)
+  if (Array.isArray(stored)) return stored.filter(known)
+  if (known(stored)) return [stored]
+  return []
+}
+
 export function getFiltersPreference(): Filters {
   if (typeof window === "undefined") return DEFAULT_FILTERS
 
@@ -99,6 +110,7 @@ export function getFiltersPreference(): Filters {
       } else if (!Array.isArray(parsed.status)) {
         parsed.status = [...DEFAULT_STATUSES]
       }
+      parsed.priority = migratePriority(parsed.priority)
       return { ...DEFAULT_FILTERS, ...parsed }
     }
   } catch {
