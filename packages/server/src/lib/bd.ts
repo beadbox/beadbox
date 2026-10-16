@@ -225,7 +225,7 @@ export interface BdBead {
   dependents?: BdBead[]
   total_children?: number
   closed_children?: number
-  metadata?: Record<string, string>
+  metadata?: Record<string, unknown>
   // NOT populated by showBead (bd show omits comment bodies by default,
   // and the `--include-comments` flag that streams them is version-gated
   // — see showBead). The detail panel fetches comment bodies separately
@@ -1560,7 +1560,12 @@ export async function getMoleculeStructure(
       title: b?.title ?? nid,
       status: (b?.status ?? "open") as BeadStatus,
       type: b ? mapType(b.issue_type) : "unknown",
-      gateType: b?.issue_type === "gate" ? (b.metadata?.gate_type ?? "human") : undefined,
+      gateType:
+        b?.issue_type === "gate"
+          ? typeof b.metadata?.gate_type === "string"
+            ? b.metadata.gate_type
+            : "human"
+          : undefined,
     }
   })
 

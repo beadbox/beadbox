@@ -18,6 +18,7 @@ import {
   getStatusDisplayConfig,
   typeColors,
 } from "@/components/bead-detail-helpers"
+import { BeadCustomFields } from "@/components/bead-custom-fields"
 import { CopyableId } from "@/components/copyable-id"
 import { SimpleMarkdown } from "@/components/simple-markdown"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -268,22 +269,7 @@ export function BeadExpandedViewModal({
             </div>
           )}
 
-          {/* Custom Fields (metadata) */}
-          {Object.keys(bead.metadata || {}).length > 0 && (
-            <div className="pt-4 border-t border-border/30">
-              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                Custom Fields
-              </h3>
-              <div className="space-y-1">
-                {Object.entries(bead.metadata!).map(([key, value]) => (
-                  <div key={key} className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{key}</span>
-                    <span className="text-foreground/90">{value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <BeadCustomFields metadata={bead.metadata} />
 
           {/* Dependencies */}
           {bead.blockedBy?.length || bead.blocks?.length ? (
