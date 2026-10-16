@@ -14,6 +14,7 @@ import {
 import posthog from "posthog-js"
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { CommentsSection } from "@/components/bead-comments-section"
+import { BeadCustomFields } from "@/components/bead-custom-fields"
 import { safeCapture } from "@/lib/posthog-safe"
 import { BeadDependenciesDisplay } from "@/components/bead-dependencies-display"
 import {
@@ -672,22 +673,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                     onSave={(value) => mutations.saveTextField("notes", value)}
                   />
 
-                  {/* Custom Fields */}
-                  {Object.keys(bead.metadata || {}).length > 0 && (
-                    <div className="pt-4 border-t border-border/30">
-                      <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                        Custom Fields
-                      </h3>
-                      <div className="space-y-1">
-                        {Object.entries(bead.metadata!).map(([key, value]) => (
-                          <div key={key} className="flex items-center justify-between text-sm">
-                            <span className="text-muted-foreground">{key}</span>
-                            <span className="text-foreground/90">{value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <BeadCustomFields metadata={bead.metadata} />
 
                   <BeadDependenciesDisplay
                     blockedBy={bead.blockedBy}
