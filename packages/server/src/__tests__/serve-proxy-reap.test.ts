@@ -19,6 +19,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ServeManager, sweepStaleServeProxies } from "../lib/serve-manager"
 import { processTable } from "../lib/serve-proxy"
+import { killOwned } from "./fixtures/kill-owned"
 
 const FAKE_SERVE = join(import.meta.dir, "fixtures", "fake-bd-serve.py")
 const HOST = join(import.meta.dir, "fixtures", "serve-host.ts")
@@ -52,7 +53,8 @@ afterEach(async () => {
   manager = null
   for (const p of extra.splice(0)) p.kill("SIGKILL")
   // Anything this test's bd started, by its unique path: nothing may outlive the test.
-  for (const r of processTable()) if (r.command.includes(bd)) process.kill(r.pid, "SIGKILL")
+  // killOwned: a row can exit between the snapshot and the kill (beadbox-622).
+  for (const r of processTable()) if (r.command.includes(bd)) killOwned(r.pid)
   rmSync(root, { recursive: true, force: true })
 })
 
