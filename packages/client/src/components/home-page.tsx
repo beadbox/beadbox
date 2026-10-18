@@ -188,6 +188,7 @@ import { UpdateDialog } from "@/components/update-dialog"
 import {
   countAllBeads,
   extractAssignees,
+  extractLabels,
   extractRigNames,
   filterEpics,
   flattenEpicsToBeads,
@@ -343,6 +344,7 @@ function BeadsEpicsViewer() {
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
 
   const assignees = useMemo(() => extractAssignees(epics), [epics])
+  const labelSuggestions = useMemo(() => extractLabels(epics), [epics])
   const rigNames = useMemo(() => extractRigNames(epics), [epics])
   const [typesByWorkspace, setTypesByWorkspace] = useState<Record<string, string>>({})
   const selectedType = currentWorkspace
@@ -1114,6 +1116,7 @@ function BeadsEpicsViewer() {
                   parentPath={parentPath}
                   dbPath={currentWorkspace?.databasePath}
                   assignees={assignees}
+                  availableLabels={labelSuggestions}
                   availableStatuses={availableStatuses}
                   availableTypes={typeOptions}
                   typeCatalogReady={typeCatalogReady}
@@ -1386,6 +1389,7 @@ function BeadsEpicsViewer() {
                   parentPath={parentPath}
                   dbPath={currentWorkspace?.databasePath}
                   assignees={assignees}
+                  availableLabels={labelSuggestions}
                   availableStatuses={availableStatuses}
                   availableTypes={typeOptions}
                   typeCatalogReady={typeCatalogReady}

@@ -115,6 +115,26 @@ export function extractAssignees(epics: Epic[]): string[] {
   return Array.from(assignees).sort()
 }
 
+// Extract all unique labels from epics recursively: the suggestions offered when
+// adding a label in the detail panel (beadbox-m4i).
+export function extractLabels(epics: Epic[]): string[] {
+  const labels = new Set<string>()
+
+  function traverseBead(bead: Bead) {
+    for (const label of bead.labels ?? []) labels.add(label)
+    bead.children?.forEach(traverseBead)
+  }
+
+  function traverseEpic(epic: Epic) {
+    traverseBead(epic)
+    epic.children?.forEach(traverseBead)
+    epic.childEpics?.forEach(traverseEpic)
+  }
+
+  epics.forEach(traverseEpic)
+  return Array.from(labels).sort()
+}
+
 // bb-fe03.7: matchesBead was 8 sequential `if (filter not satisfied) return false`
 // blocks plus a search subcheck → CCN 18. Collapsed to a predicate-list pattern:
 // each predicate returns true when the bead PASSES that filter. The driver loops

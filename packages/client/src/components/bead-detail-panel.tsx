@@ -64,6 +64,8 @@ interface BeadDetailPanelProps {
   parentPath?: { id: string; title: string }[]
   dbPath?: string
   assignees?: string[]
+  /** Labels in use across the workspace, suggested when adding one. */
+  availableLabels?: string[]
   availableStatuses?: string[]
   availableTypes?: string[]
   typeCatalogReady?: boolean
@@ -92,6 +94,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
       parentPath = [],
       dbPath,
       assignees = [],
+      availableLabels = [],
       availableStatuses = ["open", "in_progress", "closed"],
       availableTypes = [],
       typeCatalogReady = false,
@@ -495,6 +498,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
               priority={mutations.priority}
               assignee={mutations.assignee}
               labels={mutations.labels}
+              availableLabels={availableLabels}
               availableStatuses={availableStatuses}
               assignees={assignees}
               fieldStates={{
@@ -505,6 +509,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
               onStatusChange={mutations.handleStatusChange}
               onPriorityChange={mutations.handlePriorityChange}
               onAssigneeChange={mutations.handleAssigneeChange}
+              onAddLabel={mutations.handleAddLabel}
               onRemoveLabel={mutations.handleRemoveLabel}
               isMobile={isMobile}
             />

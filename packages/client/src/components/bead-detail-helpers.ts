@@ -201,6 +201,23 @@ export function getWorkflowAdvancement(current: string, chain: string[]): Workfl
 }
 
 // ---------------------------------------------------------------------------
+// Labels
+// ---------------------------------------------------------------------------
+
+/**
+ * The label to add for what the user typed, or null to ignore it (beadbox-m4i).
+ * Trimmed, as bd trims. Refused: blank; a comma, because bd's --add-label
+ * splits on commas and would store several labels where the panel shows one
+ * chip; a leading "-", which `bd label` would parse as a flag; and a label the
+ * bead already has.
+ */
+export function normalizeNewLabel(raw: string, existing: readonly string[]): string | null {
+  const label = raw.trim()
+  if (!label || label.startsWith("-") || label.includes(",")) return null
+  return existing.includes(label) ? null : label
+}
+
+// ---------------------------------------------------------------------------
 // Analytics helpers
 // ---------------------------------------------------------------------------
 

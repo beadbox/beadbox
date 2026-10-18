@@ -28,6 +28,7 @@ import {
   type FieldName,
   type FieldState,
   initialFieldStates,
+  normalizeNewLabel,
 } from "@/components/bead-detail-helpers"
 import { toastError } from "@/lib/notifications"
 import type { Bead, BeadPriority, BeadStatus, BeadType } from "@/lib/types"
@@ -498,23 +499,25 @@ export function useBeadMutations({ bead, dbPath, onUpdate }: UseBeadMutationsOpt
   // ---------------------------------------------------------------------------
   // Labels
   // ---------------------------------------------------------------------------
-  const [newLabel, setNewLabel] = useState("")
-
-  const handleAddLabel = useCallback(async () => {
-    if (!bead || !newLabel.trim() || labels.includes(newLabel.trim())) return
-    const labelToAdd = newLabel.trim()
-    setLabels([...labels, labelToAdd])
-    setNewLabel("")
-    const result = await trackedAction("addLabelAction", () =>
-      addLabelAction(bead.id, labelToAdd, dbPath),
-    )
-    if (result.success) {
-      onUpdate({ ...bead, labels: [...labels, labelToAdd], updatedAt: new Date() })
-    } else {
-      setLabels(labels)
-      toastError("Failed to add label", { description: result.error })
-    }
-  }, [bead, newLabel, labels, dbPath, onUpdate])
+  const handleAddLabel = useCallback(
+    async (raw: string) => {
+      const labelToAdd = normalizeNewLabel(raw, labels)
+      if (!bead || labelToAdd === null) return
+      setLabels([...labels, labelToAdd])
+      // A thrown rpc (sidecar deadline or restart mid-call) is a failed write
+      // too: without the catch the optimistic chip stays and no toast shows.
+      const result = await trackedAction("addLabelAction", () =>
+        addLabelAction(bead.id, labelToAdd, dbPath),
+      ).catch((error: unknown) => ({ success: false, error: String(error) }))
+      if (result.success) {
+        onUpdate({ ...bead, labels: [...labels, labelToAdd], updatedAt: new Date() })
+      } else {
+        setLabels(labels)
+        toastError("Failed to add label", { description: result.error })
+      }
+    },
+    [bead, labels, dbPath, onUpdate],
+  )
 
   const handleRemoveLabel = useCallback(
     async (label: string) => {
@@ -599,8 +602,6 @@ export function useBeadMutations({ bead, dbPath, onUpdate }: UseBeadMutationsOpt
     dueAt,
     deferUntil,
     estimatedMinutes,
-    newLabel,
-    setNewLabel,
 
     // Field states
     fieldStates,
