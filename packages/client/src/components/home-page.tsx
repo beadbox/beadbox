@@ -193,6 +193,7 @@ import {
   flattenEpicsToBeads,
   isArchived,
   matchesBead,
+  resolveStatusFilter,
   withoutArchived,
 } from "@/lib/epic-tree-utils"
 import { groupTreeByStatus } from "@/lib/grouped-layout"
@@ -352,8 +353,8 @@ function BeadsEpicsViewer() {
     [availableTypes, epics],
   )
   const filteredEpics = useMemo(
-    () => filterEpics(epics, { ...filters, type: selectedType, includeSystem }, rigNames),
-    [epics, filters, rigNames, selectedType, includeSystem],
+    () => filterEpics(epics, { ...filters, type: selectedType, includeSystem }, rigNames, availableStatuses),
+    [epics, filters, rigNames, selectedType, includeSystem, availableStatuses],
   )
   const sortedEpics = useMemo(() => sortEpics(filteredEpics, sort), [filteredEpics, sort])
 
@@ -473,7 +474,7 @@ function BeadsEpicsViewer() {
   const groupedLayout = useMemo(() => {
     if (!filters.grouped) return null
     const groupedFilters: Filters = {
-      ...filters,
+      ...resolveStatusFilter(filters, availableStatuses),
       rig: filters.rig !== "all" && rigNames.length === 0 ? "all" : filters.rig,
     }
     const shownAs = new Map<string, Epic>()
@@ -499,6 +500,7 @@ function BeadsEpicsViewer() {
     )
   }, [
     filters,
+    availableStatuses,
     rigNames,
     sortedEpics,
     activeEpicsWithFilteredStandalone,
@@ -867,7 +869,7 @@ function BeadsEpicsViewer() {
   }
   const groupedBeads = useMemo(() => {
     const groupedFilters: Filters = {
-      ...filters,
+      ...resolveStatusFilter(filters, availableStatuses),
       rig: filters.rig !== "all" && rigNames.length === 0 ? "all" : filters.rig,
     }
     // beadbox-51m: archived items get their own collapsible group, never a status group.
@@ -894,6 +896,7 @@ function BeadsEpicsViewer() {
     backlogBeads,
     archivedBeads,
     filters,
+    availableStatuses,
     rigNames,
   ])
 

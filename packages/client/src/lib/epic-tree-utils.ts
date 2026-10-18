@@ -1,4 +1,12 @@
-import { type Bead, type Epic, type Filters, priorityFilterNarrows } from "./types"
+import {
+  type Bead,
+  type BeadStatus,
+  type Epic,
+  type Filters,
+  effectiveStatusSelection,
+  priorityFilterNarrows,
+  statusFilterNarrows,
+} from "./types"
 
 // bb-pyv8: toastError moved to ./notifications.ts (pure-helper hygiene per
 // bb-78qr arch audit). This file no longer imports posthog-js or sonner.
@@ -126,11 +134,11 @@ function matchesSearch(bead: Bead, filters: Filters): boolean {
 const BEAD_FILTER_PREDICATES: BeadFilterPredicate[] = [
   // Hide messages unless explicitly shown
   (b, f) => f.showMessages || f.type === "message" || f.includeSystem || b.type !== "message",
-  // beadbox-brg: multi-select status. Strict whitelist — bead matches if
-  // its status is in the array. Empty array → nothing visible (Gmail/Linear
-  // convention). The FilterBar populates a sensible default on first paint
-  // so empty only happens via explicit "deselect all".
-  (b, f) => f.status.includes(b.status),
+  // beadbox-brg: multi-select status. A whitelist — bead matches if its
+  // status is in the array; empty array → nothing visible (Gmail/Linear
+  // convention). beadbox-429: when every listed status is checked
+  // (resolveStatusFilter sets statusAll) there is no narrowing at all.
+  (b, f) => f.statusAll === true || f.status.includes(b.status),
   // beadbox-813: multi-select priority. Empty or all five = no filtering (so
   // beads with no or an unknown priority still show); otherwise match ANY.
   (b, f) => !priorityFilterNarrows(f.priority) || f.priority.includes(b.priority),
@@ -141,6 +149,19 @@ const BEAD_FILTER_PREDICATES: BeadFilterPredicate[] = [
   (b, f) => f.rig === "all" || b.rigName === f.rig,
   matchesSearch,
 ]
+
+/**
+ * Apply the Status filter rule against the workspace's listed statuses
+ * (beadbox-429, pm/spec §4.2): the default selection counts as every listed
+ * status, and every listed status checked means no status narrowing.
+ */
+export function resolveStatusFilter(filters: Filters, listed: readonly BeadStatus[]): Filters {
+  return {
+    ...filters,
+    status: effectiveStatusSelection(filters.status, listed),
+    statusAll: !statusFilterNarrows(filters.status, listed),
+  }
+}
 
 // Filter beads based on criteria
 export function matchesBead(bead: Bead, filters: Filters): boolean {
@@ -205,10 +226,16 @@ export function filterEpic(epic: Epic, filters: Filters): Epic | null {
   return null
 }
 
-export function filterEpics(epics: Epic[], filters: Filters, rigNames: string[] = []): Epic[] {
+export function filterEpics(
+  epics: Epic[],
+  filters: Filters,
+  rigNames: string[] = [],
+  listedStatuses?: readonly BeadStatus[],
+): Epic[] {
   // If rig filter is set but no rigs exist in this workspace, ignore it
-  const effectiveFilters =
+  const rigFilters =
     filters.rig !== "all" && rigNames.length === 0 ? { ...filters, rig: "all" as const } : filters
+  const effectiveFilters = listedStatuses ? resolveStatusFilter(rigFilters, listedStatuses) : rigFilters
 
   // beadbox-brg: the pre-multi-select code had a fast-path early-return when
   // every filter was at its "all" sentinel. With status as a whitelist there

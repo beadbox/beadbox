@@ -299,12 +299,13 @@ export function buildGanttModel(
   filters: Filters,
   now: number,
   rigNames: string[] = [],
+  listedStatuses?: readonly string[],
 ): GanttModel {
   const titles = new Map<string, string>()
   indexTitles(epics, titles)
   const live = epics.filter((epic) => !isArchived(epic)).map(withoutArchived)
   const bars = scheduleBars(live, blockedBy, now)
-  const visible = filterEpics(live, filters, rigNames)
+  const visible = filterEpics(live, filters, rigNames, listedStatuses)
   // Ungrouped goes last, as in the epic tree.
   visible.sort((a, b) => Number(a.id === UNGROUPED_ID) - Number(b.id === UNGROUPED_ID))
   const sections = visible.map((epic) => buildSection(epic, 0, bars))

@@ -139,8 +139,9 @@ export function ChartView() {
         { ...prefs.filters, type: selectedType, includeSystem },
         now,
         rigNames,
+        statusesQuery.data ?? [],
       ),
-    [epics, blocksQuery.data, prefs.filters, selectedType, includeSystem, now, rigNames],
+    [epics, blocksQuery.data, prefs.filters, selectedType, includeSystem, now, rigNames, statusesQuery.data],
   )
 
   useEffect(() => {

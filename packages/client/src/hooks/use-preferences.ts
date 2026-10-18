@@ -24,7 +24,7 @@ import {
   type ThemeVariant,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
-import type { Filters, SortOption } from "../lib/types"
+import { DEFAULT_STATUSES, type Filters, type SortOption } from "../lib/types"
 
 export function usePreferences() {
   const [theme, setTheme] = useState<ThemeVariant>("gray")
@@ -36,16 +36,7 @@ export function usePreferences() {
     // beadbox-brg: default to the canonical-known statuses so beads are
     // visible on first render. Replaced from localStorage in the mount
     // effect below.
-    status: [
-      "open",
-      "in_progress",
-      "closed",
-      "ready_for_qa",
-      "qa_passed",
-      "ready_to_ship",
-      "blocked",
-      "deferred",
-    ],
+    status: [...DEFAULT_STATUSES],
     assignee: "all",
     priority: [],
     showMessages: false,

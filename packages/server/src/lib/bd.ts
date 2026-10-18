@@ -28,6 +28,7 @@ import {
   flagArg,
 } from "./bd-argv"
 import { execFileAsync } from "./exec"
+import { parseStatusConfig, type StatusConfigEntry } from "./status-config"
 import { recordFlockContention } from "./flock-contention-tracker"
 import type {
   BeadPriority,
@@ -759,21 +760,47 @@ export async function updateStatus(
   await bdExecRaw(buildUpdateArgs(id, "--status", status), options)
 }
 
-// Get custom statuses from bd config
+// The configured status.custom entries, `name[:category]` each (beadbox-429).
+// Throws when bd cannot read the config, so a caller that writes the list back
+// can refuse rather than drop categories.
+export async function getCustomStatusEntries(options: BdOptions = {}): Promise<StatusConfigEntry[]> {
+  return parseStatusConfig(await bdExecRaw(["config", "get", "status.custom"], options))
+}
+
+// Get custom status names from bd config
 export async function getCustomStatuses(options: BdOptions = {}): Promise<string[]> {
   try {
-    const result = await bdExecRaw(["config", "get", "status.custom"], options)
-    // Result may be a comma-separated list or single status
-    const trimmed = result.trim()
-    if (!trimmed || trimmed.includes("(not set)")) return []
-    return trimmed
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
+    return (await getCustomStatusEntries(options)).map((entry) => entry.name)
   } catch {
     // Config key doesn't exist or other error
     return []
   }
+}
+
+interface BdStatusesResult {
+  built_in_statuses?: Array<{ name?: string }>
+  custom_statuses?: Array<{ name?: string }>
+}
+
+export interface StatusCatalog {
+  builtIn: string[]
+  custom: string[]
+}
+
+export function parseStatusCatalog(value: BdStatusesResult): StatusCatalog {
+  const names = (list: Array<{ name?: string }> | undefined) =>
+    (Array.isArray(list) ? list : [])
+      .map((entry) => entry?.name)
+      .filter((name): name is string => typeof name === "string" && name.length > 0)
+  const builtIn = names(value?.built_in_statuses)
+  if (builtIn.length === 0) throw new Error("bd statuses returned no built-in statuses")
+  return { builtIn, custom: names(value?.custom_statuses) }
+}
+
+// Every status bd accepts, by name (`bd statuses`, present since bd 1.1.0).
+// Custom statuses come back alphabetical; order them from the config.
+export async function getStatusCatalog(options: BdOptions = {}): Promise<StatusCatalog> {
+  return parseStatusCatalog(await bdExec<BdStatusesResult>(["statuses"], options))
 }
 
 // Replace the custom-status list in bd config. Empty list unsets the key.

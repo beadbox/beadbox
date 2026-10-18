@@ -1,4 +1,4 @@
-import { ALL_PRIORITIES, type Bead, type BeadPriority, type Filters, type ReadState, type SortOption } from "./types"
+import { ALL_PRIORITIES, DEFAULT_STATUSES, type Bead, type BeadPriority, type Filters, type ReadState, type SortOption } from "./types"
 
 export type ThemeVariant = "blue" | "gray" | "green"
 
@@ -27,20 +27,9 @@ export type CommentSortOrder = "newest" | "oldest"
 const DEFAULT_SORT: SortOption = { field: "status", direction: "desc" }
 
 // beadbox-brg: defaults include the canonical core + chain statuses so a
-// fresh install shows everything until the user narrows. Custom statuses
-// outside this set need an explicit toggle (the FilterBar's master "All
-// Status" pulls them in automatically once availableStatuses is loaded).
-const DEFAULT_STATUSES = [
-  "open",
-  "in_progress",
-  "closed",
-  "ready_for_qa",
-  "qa_passed",
-  "ready_to_ship",
-  "blocked",
-  "deferred",
-] as const
-
+// fresh install shows everything until the user narrows. beadbox-429: that
+// default selection is read as every listed status (lib/types.ts), so a
+// workspace's own custom statuses are shown too.
 const DEFAULT_FILTERS: Filters = {
   status: [...DEFAULT_STATUSES],
   assignee: "all",

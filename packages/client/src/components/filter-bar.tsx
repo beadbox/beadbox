@@ -28,7 +28,15 @@ import { TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui
 import { useViewport } from "@/hooks/use-viewport"
 import { getAnalyticsEnabled } from "@/lib/local-storage"
 import { safeCapture } from "@/lib/posthog-safe"
-import { ALL_PRIORITIES, type BeadPriority, type BeadStatus, type Filters, priorityFilterNarrows } from "@/lib/types"
+import {
+  ALL_PRIORITIES,
+  type BeadPriority,
+  type BeadStatus,
+  effectiveStatusSelection,
+  FALLBACK_STATUSES,
+  type Filters,
+  priorityFilterNarrows,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export type { Filters }
@@ -142,16 +150,16 @@ export function FilterBar({
 
   // beadbox-brg: status-multi-select wiring. allStatuses is the ordered set
   // surfaced in the dropdown (workspace's availableStatuses if loaded,
-  // otherwise the core-three fallback for first-paint). The filter is a
-  // strict whitelist — a row is checked iff its status is in filters.status.
+  // otherwise the core-three fallback for first-paint). beadbox-429: the
+  // control shows and edits the effective selection (the untouched default
+  // = every listed status), and every listed status checked = no narrowing.
   const allStatuses: string[] =
-    availableStatuses && availableStatuses.length > 0
-      ? availableStatuses
-      : ["open", "in_progress", "closed"]
-  const allSelected = allStatuses.every((s) => filters.status.includes(s as BeadStatus))
+    availableStatuses && availableStatuses.length > 0 ? availableStatuses : [...FALLBACK_STATUSES]
+  const statusSelection = effectiveStatusSelection(filters.status, allStatuses)
+  const allSelected = allStatuses.every((s) => statusSelection.includes(s as BeadStatus))
 
   function toggleStatus(status: BeadStatus): void {
-    const current = filters.status
+    const current = statusSelection
     const next = current.includes(status)
       ? current.filter((s) => s !== status)
       : ([...current, status] as BeadStatus[])
@@ -167,9 +175,9 @@ export function FilterBar({
 
   function statusTriggerLabel(): string {
     if (allSelected) return "All Status"
-    if (filters.status.length === 0) return "No Status"
-    if (filters.status.length === 1) return statusLabel(filters.status[0])
-    return `${filters.status.length} statuses`
+    if (statusSelection.length === 0) return "No Status"
+    if (statusSelection.length === 1) return statusLabel(statusSelection[0])
+    return `${statusSelection.length} statuses`
   }
 
   // beadbox-813: priority multi-select, on the same control as Status. Unlike
@@ -206,10 +214,10 @@ export function FilterBar({
         triggerClassName={triggerClassName}
         ariaLabel="Status filter"
         allLabel="All Status"
-        allState={allSelected ? true : filters.status.length === 0 ? false : "indeterminate"}
+        allState={allSelected ? true : statusSelection.length === 0 ? false : "indeterminate"}
         onToggleAll={toggleAllStatuses}
         options={allStatuses.map((s) => ({ value: s as BeadStatus, label: statusLabel(s) }))}
-        selected={filters.status}
+        selected={statusSelection}
         onToggle={toggleStatus}
         footer={
           <MultiSelectRow

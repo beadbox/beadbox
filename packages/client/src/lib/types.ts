@@ -19,6 +19,51 @@ export function priorityFilterNarrows(selected: readonly BeadPriority[]): boolea
   return selected.length > 0 && !ALL_PRIORITIES.every((p) => selected.includes(p))
 }
 
+/**
+ * The status selection a fresh install starts with (and what most saved
+ * preferences still hold): the canonical core + chain statuses. It means
+ * "show everything until the user narrows", so it is read as every listed
+ * status (beadbox-429).
+ */
+export const DEFAULT_STATUSES: readonly BeadStatus[] = [
+  "open",
+  "in_progress",
+  "closed",
+  "ready_for_qa",
+  "qa_passed",
+  "ready_to_ship",
+  "blocked",
+  "deferred",
+]
+
+/** Listed statuses before the workspace's list has loaded. */
+export const FALLBACK_STATUSES: readonly BeadStatus[] = ["open", "in_progress", "closed"]
+
+function isDefaultStatusSelection(selected: readonly BeadStatus[]): boolean {
+  const set = new Set(selected)
+  return set.size === DEFAULT_STATUSES.length && DEFAULT_STATUSES.every((s) => set.has(s))
+}
+
+/** The selection the Status filter shows and applies (default = every listed status). */
+export function effectiveStatusSelection(
+  selected: readonly BeadStatus[],
+  listed: readonly BeadStatus[],
+): BeadStatus[] {
+  if (!isDefaultStatusSelection(selected)) return [...selected]
+  return [...new Set([...listed, ...selected])]
+}
+
+/**
+ * True when a status selection narrows the list: some listed status is
+ * unchecked. Every listed status checked ("All Status") is no narrowing, so a
+ * bead in a status the list does not name is still shown (pm/spec §4.2).
+ */
+export function statusFilterNarrows(selected: readonly BeadStatus[], listed: readonly BeadStatus[]): boolean {
+  const effective = new Set(effectiveStatusSelection(selected, listed))
+  const list = listed.length > 0 ? listed : FALLBACK_STATUSES
+  return !list.every((s) => effective.has(s))
+}
+
 export interface Comment {
   id: string
   author: string
@@ -286,6 +331,11 @@ export interface Filters {
   // beadbox-brg: status filter is multi-select. Empty array = no filter
   // (formerly 'all'); non-empty = bead matches if its status is in the list.
   status: BeadStatus[]
+  /**
+   * Derived, never persisted: set by resolveStatusFilter when the selection
+   * covers every listed status, meaning no status narrowing (beadbox-429).
+   */
+  statusAll?: boolean
   assignee: string
   // beadbox-813: priority filter is multi-select. UNLIKE status, an empty
   // array means no filter ("All Priority"), and so does selecting all five:

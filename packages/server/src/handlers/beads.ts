@@ -19,7 +19,9 @@ import {
   closeBead as bdCloseBead,
   deleteBead as bdDeleteBead,
   deleteComment as bdDeleteComment,
+  getCustomStatusEntries as bdGetCustomStatusEntries,
   getCustomStatuses as bdGetCustomStatuses,
+  getStatusCatalog as bdGetStatusCatalog,
   getAvailableTypes as bdGetAvailableTypes,
   removeDependency as bdRemoveDependency,
   removeLabel as bdRemoveLabel,
@@ -42,6 +44,7 @@ import {
 import { tryServe } from "../lib/serve-reads"
 import { readMetadataMode } from "../lib/dolt-metadata"
 import { invalidateEpicCache } from "../lib/epic-cache"
+import { parseStatusConfig, type StatusConfigEntry, tokensForNames } from "../lib/status-config"
 import { RESERVED_STATUSES, validateStatusName } from "../lib/status-validation"
 import type { BeadPriority, BeadType } from "../lib/types"
 
@@ -61,7 +64,9 @@ export async function updateBeadStatus(
   }
 }
 
-// Get all available statuses (core + custom)
+// Every status a bead can be given (beadbox-429, pm/spec §3.5): bd's built-ins
+// from `bd statuses`, then the custom statuses by name in config order. If
+// `bd statuses` fails, the core three plus the configured names.
 export async function getAvailableStatuses(dbPath?: string): Promise<string[]> {
   const options: BdOptions = dbPath ? { db: dbPath } : {}
   if (dbPath) {
@@ -72,12 +77,14 @@ export async function getAvailableStatuses(dbPath?: string): Promise<string[]> {
   }
   const coreStatuses = ["open", "in_progress", "closed"]
 
-  try {
-    const customStatuses = await bdGetCustomStatuses(options)
-    return [...coreStatuses, ...customStatuses]
-  } catch {
-    return coreStatuses
-  }
+  const [catalog, customStatuses] = await Promise.all([
+    bdGetStatusCatalog(options).catch(() => null),
+    bdGetCustomStatuses(options).catch(() => [] as string[]),
+  ])
+  const ordered = catalog
+    ? [...catalog.builtIn, ...customStatuses, ...catalog.custom]
+    : [...coreStatuses, ...customStatuses]
+  return [...new Set(ordered)]
 }
 
 // `bd types` reflects the selected workspace's types.custom configuration.
@@ -103,22 +110,12 @@ export async function getAvailableTypes(dbPath?: string): Promise<string[]> {
 // Get only the custom statuses (for the Settings → Workflow manager). Distinct
 // from getAvailableStatuses, which prepends the core lifecycle statuses.
 // Ported from v0.24 actions/beads.ts (commit 1386b41 / bb-oqux) for bb-wxuw.
-/** Same parsing as lib/bd.ts getCustomStatuses: a comma list; unset -> []. */
-function parseStatusList(raw: string): string[] {
-  const trimmed = raw.trim()
-  if (!trimmed || trimmed.includes("(not set)")) return []
-  return trimmed
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
-
 export async function getCustomStatusList(dbPath?: string): Promise<string[]> {
   const options: BdOptions = dbPath ? { db: dbPath } : {}
   // Opted-in workspaces may read status.custom through bd serve (beadbox-6x2),
   // parsed exactly as the CLI's `bd config get` output is.
   const viaServe = await tryServe(dbPath, (c) => c.getConfig("status.custom"))
-  if (viaServe) return parseStatusList(viaServe.value ?? "")
+  if (viaServe) return parseStatusConfig(viaServe.value ?? "").map((entry) => entry.name)
   try {
     return await bdGetCustomStatuses(options)
   } catch {
@@ -149,8 +146,18 @@ export async function updateCustomStatuses(
   }
 
   const options: BdOptions = dbPath ? { db: dbPath } : {}
+  // Names arrive from Settings; each one already configured keeps its exact
+  // token, `name:category` included (beadbox-429). Unreadable config = refuse,
+  // never a write that silently drops categories.
+  let current: StatusConfigEntry[]
   try {
-    await bdSetCustomStatuses(cleaned, options)
+    current = await bdGetCustomStatusEntries(options)
+  } catch (error) {
+    console.error("Failed to read custom statuses before saving:", error)
+    return { success: false, error: `Could not read the current statuses: ${String(error)}` }
+  }
+  try {
+    await bdSetCustomStatuses(tokensForNames(cleaned, current), options)
     return { success: true }
   } catch (error) {
     console.error("Failed to update custom statuses:", error)
