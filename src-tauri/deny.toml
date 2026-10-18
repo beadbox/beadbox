@@ -83,6 +83,30 @@ ignore = [
   # Revisit when Tauri ships a release that moves plist/quick-xml past 0.41.
   "RUSTSEC-2026-0194",
   "RUSTSEC-2026-0195",
+
+  # ── zip 4.6.1, three extraction advisories, WINDOWS-ONLY, NOT SHIPPED ──
+  #
+  # RUSTSEC-2026-0367  SUID/SGID bits preserved on extraction
+  # RUSTSEC-2026-0368  extract() creates symlinks pointing outside the target
+  # RUSTSEC-2026-0369  Unix permissions applied through symlinks on extract
+  #
+  # NOT IN EITHER SHIPPED BUILD. zip's only dependent is tauri-plugin-updater,
+  # and only as [target.'cfg(target_os = "windows")'.dependencies.zip], used
+  # to unpack Windows update archives. Verified with
+  # `cargo tree --locked -e all --target <triple> -i zip`:
+  #     aarch64-apple-darwin      -> nothing to print
+  #     x86_64-unknown-linux-gnu  -> nothing to print
+  #     x86_64-pc-windows-msvc    -> zip v4.6.1 -> tauri-plugin-updater 2.10.1
+  # Windows builds are not published, so no released binary contains it.
+  #
+  # NOT FIXABLE BY US: the fix is zip >=9.0.0, and every tauri-plugin-updater
+  # 2.x release (2.10.1 through 2.14.0) still requires zip ^4.
+  #
+  # Revisit BEFORE any Windows build ships (the ignore must not travel with
+  # it), when tauri-plugin-updater moves to zip >=9, or by 2027-01-18.
+  "RUSTSEC-2026-0367",
+  "RUSTSEC-2026-0368",
+  "RUSTSEC-2026-0369",
 ]
 
 [bans]
