@@ -36,7 +36,7 @@ export interface Bead {
   priority: BeadPriority
   assignee: string
   labels?: string[]
-  metadata?: Record<string, string>
+  metadata?: Record<string, unknown>
   comments: Comment[]
   commentCount?: number
   parentId?: string
