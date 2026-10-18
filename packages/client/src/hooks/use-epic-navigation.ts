@@ -170,18 +170,10 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
             }
           : cachedBead,
       )
-      // Skip background refetch if selectedBead already has comments populated
-      // from a previous getBeadDetail call AND commentCount hasn't changed.
-      // The server-side cache will also short-circuit, but this avoids the round-trip entirely.
-      if (
-        selectedBead &&
-        selectedBead.id === beadIdParam &&
-        selectedBead.comments.length > 0 &&
-        selectedBead.commentCount === cachedBead.commentCount
-      ) {
-        return
-      }
-      // Data may have changed (new comments, etc.) - refetch
+      // The tree refreshed, so the open bead's detail may be stale in ways the
+      // tree row can't show: bd's label writes bump neither updated_at nor the
+      // comment count (beadbox-o9a). Always ask the sidecar. Its detail cache
+      // answers without a bd call unless the data changed.
       getBeadDetail(beadIdParam, currentWorkspace?.databasePath).then((fullBead) => {
         if (!fullBead) return
         setSelectedBead((prev) => {
@@ -217,7 +209,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
       .finally(() => {
         setIsLoadingBead(false)
       })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectedBead and updateBeadInEpicsRef are refs/derived; re-running on their change would cause loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateBeadInEpicsRef is a ref; re-running on its change would cause loops
   }, [beadIdParam, epics, currentWorkspace?.databasePath])
 
   const parentPath = useMemo(() => {

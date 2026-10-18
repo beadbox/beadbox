@@ -46,6 +46,11 @@ export function setCachedEpics(
   includeSystem = false,
   blockedBy: Map<string, string[]> | null = null,
 ): void {
+  // A tree built from different data makes every cached detail suspect, even
+  // when the bead's updated_at and comment count did not move: bd's label
+  // writes bump neither (beadbox-o9a). Unchanged data never reaches here (the
+  // fingerprint cache hit returns first), so idle detail reads still hit.
+  if (fingerprint !== cachedFingerprint || dbPath !== cachedDbPath) beadDetailCache.clear()
   cachedFingerprint = fingerprint
   cachedDbPath = dbPath
   cachedIncludeSystem = includeSystem
