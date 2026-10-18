@@ -1,10 +1,11 @@
-import tailwindcss from "@tailwindcss/vite"
-import { TanStackRouterVite } from "@tanstack/router-plugin/vite"
-import react from "@vitejs/plugin-react"
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { type Plugin, defineConfig } from "vite"
+import tailwindcss from "@tailwindcss/vite"
+import { TanStackRouterVite } from "@tanstack/router-plugin/vite"
+import react from "@vitejs/plugin-react"
+import { defineConfig, type Plugin } from "vite"
+import { testTransportEnabled, testTransportGuard } from "./vite-plugins/test-transport-guard"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -23,9 +24,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // VITE_BUILD_TAG stays empty in dev — consumers (use-update-checker,
 // dev-badge) already fall back to VITE_APP_VERSION when BUILD_TAG is blank.
 if (!process.env.VITE_APP_VERSION) {
-  const rootPkg = JSON.parse(
-    readFileSync(resolve(__dirname, "../../package.json"), "utf-8"),
-  )
+  const rootPkg = JSON.parse(readFileSync(resolve(__dirname, "../../package.json"), "utf-8"))
   process.env.VITE_APP_VERSION = rootPkg.version
 }
 
@@ -65,8 +64,17 @@ function posthogGuardPlugin(): Plugin {
 // /assets/index-abc.js would resolve relative to the protocol root, not the
 // document, and 404. The bead AC includes a grep gate against
 // dist/index.html for href="/".
+// beadbox-r72.2: the headless test transport. On only for a build run with
+// BEADBOX_TEST_TRANSPORT=1 (the Playwright harness); every other build gets
+// the literal false, the test transport's import() is compiled out, and the
+// guard fails the build if any of it survives.
+const TEST_TRANSPORT = testTransportEnabled()
+
 export default defineConfig({
   base: "./",
+  define: {
+    __BEADBOX_TEST_TRANSPORT__: JSON.stringify(TEST_TRANSPORT),
+  },
   // bb-1yhp: honor PORT env var so the Playwright webServer in
   // e2e/holistic/playwright.holistic.config.ts (and the project port-
   // assignment table for parallel agent dev sessions) can pin the dev
@@ -88,6 +96,7 @@ export default defineConfig({
     // so the parent-config-walk-up issue TB0 hit doesn't apply here.
     tailwindcss(),
     posthogGuardPlugin(),
+    testTransportGuard(TEST_TRANSPORT),
   ],
   resolve: {
     alias: {

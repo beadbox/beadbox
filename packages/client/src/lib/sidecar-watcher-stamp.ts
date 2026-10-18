@@ -11,8 +11,8 @@
 // re-running the orphan-kill smoke.
 
 import type { UnlistenFn } from "@tauri-apps/api/event"
-import { onStderr } from "tauri-plugin-js-api"
 import { isTauriRuntime } from "./rpc"
+import { onStderr } from "./sidecar-transport"
 import type { BeadboxWatcherStamp, BeadboxWatcherStatus } from "./window-globals"
 import { ensureBeadboxStamp } from "./window-globals"
 

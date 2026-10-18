@@ -63,6 +63,15 @@ describe("no network listener in shipped source", () => {
     expect(files.length).toBeGreaterThan(50)
   })
 
+  // beadbox-r72.2: the headless test transport is a Playwright binding (CDP),
+  // not a socket, and stays under this ban; test-transport.security.test.ts
+  // pins that no release build can carry it.
+  test("sweeps the sidecar transport seam and the test transport", () => {
+    const swept = files.map((f) => relative(PACKAGES_DIR, f))
+    expect(swept).toContain(join("client", "src", "lib", "sidecar-transport.ts"))
+    expect(swept).toContain(join("client", "src", "lib", "test-transport.ts"))
+  })
+
   for (const [description, pattern] of LISTENER_PATTERNS) {
     test(`no ${description}`, () => {
       const offenders = files

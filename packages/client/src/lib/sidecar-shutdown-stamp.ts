@@ -19,8 +19,8 @@
 // (tauri-plugin-js helper, an intermediate shell, etc.).
 
 import type { UnlistenFn } from "@tauri-apps/api/event"
-import { onStderr } from "tauri-plugin-js-api"
 import { isTauriRuntime } from "./rpc"
+import { onStderr } from "./sidecar-transport"
 import { ensureBeadboxStamp } from "./window-globals"
 
 const SIDECAR_NAME = "beadbox-sidecar"

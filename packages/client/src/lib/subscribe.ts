@@ -27,18 +27,18 @@ import {
 } from "@beadbox/server/subscribe-protocol"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { useEffect, useState, useSyncExternalStore } from "react"
-import { onStderr } from "tauri-plugin-js-api"
 import type { WsLifecycleEvent } from "./console-types"
 import { getAnalyticsEnabled } from "./local-storage"
 import { safeCapture } from "./posthog-safe"
 import { queryClient } from "./query-client"
-import { isTauriRuntime, rpc } from "./rpc"
+import { rpc } from "./rpc"
+import { hasSidecarTransport, onStderr } from "./sidecar-transport"
 import { type BeadboxSubscriptionStamp, ensureBeadboxStamp } from "./window-globals"
 
 const SIDECAR_NAME = "beadbox-sidecar"
 
 /**
- * Test-only seam. Replaces the tauri-plugin-js-api `onStderr` so unit
+ * Test-only seam. Replaces the transport's `onStderr` so unit
  * tests can drive the listener synchronously without booting Tauri.
  */
 type ListenStderrFn = (name: string, cb: (data: string) => void) => Promise<UnlistenFn>
@@ -54,17 +54,17 @@ export function _resetListenStderr(): void {
 }
 
 /**
- * Hook test seam — lets tests pass a custom isTauriRuntime check without
+ * Hook test seam — lets tests pass a custom transport check without
  * mucking with `window.__TAURI_INTERNALS__`. Defaults to the real check.
  */
-let runtimeCheck: () => boolean = isTauriRuntime
+let runtimeCheck: () => boolean = hasSidecarTransport
 
 export function _setRuntimeCheck(fn: () => boolean): void {
   runtimeCheck = fn
 }
 
 export function _resetRuntimeCheck(): void {
-  runtimeCheck = isTauriRuntime
+  runtimeCheck = hasSidecarTransport
 }
 
 // Module-level subscription change counter + listener set.
@@ -362,7 +362,7 @@ export interface UseChangeSubscriptionOptions {
 /**
  * Subscribes to sidecar change events for `workspacePath`. No-op when:
  *   - workspacePath is null/undefined (workspace not yet selected)
- *   - !isTauriRuntime() (running in browser-only vite dev)
+ *   - !hasSidecarTransport() (browser-only vite dev: no sidecar to talk to)
  */
 export function useChangeSubscription(
   workspacePath: string | null | undefined,

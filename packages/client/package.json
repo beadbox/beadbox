@@ -48,6 +48,7 @@
     "elkjs": "^0.11.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "kkrpc": "0.6.7",
     "lucide-react": "^0.454.0",
     "posthog-js": "^1.372.0",
     "react": "19.2.0",

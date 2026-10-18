@@ -17,9 +17,11 @@
 // same in-flight promise.
 
 import type { handlers as serverHandlers } from "@beadbox/server/handlers"
-import { createChannel, getStatus, kill, onExit, spawn } from "tauri-plugin-js-api"
 import type { BdCommandEvent } from "./console-types"
+import { hasSidecarTransport, runtime } from "./sidecar-transport"
 import { hydrateSavedPasswords } from "./tauri-credentials"
+
+export { isTauriRuntime } from "./tauri-runtime"
 
 /**
  * Type of the remote API exposed by the sidecar's kkrpc handler registry.
@@ -27,8 +29,6 @@ import { hydrateSavedPasswords } from "./tauri-credentials"
  * drifts in packages/server, this client's typecheck fails.
  */
 export type RemoteApi = typeof serverHandlers
-
-const SIDECAR_NAME = "beadbox-sidecar"
 
 /**
  * What the manager did about a missed deadline (beadbox-hia):
@@ -66,11 +66,6 @@ export class RpcUnavailableError extends Error {
     super(`rpc.${method} is not available outside the Tauri shell`)
     this.name = "RpcUnavailableError"
   }
-}
-
-export function isTauriRuntime(): boolean {
-  if (typeof window === "undefined") return false
-  return (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ != null
 }
 
 // bb-ck7j: dev-console rpc tap. Set by home-page/activity-page when the
@@ -115,12 +110,12 @@ function summarizeResult(result: unknown): string | null {
   return String(result)
 }
 
-interface SidecarSession {
+export interface SidecarSession {
   api: RemoteApi
   destroy: () => void
 }
 
-interface SidecarRuntime {
+export interface SidecarRuntime {
   onExit: (callback: (code: number | null) => void) => Promise<unknown>
   spawn: () => Promise<unknown>
   kill: () => Promise<unknown>
@@ -436,32 +431,7 @@ export const SIDECAR_MANAGER_OPTIONS: SidecarManagerOptions = {
 }
 
 const sidecarManager = createSidecarManager(
-  {
-    onExit: (callback) => onExit(SIDECAR_NAME, callback),
-    spawn: () => spawn(SIDECAR_NAME, { sidecar: SIDECAR_NAME }),
-    kill: () => kill(SIDECAR_NAME),
-    // getStatus rejects when no process is registered under the name.
-    isRunning: () =>
-      getStatus(SIDECAR_NAME).then(
-        (status) => status.running,
-        () => false,
-      ),
-    connect: async () => {
-      const { api, channel, io } = await createChannel<Record<string, never>, RemoteApi>(
-        SIDECAR_NAME,
-      )
-      return {
-        api,
-        destroy: () => {
-          try {
-            void Promise.resolve(channel.destroy()).catch(() => {})
-          } finally {
-            void io.destroy().catch(() => {})
-          }
-        },
-      }
-    },
-  },
+  runtime,
   // Also fired when a session connects after a suppressed exit: either way it
   // means "the sidecar you subscribed to is gone; subscribe again".
   () => window.dispatchEvent(new Event("beadbox:sidecar-exit")),
@@ -594,7 +564,7 @@ function buildStubRpc(): RemoteApi {
   } as unknown as RemoteApi
 }
 
-let _rpc: RemoteApi = isTauriRuntime() ? buildTauriRpc() : buildStubRpc()
+let _rpc: RemoteApi = hasSidecarTransport() ? buildTauriRpc() : buildStubRpc()
 
 /**
  * Test-only override. Lets unit tests inject a mocked RemoteApi without
@@ -607,7 +577,7 @@ export function _setRpc(mock: RemoteApi): void {
 
 /** Test-only reset. */
 export function _resetRpc(): void {
-  _rpc = isTauriRuntime() ? buildTauriRpc() : buildStubRpc()
+  _rpc = hasSidecarTransport() ? buildTauriRpc() : buildStubRpc()
 }
 
 export const rpc: RemoteApi = new Proxy({} as RemoteApi, {
