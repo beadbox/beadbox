@@ -49,7 +49,8 @@ export default defineConfig({
   testIgnore: ["**/holistic/**"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // No retries anywhere (beadbox-r72.4): a flaky spec is a failing spec.
+  retries: 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? [["github"], ["list"]] : "list",
   globalSetup: "./e2e/global-setup.ts",

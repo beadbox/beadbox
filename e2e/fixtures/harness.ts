@@ -4,6 +4,8 @@
 //   workspace  (worker) the standard template workspace on this worker's own
 //              Dolt server, registered as the active workspace in a synthetic
 //              registry; plus bd() to read or write it the way a user would.
+//   statusesWorkspace (worker) a second registered workspace whose beads sit
+//              in bd 1.3 name:category custom statuses (beadbox-r72.4).
 //   sidecar    (worker) one real sidecar for the worker (SidecarBridge).
 //   page       a page with window.__beadboxTestBridge installed, so the test
 //              build's rpc.* reaches that sidecar.
@@ -16,7 +18,7 @@ import { execFileSync } from "child_process"
 import { randomUUID } from "crypto"
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
 import { join, resolve } from "path"
-import { TEMPLATE_DATA_DIR, TEMPLATE_WS_DIR } from "../global-setup"
+import { TEMPLATE_DATA_DIR, TEMPLATE_STATUSES_WS_DIR, TEMPLATE_WS_DIR } from "../global-setup"
 import {
   childEnv,
   findBd,
@@ -45,11 +47,11 @@ export interface HarnessWorkspace {
   bdJson: <T = unknown>(args: string[]) => T
 }
 
-/** Copy the template workspace into this worker's directory, pointed at its Dolt server. */
-function copyWorkspace(dest: string, doltPort: number): string {
+/** Copy a template workspace into this worker's directory, pointed at its Dolt server. */
+function copyWorkspace(template: string, dest: string, doltPort: number): string {
   mkdirSync(dest, { recursive: true })
   const beadsDir = join(dest, ".beads")
-  cpSync(join(TEMPLATE_WS_DIR, ".beads"), beadsDir, { recursive: true })
+  cpSync(join(template, ".beads"), beadsDir, { recursive: true })
   const metaPath = join(beadsDir, "metadata.json")
   const meta = JSON.parse(readFileSync(metaPath, "utf-8"))
   meta.dolt_server_port = doltPort
@@ -62,10 +64,30 @@ function copyWorkspace(dest: string, doltPort: number): string {
   return beadsDir
 }
 
-type WorkerFixtures = { workspace: HarnessWorkspace; sidecar: SidecarBridge }
+function harnessWorkspace(name: string, projectDir: string, beadsDir: string, doltPort: number, registryPath: string): HarnessWorkspace {
+  const env = childEnv({ BEADS_DOLT_SERVER_HOST: "127.0.0.1", BEADS_DOLT_SERVER_PORT: String(doltPort) })
+  const bd = (args: string[]) => execFileSync(findBd(), args, { cwd: projectDir, env, encoding: "utf-8", timeout: 30_000 })
+  return {
+    id: randomUUID(),
+    name,
+    projectDir,
+    beadsDir,
+    doltPort,
+    registryPath,
+    bd,
+    bdJson: <T>(args: string[]) => JSON.parse(bd([...args, "--json"])) as T,
+  }
+}
+
+type WorkerFixtures = {
+  workspaces: { standard: HarnessWorkspace; statuses: HarnessWorkspace }
+  workspace: HarnessWorkspace
+  statusesWorkspace: HarnessWorkspace
+  sidecar: SidecarBridge
+}
 
 export const test = base.extend<object, WorkerFixtures>({
-  workspace: [
+  workspaces: [
     async ({}, use, workerInfo) => {
       const dir = runPaths().worker(workerInfo.workerIndex)
       const dataDir = join(dir, "dolt")
@@ -74,41 +96,30 @@ export const test = base.extend<object, WorkerFixtures>({
       const server = startDoltServer(doltPort, dataDir, "SELECT 1", { killPortFirst: false })
       try {
         waitForTablesReady(doltPort)
-        const projectDir = join(dir, "ws-standard")
-        const beadsDir = copyWorkspace(projectDir, doltPort)
-        const id = randomUUID()
         const registryPath = join(dir, "registry.json")
+        const make = (name: string, template: string, folder: string) => {
+          const projectDir = join(dir, folder)
+          return harnessWorkspace(name, projectDir, copyWorkspace(template, projectDir, doltPort), doltPort, registryPath)
+        }
+        const standard = make("e2e-standard", TEMPLATE_WS_DIR, "ws-standard")
+        const statuses = make("e2e-statuses", TEMPLATE_STATUSES_WS_DIR, "ws-statuses")
         writeFileSync(
           registryPath,
           JSON.stringify({
             version: 2,
-            activeWorkspace: id,
-            workspaces: [
-              {
-                id,
-                name: "e2e-standard",
-                addedAt: new Date().toISOString(),
-                local: { path: beadsDir },
-                server: null,
-                mode: "server",
-              },
-            ],
+            activeWorkspace: standard.id,
+            workspaces: [standard, statuses].map((w) => ({
+              id: w.id,
+              name: w.name,
+              addedAt: new Date().toISOString(),
+              local: { path: w.beadsDir },
+              server: null,
+              mode: "server",
+            })),
           }),
         )
         writeFileSync(join(dir, "legacy-registry.json"), "[]")
-        const env = childEnv({ BEADS_DOLT_SERVER_HOST: "127.0.0.1", BEADS_DOLT_SERVER_PORT: String(doltPort) })
-        const bd = (args: string[]) =>
-          execFileSync(findBd(), args, { cwd: projectDir, env, encoding: "utf-8", timeout: 30_000 })
-        await use({
-          id,
-          name: "e2e-standard",
-          projectDir,
-          beadsDir,
-          doltPort,
-          registryPath,
-          bd,
-          bdJson: <T>(args: string[]) => JSON.parse(bd([...args, "--json"])) as T,
-        })
+        await use({ standard, statuses })
       } finally {
         const pid = server.process.pid
         stopDoltServer(server)
@@ -117,6 +128,9 @@ export const test = base.extend<object, WorkerFixtures>({
     },
     { scope: "worker" },
   ],
+
+  workspace: [async ({ workspaces }, use) => use(workspaces.standard), { scope: "worker" }],
+  statusesWorkspace: [async ({ workspaces }, use) => use(workspaces.statuses), { scope: "worker" }],
 
   sidecar: [
     async ({ workspace }, use, workerInfo) => {

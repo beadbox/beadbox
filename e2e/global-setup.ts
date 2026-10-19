@@ -46,6 +46,9 @@ export const TEMPLATE_WS_DIR = templateWs("standard")
 export const TEMPLATE_ALPHA_WS_DIR = templateWs("alpha")
 export const TEMPLATE_BETA_WS_DIR = templateWs("beta")
 export const TEMPLATE_GAMMA_WS_DIR = templateWs("gamma")
+// bd 1.3 custom statuses in name:category form (beadbox-r72.4, check C).
+export const TEMPLATE_STATUSES_WS_DIR = templateWs("statuses")
+export const CUSTOM_STATUSES = "ticket_awaiting:active,ticket_active:wip,unit_escalated:frozen"
 
 // Port used by the temporary Dolt server during template creation.
 // Not used at runtime; workers pick their own ephemeral ports.
@@ -241,6 +244,14 @@ export default function globalSetup() {
       "--title", "Gamma Task One", "--type", "task", "--priority", "2",
       "--parent", gammaEpicId,
     ], TEMPLATE_DOLT_PORT)
+
+    // beadbox-r72.4 (check C): one bead in each bd 1.3 name:category status.
+    const statusesDbPath = initWorkspace(TEMPLATE_STATUSES_WS_DIR, "st")
+    bd(statusesDbPath, ["config", "set", "status.custom", CUSTOM_STATUSES], TEMPLATE_DOLT_PORT)
+    for (const status of CUSTOM_STATUSES.split(",").map((s) => s.split(":")[0])) {
+      const id = bdCreate(statusesDbPath, ["--title", `Bead in ${status}`, "--type", "task", "--priority", "2"], TEMPLATE_DOLT_PORT)
+      bd(statusesDbPath, ["update", id, "--status", status], TEMPLATE_DOLT_PORT)
+    }
   } finally {
     // 6. Stop the template server. Data persists in TEMPLATE_DATA_DIR.
     stopDoltServer(server)
