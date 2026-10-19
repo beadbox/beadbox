@@ -79,7 +79,7 @@ jobs:
         # CLI — mocking bd would delete the property beadbox-l5i.3 added.
         # Version pinned; bump BD_VERSION to move it.
         env:
-          BD_VERSION: "1.2.2"
+          BD_VERSION: "1.3.1"
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
@@ -149,6 +149,71 @@ jobs:
         with:
           name: coverage-client
           path: coverage-client.txt
+          retention-days: 14
+
+  e2e-headless:
+    # beadbox-r72.3 (systemdesign §7.2): Playwright drives a test build of the
+    # real bundle (BEADBOX_TEST_TRANSPORT=1, the binding transport) against the
+    # COMPILED beadbox-sidecar, one per worker, on real bd + Dolt data from
+    # synthetic fixtures. The compiled binary gives release parity: it catches
+    # what `bun build --compile` drops (§5.2), which the TypeScript entry used
+    # locally cannot. The harness kills only the pids it spawns.
+    name: E2E headless — Playwright vs the compiled sidecar
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - name: Install bd (beads CLI)
+        # Version pinned; keep in step with coverage-server's BD_VERSION above.
+        env:
+          BD_VERSION: "1.3.1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL --proto '=https' --tlsv1.2 \
+            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_linux_amd64.tar.gz" \
+            | tar xzf - -C "$HOME/.local/bin" bd
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/bd" version
+      - name: Install dolt (the fixtures run real Dolt servers)
+        # As release.yml's test-integration job: the beads tarball ships only bd.
+        # Tarball layout is dolt-linux-amd64/bin/dolt, hence --strip-components=2.
+        env:
+          DOLT_VERSION: "2.3.1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL --proto '=https' --tlsv1.2 \
+            "https://github.com/dolthub/dolt/releases/download/v${DOLT_VERSION}/dolt-linux-amd64.tar.gz" \
+            | tar xzf - -C "$HOME/.local/bin" --strip-components=2 dolt-linux-amd64/bin/dolt
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/dolt" version
+          # Dolt refuses `dolt init` without an author identity. The harness sets
+          # one in its own scratch HOME too; these cover any dolt call outside it.
+          "$HOME/.local/bin/dolt" config --global --add user.name  "beadbox-ci"
+          "$HOME/.local/bin/dolt" config --global --add user.email "ci@beadbox.app"
+      - run: bun install --frozen-lockfile
+      - name: Install Playwright's Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: Build the sidecar binary (release parity)
+        run: bun --cwd=packages/server run build:linux-x64
+      - name: Build the client test bundle
+        # The client's pinned Vite (never `bun x vite`, which fetches vite@latest).
+        working-directory: packages/client
+        run: BEADBOX_TEST_TRANSPORT=1 node_modules/.bin/vite build --outDir "$RUNNER_TEMP/client-dist" --emptyOutDir
+      - name: Run the headless suite
+        env:
+          BEADBOX_SIDECAR: src-tauri/binaries/beadbox-sidecar-x86_64-unknown-linux-gnu
+          E2E_CLIENT_DIST: ${{ runner.temp }}/client-dist
+        run: bun run test:e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: e2e-headless-results
+          path: test-results/
           retention-days: 14
 
   coverage-rust:

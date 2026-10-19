@@ -62,6 +62,17 @@ export function findDolt(): string {
 const BD_PATH = findBd()
 const DOLT_PATH = findDolt()
 
+/**
+ * Environment for the bd and Dolt processes these helpers spawn. The headless
+ * harness (beadbox-r72.3) sets E2E_HOME to a scratch home per run, so no child
+ * can read or write the real home (bd's registry, ~/.beadbox, Dolt's global
+ * config). Without E2E_HOME this is process.env, as before.
+ */
+export function childEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const home = process.env.E2E_HOME ? { HOME: process.env.E2E_HOME } : {}
+  return { ...process.env, ...home, ...extra }
+}
+
 // ---------------------------------------------------------------------------
 // bd CLI helpers
 // ---------------------------------------------------------------------------
@@ -90,7 +101,7 @@ function projectRootFromDb(dbPath: string): string | undefined {
  * ignores --json without --flat, returning human-readable text instead of JSON.
  */
 export function bd(dbPath: string, args: string[], doltPort?: number): string {
-  const env: NodeJS.ProcessEnv = { ...process.env }
+  const env: NodeJS.ProcessEnv = childEnv()
   if (doltPort !== undefined) {
     env.BEADS_DOLT_SERVER_PORT = String(doltPort)
     // Also set HOST so bd uses the existing server instead of trying to
@@ -209,11 +220,18 @@ function cleanStaleDoltState(dataDir: string): void {
  * Polls until the server accepts MySQL connections (up to 30s).
  * Returns a handle with the child process, port, and data directory.
  */
-export function startDoltServer(port: number, dataDir: string, readinessQuery = "SELECT 1"): DoltServerHandle {
+export function startDoltServer(
+  port: number,
+  dataDir: string,
+  readinessQuery = "SELECT 1",
+  { killPortFirst = true }: { killPortFirst?: boolean } = {},
+): DoltServerHandle {
   // Kill any stale process on this port before starting.
   // A leftover dolt server from a previous test run would accept our poll
   // but serve data from a different data-dir, silently corrupting tests.
-  killProcessOnPort(port)
+  // The headless harness passes killPortFirst: false: it kills only pids it
+  // spawned (beadbox-r72.3), and its ports come fresh from findFreePort().
+  if (killPortFirst) killProcessOnPort(port)
 
   // Clean up stale state from previous Dolt server instances.
   // After SIGKILL, the Unix socket and database LOCK files may remain,
@@ -227,7 +245,7 @@ export function startDoltServer(port: number, dataDir: string, readinessQuery = 
     `--data-dir=${dataDir}`,
     `--socket=${socketPath}`,
     "--loglevel=error",
-  ], { stdio: "ignore", detached: false })
+  ], { stdio: "ignore", detached: false, env: childEnv() })
 
   // Poll until server accepts connections (up to 30s).
   // Also verify the child process hasn't exited (e.g. port conflict).
@@ -250,7 +268,7 @@ export function startDoltServer(port: number, dataDir: string, readinessQuery = 
       "-p", "",
       "--no-tls",
       "sql", "-q", readinessQuery,
-    ], { timeout: 2000, stdio: "ignore" })
+    ], { timeout: 2000, stdio: "ignore", env: childEnv() })
     if (result.status === 0) return { process: child, port, dataDir }
     sleepMs(100)
   }

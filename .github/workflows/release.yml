@@ -237,7 +237,7 @@ jobs:
         # behaviour against a REAL cobra CLI.
         # Version pinned; keep in step with quality-gates.yml's BD_VERSION.
         env:
-          BD_VERSION: "1.2.2"
+          BD_VERSION: "1.3.1"
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"
@@ -277,7 +277,7 @@ jobs:
         # behaviour against a REAL cobra CLI.
         # Version pinned; keep in step with quality-gates.yml's BD_VERSION.
         env:
-          BD_VERSION: "1.2.2"
+          BD_VERSION: "1.3.1"
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.local/bin"

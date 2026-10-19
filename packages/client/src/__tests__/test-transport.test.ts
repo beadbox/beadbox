@@ -133,10 +133,12 @@ describe("BindingIo hands kkrpc whole lines, whatever the bridge's chunking (bea
   })
 })
 
-function stderrTransport(chunks: string[]) {
-  const stderr = new Queue<string | null>()
+type StreamItem = string | { eof: true } | null
+
+function stderrTransport(chunks: StreamItem[]) {
+  const stderr = new Queue<StreamItem>()
   for (const chunk of chunks) stderr.push(chunk)
-  const emit = (chunk: string) => stderr.push(chunk)
+  const emit = (chunk: StreamItem) => stderr.push(chunk)
   let exited: (code: number | null) => void = () => {}
   let waitExitCalls = 0
   const bridge: TestBridge = {
@@ -192,6 +194,41 @@ describe("onStderr delivers whole lines without their newline, as tauri-plugin-j
     await flush()
     expect(first).toEqual(["a"])
     expect(second).toEqual(["a", "b"])
+  })
+})
+
+describe("the end of a child's stream flushes its last line, as BufReader::lines() does at EOF", () => {
+  test("a final stderr line with no newline is delivered when the stream ends", async () => {
+    const { transport } = stderrTransport(["first\nlast words, no newline", { eof: true }])
+    const got: string[] = []
+    await transport.onStderr("beadbox-sidecar", (data) => got.push(data))
+    await flush()
+    expect(got).toEqual(["first", "last words, no newline"])
+  })
+
+  test("stderr keeps flowing after an end: a respawned sidecar's lines still arrive", async () => {
+    const { transport, emit } = stderrTransport(["old\n", { eof: true }])
+    const got: string[] = []
+    await transport.onStderr("beadbox-sidecar", (data) => got.push(data))
+    emit("new\n")
+    await flush()
+    expect(got).toEqual(["old", "new"])
+  })
+
+  test("a final stdout frame with no newline reaches kkrpc when the stream ends", async () => {
+    const items = new Queue<StreamItem>()
+    items.push('{"partial":')
+    items.push({ eof: true })
+    const io = new BindingIo(() => ({
+      spawn: async () => 1,
+      kill: async () => true,
+      status: async () => ({ running: true }),
+      write: async () => true,
+      read: () => items.next(),
+      readStderr: () => never(),
+      waitExit: () => never(),
+    }))
+    expect(await within(io.read(), 200)).toBe('{"partial":\n')
   })
 })
 

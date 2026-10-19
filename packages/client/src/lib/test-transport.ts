@@ -22,13 +22,21 @@ export interface TestBridge {
   status(): Promise<{ running: boolean }>
   /** Write a kkrpc frame to the sidecar's stdin. */
   write(data: string): Promise<unknown>
-  /** The next stdout data, in any chunking; null only when the bridge is closing. */
-  read(): Promise<string | null>
-  /** The next stderr data, in any chunking; null only when the bridge is closing. */
-  readStderr(): Promise<string | null>
+  /** The next stdout data, in any chunking; END when the child's stdout ends; null only when the bridge is closing. */
+  read(): Promise<StreamData>
+  /** The next stderr data, in any chunking; END when the child's stderr ends; null only when the bridge is closing. */
+  readStderr(): Promise<StreamData>
   /** Resolves with the exit code of the running sidecar when it exits. */
   waitExit(): Promise<number | null>
 }
+
+/**
+ * What a bridge read returns. `{ eof: true }` marks the end of the current
+ * child's stream, in order with its data, so the last line is flushed even
+ * without a trailing newline (Rust's BufReader::lines() yields it at EOF);
+ * the stream continues with the next child after a respawn.
+ */
+export type StreamData = string | { eof: true } | null
 
 type GetBridge = () => TestBridge
 
@@ -64,6 +72,17 @@ class LineSplitter {
     if (start < chunk.length) this.partial.push(chunk.slice(start))
     return lines
   }
+
+  /** At the end of a stream: the unterminated last line, if any. */
+  flush(): string[] {
+    const last = this.partial.join("")
+    this.partial = []
+    return last ? [last] : []
+  }
+}
+
+function linesOf(splitter: LineSplitter, data: string | { eof: true }): string[] {
+  return typeof data === "string" ? splitter.push(data) : splitter.flush()
 }
 
 /** kkrpc IO over the bridge: the JsRuntimeIo twin. */
@@ -87,7 +106,7 @@ export class BindingIo implements IoInterface {
     while (this.lines.length === 0) {
       const data = await this.getBridge().read()
       if (this.destroyed || data == null) return never()
-      this.lines.push(...this.splitter.push(data))
+      this.lines.push(...linesOf(this.splitter, data))
     }
     const line = `${this.lines.shift()}\n`
     for (const listener of this.listeners) listener(line)
@@ -149,7 +168,7 @@ export function createTestTransport(getBridge: GetBridge = windowBridge): TestTr
     for (;;) {
       const data = await getBridge().readStderr()
       if (data == null) break
-      for (const line of splitter.push(data)) {
+      for (const line of linesOf(splitter, data)) {
         for (const listener of [...stderrListeners]) listener(line)
       }
     }

@@ -1,18 +1,26 @@
 import { execFileSync } from "child_process"
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { join } from "path"
-import { homedir, tmpdir } from "os"
+import { tmpdir } from "os"
 
 import {
+  childEnv,
   findBd,
+  findDolt,
   findFreePort,
   startDoltServer,
   stopDoltServer,
   bd,
   bdCreate,
 } from "./fixtures/dolt-server"
+import { runPaths } from "./fixtures/run-paths"
 
-const REGISTRY_PATH = join(homedir(), ".beads", "registry.json")
+// beadbox-r72.3: this setup no longer asks bd to kill every Dolt server of
+// this user (other agents' included) and no longer reads or
+// rewrites the real ~/.beads/registry.json. Under the headless harness every
+// bd and Dolt process gets a scratch HOME (E2E_HOME), so nothing it creates
+// can reach the real home in the first place.
+const HEADLESS = !!process.env.E2E_RUN_DIR
 
 // Unique suffix per Playwright process. globalSetup (main process) sets
 // E2E_TEMPLATE_ID before workers spawn. Workers inherit the env var, so
@@ -26,14 +34,18 @@ const TEMPLATE_SUFFIX = process.env.E2E_TEMPLATE_ID
 
 // Template Dolt data directory: contains all seeded databases.
 // Workers copy this and start their own Dolt server against the copy.
-export const TEMPLATE_DATA_DIR = join(tmpdir(), `beadbox-e2e-dolt-data-${TEMPLATE_SUFFIX}`)
+export const TEMPLATE_DATA_DIR = HEADLESS
+  ? runPaths().templateData
+  : join(tmpdir(), `beadbox-e2e-dolt-data-${TEMPLATE_SUFFIX}`)
 
 // Template workspace directories: contain .beads/ with metadata.json.
 // Workers copy these and update the dolt_server_port in metadata.json.
-export const TEMPLATE_WS_DIR = join(tmpdir(), `beadbox-e2e-ws-standard-${TEMPLATE_SUFFIX}`)
-export const TEMPLATE_ALPHA_WS_DIR = join(tmpdir(), `beadbox-e2e-ws-alpha-${TEMPLATE_SUFFIX}`)
-export const TEMPLATE_BETA_WS_DIR = join(tmpdir(), `beadbox-e2e-ws-beta-${TEMPLATE_SUFFIX}`)
-export const TEMPLATE_GAMMA_WS_DIR = join(tmpdir(), `beadbox-e2e-ws-gamma-${TEMPLATE_SUFFIX}`)
+const templateWs = (name: string) =>
+  HEADLESS ? runPaths().templateWorkspace(name) : join(tmpdir(), `beadbox-e2e-ws-${name}-${TEMPLATE_SUFFIX}`)
+export const TEMPLATE_WS_DIR = templateWs("standard")
+export const TEMPLATE_ALPHA_WS_DIR = templateWs("alpha")
+export const TEMPLATE_BETA_WS_DIR = templateWs("beta")
+export const TEMPLATE_GAMMA_WS_DIR = templateWs("gamma")
 
 // Port used by the temporary Dolt server during template creation.
 // Not used at runtime; workers pick their own ephemeral ports.
@@ -85,11 +97,10 @@ function initWorkspace(wsDir: string, prefix: string): string {
   ], {
     cwd: wsDir,
     encoding: "utf-8",
-    env: {
-      ...process.env,
+    env: childEnv({
       BEADS_DOLT_SERVER_HOST: "127.0.0.1",
       BEADS_DOLT_SERVER_PORT: String(TEMPLATE_DOLT_PORT),
-    },
+    }),
   })
 
   // Ensure metadata.json records the port and database name.
@@ -146,32 +157,34 @@ function seedStandardData(dbPath: string): void {
   ], TEMPLATE_DOLT_PORT)
 }
 
-function cleanStaleRegistryEntries(): void {
+/** Fail with the cause on the first line when a required tool is missing. */
+function requireTool(name: string, path: string): void {
   try {
-    const raw = readFileSync(REGISTRY_PATH, "utf-8")
-    const entries = JSON.parse(raw) as Array<{ workspace_path?: string; database_path?: string }>
-    const cleaned = entries.filter((e) => {
-      const path = e.workspace_path ?? e.database_path ?? ""
-      return !path.includes("beadbox-e2e-") && !path.includes("e2e-alpha-") && !path.includes("e2e-beta-") && !path.includes("e2e-gamma-")
-    })
-    if (cleaned.length !== entries.length) {
-      writeFileSync(REGISTRY_PATH, JSON.stringify(cleaned, null, 2))
-    }
-  } catch {
-    // Registry may not exist
+    execFileSync(path, ["version"], { encoding: "utf-8", timeout: 15_000, env: childEnv() })
+  } catch (error) {
+    const reason = (error as NodeJS.ErrnoException).code === "ENOENT" ? "not found" : (error as Error).message.split("\n")[0]
+    throw new Error(`[e2e] ${name} is required (${path}): ${reason}. Install it or set ${name.toUpperCase()}_PATH.`)
   }
 }
 
 export default function globalSetup() {
-  // 0. Kill orphaned Dolt processes from previous test runs.
-  // On CI runners, orphans accumulate across RC cycles and hit the 3-process cap.
-  try {
-    execFileSync(BD_PATH, ["dolt", "killall"], { encoding: "utf-8", timeout: 10_000 })
-  } catch {
-    // Ignore: killall may fail if no processes exist or bd is too old
+  // Refuse to run outside playwright.config.ts: without the run directory and
+  // its scratch HOME, bd init and Dolt would write into the real home.
+  if (!process.env.E2E_RUN_DIR || !process.env.E2E_HOME) {
+    throw new Error("[e2e] global setup must run through playwright.config.ts (E2E_RUN_DIR and E2E_HOME are not set)")
   }
-  // 1. Clean stale e2e entries from production registry
-  cleanStaleRegistryEntries()
+  // 0. Tools present, and a scratch HOME with a Dolt identity (Dolt refuses
+  // `dolt init` without one; CI runners have none).
+  requireTool("bd", BD_PATH)
+  requireTool("dolt", findDolt())
+  if (HEADLESS) {
+    mkdirSync(runPaths().home, { recursive: true })
+    for (const [key, value] of [["user.name", "beadbox-e2e"], ["user.email", "e2e@beadbox.app"]]) {
+      execFileSync(findDolt(), ["config", "--global", "--add", key, value], { env: childEnv(), stdio: "ignore" })
+    }
+    // Test runs are not usage: keep them out of bd's anonymous metrics.
+    execFileSync(BD_PATH, ["metrics", "off"], { env: childEnv(), stdio: "ignore", timeout: 15_000 })
+  }
 
   // 2. Reset the isolated test registries (legacy + beadbox format)
   const testRegistryPath = process.env.BEADS_REGISTRY_PATH
@@ -188,7 +201,7 @@ export default function globalSetup() {
   mkdirSync(TEMPLATE_DATA_DIR, { recursive: true })
 
   // 4. Start a temporary Dolt server for seeding
-  const server = startDoltServer(TEMPLATE_DOLT_PORT, TEMPLATE_DATA_DIR)
+  const server = startDoltServer(TEMPLATE_DOLT_PORT, TEMPLATE_DATA_DIR, "SELECT 1", { killPortFirst: !HEADLESS })
 
   try {
     // 5. Create and seed template workspaces (all on the same temp server)

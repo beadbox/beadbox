@@ -1,64 +1,41 @@
-import { execFileSync } from "child_process"
-import { rmSync, readFileSync, writeFileSync } from "fs"
-import { join } from "path"
-import { homedir } from "os"
-import {
-  TEMPLATE_DATA_DIR,
-  TEMPLATE_WS_DIR,
-  TEMPLATE_ALPHA_WS_DIR,
-  TEMPLATE_BETA_WS_DIR,
-  TEMPLATE_GAMMA_WS_DIR,
-} from "./global-setup"
-import { findBd } from "./fixtures/dolt-server"
+// Global teardown for the headless harness (beadbox-r72.3).
+//
+// Every machine this runs on is shared: other agents' tests, hooks, sidecars
+// and Dolt servers run as the same user. So nothing here kills by a generic
+// pattern. Each worker already SIGKILLed the sidecar and Dolt pids it spawned
+// (e2e/fixtures/harness.ts). What can remain are processes those pids left
+// behind and that were reparented, such as bd's per-workspace proxy child.
+// Every one of them carries this run's directory (a fresh mkdtemp) on its
+// command line, and no other process can, so that path is what we match.
+// Each pid killed is logged.
 
-const REGISTRY_PATH = join(homedir(), ".beads", "registry.json")
+import { spawnSync } from "child_process"
+import { rmSync } from "fs"
+import { runDir } from "./fixtures/run-paths"
+
+/** Live processes whose command line contains `needle`, excluding this one. */
+export function processesUnder(needle: string): { pid: number; command: string }[] {
+  const ps = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf-8" })
+  if (ps.status !== 0) throw new Error(`[e2e teardown] ps failed: ${ps.stderr}`)
+  return ps.stdout
+    .split("\n")
+    .map((line) => line.trim().match(/^(\d+)\s+(.*)$/))
+    .filter((m): m is RegExpMatchArray => m !== null)
+    .map((m) => ({ pid: Number(m[1]), command: m[2] }))
+    .filter((p) => p.command.includes(needle) && p.pid !== process.pid)
+}
 
 export default function globalTeardown() {
-  // Kill orphaned Dolt servers from this test run.
-  // Mirrors global-setup cleanup to catch anything spawned during tests.
-  try {
-    execFileSync(findBd(), ["dolt", "killall"], { encoding: "utf-8", timeout: 10_000 })
-  } catch { /* best-effort */ }
-
-  // Remove template directories (data dir + workspace dirs)
-  for (const dir of [TEMPLATE_DATA_DIR, TEMPLATE_WS_DIR, TEMPLATE_ALPHA_WS_DIR, TEMPLATE_BETA_WS_DIR, TEMPLATE_GAMMA_WS_DIR]) {
+  const root = runDir()
+  for (const { pid, command } of processesUnder(root)) {
     try {
-      rmSync(dir, { recursive: true, force: true })
+      process.kill(pid, "SIGKILL")
+      console.log(`[e2e teardown] killed leftover pid ${pid}: ${command.slice(0, 160)}`)
     } catch {
-      // Best-effort
+      // Exited between the listing and the kill.
     }
   }
-
-  // Reset the isolated test registries (legacy + beadbox format)
-  const testRegistryPath = process.env.BEADS_REGISTRY_PATH
-  if (testRegistryPath) {
-    try {
-      writeFileSync(testRegistryPath, "[]")
-    } catch {
-      // Best-effort
-    }
-  }
-  const testBeadboxRegistryPath = process.env.BEADBOX_REGISTRY_PATH
-  if (testBeadboxRegistryPath) {
-    try {
-      writeFileSync(testBeadboxRegistryPath, JSON.stringify({ workspaces: [], activeWorkspace: null }))
-    } catch {
-      // Best-effort
-    }
-  }
-
-  // Clean stale e2e entries from production registry
-  try {
-    const raw = readFileSync(REGISTRY_PATH, "utf-8")
-    const entries = JSON.parse(raw) as Array<{ workspace_path?: string; database_path?: string }>
-    const cleaned = entries.filter((e) => {
-      const path = e.workspace_path ?? e.database_path ?? ""
-      return !path.includes("beadbox-e2e-") && !path.includes("e2e-alpha-") && !path.includes("e2e-beta-") && !path.includes("e2e-gamma-")
-    })
-    if (cleaned.length !== entries.length) {
-      writeFileSync(REGISTRY_PATH, JSON.stringify(cleaned, null, 2))
-    }
-  } catch {
-    // Best-effort
-  }
+  const left = processesUnder(root)
+  console.log(`[e2e teardown] processes left under ${root}: ${left.length}`)
+  if (process.env.E2E_KEEP_RUN_DIR !== "1") rmSync(root, { recursive: true, force: true })
 }
