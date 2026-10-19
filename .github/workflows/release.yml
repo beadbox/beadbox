@@ -650,6 +650,12 @@ jobs:
           POSTHOG_ENV_ID: ${{ secrets.POSTHOG_ENV_ID }}
         run: bun --cwd=packages/client run build
 
+      - name: Release bundle carries no test transport (beadbox-7he)
+        # Independent of every environment variable: the Vite guard is inert
+        # when the test flag is on, so this scans the built files, sourcemaps
+        # included, after a positive control (scripts/check-release-bundle.ts).
+        run: bun scripts/check-release-bundle.ts packages/client/dist
+
       - name: Rust cache
         if: runner.environment == 'github-hosted'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -1034,6 +1040,12 @@ jobs:
           POSTHOG_ENV_ID: ${{ secrets.POSTHOG_ENV_ID }}
         run: bun --cwd=packages/client run build
 
+      - name: Release bundle carries no test transport (beadbox-7he)
+        # Independent of every environment variable: the Vite guard is inert
+        # when the test flag is on, so this scans the built files, sourcemaps
+        # included, after a positive control (scripts/check-release-bundle.ts).
+        run: bun scripts/check-release-bundle.ts packages/client/dist
+
       - name: Build Tauri app
         env:
           # tauri-plugin-updater signing for the Linux artifact (AppImage/deb).
@@ -1272,6 +1284,13 @@ jobs:
           Set-Location (Join-Path $env:GITHUB_WORKSPACE "packages\client")
           bun run build
           if ($LASTEXITCODE -ne 0) { throw "bun run build failed (exit $LASTEXITCODE)" }
+
+      - name: Release bundle carries no test transport (beadbox-7he)
+        # See the macOS job. Run from the workspace root, like the other steps.
+        shell: powershell -ExecutionPolicy Bypass -command ". '{0}'"
+        run: |
+          bun scripts/check-release-bundle.ts packages/client/dist
+          if ($LASTEXITCODE -ne 0) { throw "release bundle check failed (exit $LASTEXITCODE)" }
 
       - name: Setup Azure Trusted Signing
         shell: powershell -ExecutionPolicy Bypass -command ". '{0}'"

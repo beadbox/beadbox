@@ -79,6 +79,12 @@ jobs:
         # packages/client.
         run: bun --cwd=packages/client run build
 
+      - name: Release bundle carries no test transport (beadbox-7he)
+        # Independent of every environment variable: the Vite guard is inert
+        # when the test flag is on, so this scans the built files, sourcemaps
+        # included, after a positive control (scripts/check-release-bundle.ts).
+        run: bun scripts/check-release-bundle.ts packages/client/dist
+
       - name: Import signing certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
