@@ -1,5 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
+import { getStatusDisplayConfig } from "@/components/bead-detail-helpers"
 import { BeadDetailPanel } from "@/components/bead-detail-panel"
 import { BeadTable } from "@/components/bead-table"
 import { BeadTableBulkToolbar } from "@/components/bead-table-bulk-toolbar"
@@ -14,6 +15,7 @@ import {
   markBeadRead,
   setArchiveExpanded,
 } from "@/lib/local-storage"
+import { summarizeBulkStatus } from "@/lib/bulk-status-summary"
 import { safeCapture } from "@/lib/posthog-safe"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import { rpc } from "@/lib/rpc"
@@ -241,7 +243,8 @@ function BeadsEpicsViewer() {
   // bb-y729: page-level bulk selection. Lives here so the same set is shared
   // across every <BeadTable> mount (flat-table + per-epic tables in EpicTree).
   const beadSelection = useBeadSelection()
-  const [isBulkArchiving, setIsBulkArchiving] = useState(false)
+  // Which bulk action is in flight; both toolbar controls lock while one runs.
+  const [bulkPending, setBulkPending] = useState<"archive" | "status" | null>(null)
 
   const { isMobileLayout } = useViewport()
 
@@ -803,7 +806,7 @@ function BeadsEpicsViewer() {
   const handleBulkArchive = useCallback(async () => {
     const ids = Array.from(beadSelection.selectedIds)
     if (ids.length === 0) return
-    setIsBulkArchiving(true)
+    setBulkPending("archive")
     try {
       const result = await rpc.beads.archiveBeads(ids, currentWorkspace?.databasePath)
       const failed = result.results.filter((r) => !r.success)
@@ -820,9 +823,39 @@ function BeadsEpicsViewer() {
     } catch (error) {
       toast.error("Bulk archive failed", { description: String(error) })
     } finally {
-      setIsBulkArchiving(false)
+      setBulkPending(null)
     }
   }, [beadSelection, currentWorkspace?.databasePath, loadEpics])
+
+  // beadbox-id1 (GH #59): bulk status change, the archive model (spec §4.2.2).
+  // One bd write per id in the sidecar ("closed" via bd close). All OK: the
+  // selection clears. Any failure: only the failed ids stay selected. The
+  // reload shows bd's state, so succeeded rows carry the new status, failed
+  // rows keep the old one, and rows the filters no longer admit drop out.
+  const handleBulkStatus = useCallback(
+    async (status: string) => {
+      const ids = Array.from(beadSelection.selectedIds)
+      if (ids.length === 0) return
+      setBulkPending("status")
+      try {
+        const result = await rpc.beads.updateBeadsStatus(ids, status, currentWorkspace?.databasePath)
+        const summary = summarizeBulkStatus(result.results, getStatusDisplayConfig(status).label)
+        if (summary.ok) {
+          toast.success(summary.title)
+          beadSelection.clear()
+        } else {
+          toast.error(summary.title, { description: summary.description })
+          beadSelection.pruneTo(summary.keepSelected)
+        }
+        await loadEpics()
+      } catch (error) {
+        toast.error("Bulk status change failed", { description: String(error) })
+      } finally {
+        setBulkPending(null)
+      }
+    },
+    [beadSelection, currentWorkspace?.databasePath, loadEpics],
+  )
 
   // bb-y729: prune selection on filter change so beads that filter out drop
   // from the selection set (per spec: 'filter change → selection prunes to
@@ -1134,8 +1167,11 @@ function BeadsEpicsViewer() {
               <BeadTableBulkToolbar
                 selectedCount={beadSelection.selectedIds.size}
                 onBulkArchive={handleBulkArchive}
+                availableStatuses={availableStatuses}
+                onBulkStatus={handleBulkStatus}
                 onClear={beadSelection.clear}
-                isPending={isBulkArchiving}
+                isPending={bulkPending !== null}
+                pendingAction={bulkPending ?? undefined}
               />
               <div ref={treeContainerRef} className="flex-1 overflow-y-auto hide-scrollbar">
                 {/* beadbox-dme: gate skeleton on first-ever-load, not "currently
@@ -1264,8 +1300,11 @@ function BeadsEpicsViewer() {
               <BeadTableBulkToolbar
                 selectedCount={beadSelection.selectedIds.size}
                 onBulkArchive={handleBulkArchive}
+                availableStatuses={availableStatuses}
+                onBulkStatus={handleBulkStatus}
                 onClear={beadSelection.clear}
-                isPending={isBulkArchiving}
+                isPending={bulkPending !== null}
+                pendingAction={bulkPending ?? undefined}
               />
               <div
                 ref={treeContainerRef}
@@ -1299,6 +1338,9 @@ function BeadsEpicsViewer() {
                         selectedBeadId={beadIdParam}
                         showWaves={filters.showWaves}
                         readState={readState}
+                        selectedIds={beadSelection.selectedIds}
+                        onToggleSelect={beadSelection.toggle}
+                        onToggleSelectAll={beadSelection.toggleAll}
                       />
                     </div>
                   )

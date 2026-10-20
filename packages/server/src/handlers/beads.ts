@@ -394,6 +394,39 @@ export async function archiveBeads(
   return { success: results.every((r) => r.success), results }
 }
 
+// beadbox-id1 (GH #59): set one status on a list of bead ids, for the
+// selection toolbar. Same shape as archiveBeads: one bd write per id, a
+// failure is recorded for that id and the loop moves on. "closed" goes
+// through bd close, every other status through bd update --status.
+export async function updateBeadsStatus(
+  ids: string[],
+  status: string,
+  dbPath?: string,
+): Promise<{
+  success: boolean
+  results: { id: string; success: boolean; error?: string }[]
+}> {
+  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  const results: { id: string; success: boolean; error?: string }[] = []
+  for (const id of ids) {
+    try {
+      if (status === "closed") {
+        await bdCloseBead(id, options)
+      } else {
+        await bdUpdateStatus(id, status, options)
+      }
+      results.push({ id, success: true })
+    } catch (error) {
+      console.error(`Failed to set status on bead ${id}:`, error)
+      results.push({ id, success: false, error: String(error) })
+    }
+  }
+  if (ids.length > 0) {
+    invalidateEpicCache()
+  }
+  return { success: results.every((r) => r.success), results }
+}
+
 // Move a bead to or from backlog by setting priority
 export async function backlogBead(
   id: string,
