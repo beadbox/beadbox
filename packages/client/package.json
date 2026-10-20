@@ -79,6 +79,6 @@
     "happy-dom": "20.9.0",
     "tailwindcss": "4.1.16",
     "typescript": "5.7.2",
-    "vite": "8.0.10"
+    "vite": "8.1.6"
   }
 }
