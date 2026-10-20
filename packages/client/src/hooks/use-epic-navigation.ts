@@ -1,11 +1,10 @@
 import { useNavigate } from "@tanstack/react-router"
-import { type GroupedSection, groupedNavigationOrder } from "@/lib/grouped-layout"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Filters } from "@/components/filter-bar"
-import { dispatchKeyDown, type KeyNavContext } from "@/lib/epic-navigation-keys"
 import { useHasTrains } from "@/hooks/use-has-trains"
+import { dispatchKeyDown, type KeyNavContext } from "@/lib/epic-navigation-keys"
 import { countAllBeads, findBeadById, findParentPath } from "@/lib/epic-tree-utils"
-import { safeCapture } from "@/lib/posthog-safe"
+import { type GroupedSection, groupedNavigationOrder } from "@/lib/grouped-layout"
 import {
   getAnalyticsEnabled,
   getExpandedBeads as getStoredExpandedBeads,
@@ -15,10 +14,15 @@ import {
   setExpandedEpics as setStoredExpandedEpics,
   setSelectedBead as setStoredSelectedBead,
 } from "@/lib/local-storage"
+import { safeCapture } from "@/lib/posthog-safe"
 import { rpc } from "@/lib/rpc"
 import type { Bead, Epic, Workspace } from "@/lib/types"
 
-const getBeadDetail = rpc.epics.getBeadDetail
+// Each handler is looked up on the rpc proxy at call time, never captured at
+// module load (rpc.ts): a captured one freezes whichever transport was
+// installed when this module first loaded, and defeats the _setRpc test seam.
+const getBeadDetail = (...args: Parameters<typeof rpc.epics.getBeadDetail>) =>
+  rpc.epics.getBeadDetail(...args)
 
 interface UseEpicNavigationOpts {
   /** beadbox-2wi: when the Grouped view is on, the layout it renders (else null). */

@@ -7,7 +7,8 @@
 // the app, and restoring the route and the saved selection on relaunch crashed
 // it again every time.
 
-import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -16,7 +17,6 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
-import { QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 
 import { FormulaPourModal } from "../components/formula-pour-modal"
@@ -24,7 +24,7 @@ import { FormulaPreviewModal } from "../components/formula-preview-modal"
 import { StartupGate } from "../components/startup-gate"
 import { setSelectedFormula } from "../lib/local-storage"
 import { queryClient } from "../lib/query-client"
-import { _setRpc, type RemoteApi } from "../lib/rpc"
+import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import type { FormulaDetail, FormulaSummary, Workspace } from "../lib/types"
 import { clearWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
 import { _resetWorkspaceSessions } from "../lib/workspace-session-cache"
@@ -122,7 +122,9 @@ function installRpc() {
       },
       {
         get: (t, k) =>
-          k in t ? t[k as keyof typeof t] : mock(() => Promise.resolve({ success: true, data: [] })),
+          k in t
+            ? t[k as keyof typeof t]
+            : mock(() => Promise.resolve({ success: true, data: [] })),
       },
     ),
   }
@@ -205,15 +207,28 @@ describe("formulas view with a zero-vars formula (beadbox-vco)", () => {
 
 describe("formula modals with a zero-vars formula (beadbox-vco)", () => {
   test("the pour modal opens with no variable inputs", () => {
-    render(<FormulaPourModal open onOpenChange={() => {}} formula={zeroVars} dbPath={ws.databasePath} />)
+    render(
+      <FormulaPourModal open onOpenChange={() => {}} formula={zeroVars} dbPath={ws.databasePath} />,
+    )
     expect(screen.getByText("Pour: zero-vars")).toBeTruthy()
     expect(screen.queryByText("Variables")).toBeNull()
     expect(document.querySelectorAll('input[type="text"]').length).toBe(1) // assignee only
   })
 
   test("the preview modal opens with no variable inputs", () => {
-    render(<FormulaPreviewModal open onOpenChange={() => {}} formula={zeroVars} dbPath={ws.databasePath} />)
+    render(
+      <FormulaPreviewModal
+        open
+        onOpenChange={() => {}}
+        formula={zeroVars}
+        dbPath={ws.databasePath}
+      />,
+    )
     expect(document.body.textContent).toContain("zero-vars")
     expect(document.querySelectorAll('input[type="text"]').length).toBe(0)
   })
 })
+
+// Put the default rpc back after this file, so the mock installed above
+// cannot leak into a later test file (beadbox-r72.4).
+afterAll(() => _resetRpc())

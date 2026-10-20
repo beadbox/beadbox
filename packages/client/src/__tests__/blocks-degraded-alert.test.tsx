@@ -3,7 +3,8 @@
 // how bd's column rename hid every blocker from bd >= 1.2 users; a message in
 // the devtools console is not visible to them either.
 
-import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -12,12 +13,11 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
-import { QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { StartupGate } from "../components/startup-gate"
 import { queryClient } from "../lib/query-client"
-import { _setRpc, type RemoteApi } from "../lib/rpc"
+import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import type { Epic, Workspace } from "../lib/types"
 import { clearWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
 import { _resetWorkspaceSessions } from "../lib/workspace-session-cache"
@@ -44,7 +44,10 @@ function tree(): Epic[] {
   ]
 }
 
-type BlocksPayload = { blockedBy: Record<string, string[]>; degraded?: { reason: "error"; message: string } }
+type BlocksPayload = {
+  blockedBy: Record<string, string[]>
+  degraded?: { reason: "error"; message: string }
+}
 
 // What the sidecar answers for blocked-by; each test sets it.
 let blocksAnswer: BlocksPayload = { blockedBy: {} }
@@ -84,7 +87,9 @@ function installRpc() {
       },
       {
         get: (t, k) =>
-          k in t ? t[k as keyof typeof t] : mock(() => Promise.resolve({ success: true, data: [] })),
+          k in t
+            ? t[k as keyof typeof t]
+            : mock(() => Promise.resolve({ success: true, data: [] })),
       },
     ),
     workspaces: new Proxy(
@@ -149,16 +154,24 @@ afterEach(() => {
 
 describe("home page: blocked-by that could not be computed is shown (beadbox-01f.5)", () => {
   test("a degraded result puts a visible notice with bd's reason above the tree", async () => {
-    blocksAnswer = { blockedBy: {}, degraded: { reason: "error", message: "failed to open database" } }
+    blocksAnswer = {
+      blockedBy: {},
+      degraded: { reason: "error", message: "failed to open database" },
+    }
     setWorkspaceCookie(ws.id)
     mountHome()
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(unavailable), { timeout: 5_000 })
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(unavailable), {
+      timeout: 5_000,
+    })
     expect(screen.getByRole("alert").textContent).toContain("failed to open database")
   }, 20_000)
 
   test("Retry asks again, and a successful answer clears the notice", async () => {
-    blocksAnswer = { blockedBy: {}, degraded: { reason: "error", message: "failed to open database" } }
+    blocksAnswer = {
+      blockedBy: {},
+      degraded: { reason: "error", message: "failed to open database" },
+    }
     setWorkspaceCookie(ws.id)
     mountHome()
     await waitFor(() => expect(screen.getByText(unavailable)).toBeTruthy(), { timeout: 5_000 })
@@ -167,15 +180,25 @@ describe("home page: blocked-by that could not be computed is shown (beadbox-01f
     blocksAnswer = { blockedBy: {} }
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
 
-    await waitFor(() => expect(getBlocksDependencies.mock.calls.length).toBeGreaterThan(asked), { timeout: 5_000 })
+    await waitFor(() => expect(getBlocksDependencies.mock.calls.length).toBeGreaterThan(asked), {
+      timeout: 5_000,
+    })
     await waitFor(() => expect(screen.queryByText(unavailable)).toBeNull(), { timeout: 5_000 })
   }, 20_000)
 
   test("control: an ok answer, even an empty one, shows no notice", async () => {
     setWorkspaceCookie(ws.id)
     mountHome()
-    await waitFor(() => expect(screen.getByText("Blocked-by epic")).toBeTruthy(), { timeout: 5_000 })
-    await waitFor(() => expect(getBlocksDependencies.mock.calls.length).toBeGreaterThan(0), { timeout: 5_000 })
+    await waitFor(() => expect(screen.getByText("Blocked-by epic")).toBeTruthy(), {
+      timeout: 5_000,
+    })
+    await waitFor(() => expect(getBlocksDependencies.mock.calls.length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    })
     expect(screen.queryByText(unavailable)).toBeNull()
   }, 20_000)
 })
+
+// Put the default rpc back after this file, so the mock installed above
+// cannot leak into a later test file (beadbox-r72.4).
+afterAll(() => _resetRpc())

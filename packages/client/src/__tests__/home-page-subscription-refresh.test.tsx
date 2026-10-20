@@ -5,7 +5,8 @@
 // authoritative refresh for field edits — so it needs a test of its own
 // (beadbox-01f.9).
 
-import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -14,12 +15,11 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
-import { QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 
 import { StartupGate } from "../components/startup-gate"
 import { queryClient } from "../lib/query-client"
-import { _setRpc, type RemoteApi } from "../lib/rpc"
+import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import { _emitChangeForTests, _resetSubscriptionChangeCount } from "../lib/subscribe"
 import type { Epic, Workspace } from "../lib/types"
 import { clearWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
@@ -189,3 +189,7 @@ describe("home page: a subscription change rebuilds the tree (beadbox-s5z)", () 
     expect(getEpics.mock.calls.length).toBe(settled)
   }, 20_000)
 })
+
+// Put the default rpc back after this file, so the mock installed above
+// cannot leak into a later test file (beadbox-r72.4).
+afterAll(() => _resetRpc())

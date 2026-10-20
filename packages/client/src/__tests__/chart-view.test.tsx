@@ -1,7 +1,8 @@
 // Chart view (PR #51): rendering, shared filters, collapse, bar styles,
 // dependency drawing, the degraded notice, and opening a bead on Beads.
 
-import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -10,13 +11,20 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
-import { QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 
 import { StartupGate } from "../components/startup-gate"
 import { getSelectedBead, setFiltersPreference, setSelectedBead } from "../lib/local-storage"
 import { queryClient } from "../lib/query-client"
-import { _setRpc, rpc, type RemoteApi } from "../lib/rpc"
+import { _resetRpc, _setRpc, type RemoteApi, rpc } from "../lib/rpc"
 import { _emitChangeForTests, _resetSubscriptionChangeCount } from "../lib/subscribe"
 import type { Bead, Epic, Filters, Workspace } from "../lib/types"
 import { clearWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
@@ -72,7 +80,10 @@ function tree(): Epic[] {
   ]
 }
 
-type BlocksPayload = { blockedBy: Record<string, string[]>; degraded?: { reason: "error"; message: string } }
+type BlocksPayload = {
+  blockedBy: Record<string, string[]>
+  degraded?: { reason: "error"; message: string }
+}
 let blocksAnswer: BlocksPayload = { blockedBy: { b: ["a"], d: ["a"] } }
 
 const FILTERS: Filters = {
@@ -97,7 +108,10 @@ beforeAll(async () => {
 
 function installRpc() {
   const benign = (): RemoteApi[keyof RemoteApi] =>
-    new Proxy({}, { get: () => mock(() => Promise.resolve({ success: true, data: [], epics: [] })) }) as never
+    new Proxy(
+      {},
+      { get: () => mock(() => Promise.resolve({ success: true, data: [], epics: [] })) },
+    ) as never
   const api = {
     health: {
       runStartupHealth: mock(() =>
@@ -114,11 +128,16 @@ function installRpc() {
     },
     epics: new Proxy(
       {
-        incrementalRefresh: mock(() => Promise.resolve({ success: true as const, epics: treeFn() })),
+        incrementalRefresh: mock(() =>
+          Promise.resolve({ success: true as const, epics: treeFn() }),
+        ),
         getBlocksDependencies: mock(() => Promise.resolve(blocksAnswer)),
       },
       {
-        get: (t, k) => (k in t ? t[k as keyof typeof t] : mock(() => Promise.resolve({ success: true, data: [] }))),
+        get: (t, k) =>
+          k in t
+            ? t[k as keyof typeof t]
+            : mock(() => Promise.resolve({ success: true, data: [] })),
       },
     ),
     workspaces: new Proxy(
@@ -127,16 +146,21 @@ function installRpc() {
     ),
     beads: new Proxy(
       {
-        getAvailableStatuses: mock(() => Promise.resolve(["open", "in_progress", "closed", "blocked"])),
+        getAvailableStatuses: mock(() =>
+          Promise.resolve(["open", "in_progress", "closed", "blocked"]),
+        ),
         getAvailableTypes: mock(() => Promise.resolve(["task", "epic"])),
       },
       {
-        get: (t, k) => (k in t ? t[k as keyof typeof t] : mock(() => Promise.resolve({ success: true }))),
+        get: (t, k) =>
+          k in t ? t[k as keyof typeof t] : mock(() => Promise.resolve({ success: true })),
       },
     ),
   }
   _setRpc(
-    new Proxy(api, { get: (t, k) => (k in t ? t[k as keyof typeof t] : benign()) }) as unknown as RemoteApi,
+    new Proxy(api, {
+      get: (t, k) => (k in t ? t[k as keyof typeof t] : benign()),
+    }) as unknown as RemoteApi,
   )
 }
 
@@ -153,7 +177,10 @@ function mountChart() {
     createRoute({ getParentRoute: () => rootRoute, path: "/chart", component: ChartView }),
     createRoute({ getParentRoute: () => rootRoute, path: "/workspaces", component: () => null }),
   ])
-  const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/chart"] }) })
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/chart"] }),
+  })
   render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router as never} />
@@ -164,11 +191,15 @@ function mountChart() {
 async function mounted() {
   setWorkspaceCookie(ws.id)
   mountChart()
-  await waitFor(() => expect(screen.getAllByTestId("gantt-row-title").length).toBeGreaterThan(0), { timeout: 5_000 })
+  await waitFor(() => expect(screen.getAllByTestId("gantt-row-title").length).toBeGreaterThan(0), {
+    timeout: 5_000,
+  })
 }
 
-const titles = () => screen.queryAllByTestId("gantt-row-title").map((el) => el.getAttribute("title")?.split(":")[0])
-const barFor = (id: string) => document.querySelector(`[data-testid="gantt-bar"][data-bead-id="${id}"]`)
+const titles = () =>
+  screen.queryAllByTestId("gantt-row-title").map((el) => el.getAttribute("title")?.split(":")[0])
+const barFor = (id: string) =>
+  document.querySelector(`[data-testid="gantt-bar"][data-bead-id="${id}"]`)
 
 afterEach(() => {
   cleanup()
@@ -187,7 +218,10 @@ describe("Chart view", () => {
   test("renders a section per epic with a row per bead", async () => {
     setFiltersPreference(FILTERS)
     await mounted()
-    expect(screen.getAllByTestId("gantt-section").map((el) => el.textContent)).toEqual(["Epic one", "Epic two"])
+    expect(screen.getAllByTestId("gantt-section").map((el) => el.textContent)).toEqual([
+      "Epic one",
+      "Epic two",
+    ])
     expect(titles()).toEqual(["a", "b", "c", "x", "d"])
   }, 20_000)
 
@@ -223,7 +257,9 @@ describe("Chart view", () => {
   test("an arrow inside a section, a marker naming the bead across sections", async () => {
     setFiltersPreference(FILTERS)
     await mounted()
-    await waitFor(() => expect(screen.getAllByTestId("gantt-arrow").length).toBe(1), { timeout: 5_000 })
+    await waitFor(() => expect(screen.getAllByTestId("gantt-arrow").length).toBe(1), {
+      timeout: 5_000,
+    })
     const markers = screen.getAllByTestId("gantt-marker").map((el) => el.getAttribute("aria-label"))
     expect(markers).toContain("Blocked by a: Title a")
     expect(markers).toContain("Blocks d: Title d")
@@ -234,7 +270,9 @@ describe("Chart view", () => {
     blocksAnswer = { blockedBy: { b: ["a"], c: ["a"] } }
     setFiltersPreference(FILTERS)
     await mounted()
-    await waitFor(() => expect(screen.getAllByTestId("gantt-arrow").length).toBe(2), { timeout: 5_000 })
+    await waitFor(() => expect(screen.getAllByTestId("gantt-arrow").length).toBe(2), {
+      timeout: 5_000,
+    })
     for (const [to, tone, marker] of [
       ["b", "stroke-foreground", "url(#gantt-arrow-strong)"],
       ["c", "stroke-muted-foreground", "url(#gantt-arrow)"],
@@ -264,7 +302,9 @@ describe("Chart view", () => {
     blocksAnswer = { blockedBy: { b: ["a"], x: ["b"] } }
     setFiltersPreference(FILTERS)
     await mounted()
-    await waitFor(() => expect(screen.getAllByTestId("gantt-arrow").length).toBe(2), { timeout: 5_000 })
+    await waitFor(() => expect(screen.getAllByTestId("gantt-arrow").length).toBe(2), {
+      timeout: 5_000,
+    })
     const span = (id: string) => {
       const bar = barFor(id)!
       const left = Number(bar.getAttribute("x"))
@@ -327,14 +367,22 @@ describe("Chart view", () => {
     expect(Number(marker.querySelector("circle")!.getAttribute("r"))).toBeGreaterThan(3.5) // hit area
 
     fireEvent.focus(marker)
-    await waitFor(() => expect(screen.getAllByText("Blocked by a: Title a").length).toBeGreaterThan(0), {
-      timeout: 2_000,
-    })
+    await waitFor(
+      () => expect(screen.getAllByText("Blocked by a: Title a").length).toBeGreaterThan(0),
+      {
+        timeout: 2_000,
+      },
+    )
     fireEvent.blur(marker)
 
-    const other = screen.getAllByTestId("gantt-marker").find((el) => el.getAttribute("aria-label") === "Blocks d: Title d")!
+    const other = screen
+      .getAllByTestId("gantt-marker")
+      .find((el) => el.getAttribute("aria-label") === "Blocks d: Title d")!
     fireEvent.pointerMove(other, { pointerType: "mouse" })
-    await waitFor(() => expect(screen.getAllByText("Blocks d: Title d").length).toBeGreaterThan(0), { timeout: 2_000 })
+    await waitFor(
+      () => expect(screen.getAllByText("Blocks d: Title d").length).toBeGreaterThan(0),
+      { timeout: 2_000 },
+    )
   }, 20_000)
 
   test("the legend explains every chart element with the chart's own styles", async () => {
@@ -345,30 +393,52 @@ describe("Chart view", () => {
     // Bars: same classes as the drawn bars of each style.
     expect(swatch("working").getAttribute("class")).toBe(barFor("a")!.getAttribute("class"))
     expect(swatch("planned").getAttribute("class")).toBe(barFor("b")!.getAttribute("class"))
-    expect(swatch("planned").getAttribute("stroke-dasharray")).toBe(barFor("b")!.getAttribute("stroke-dasharray"))
+    expect(swatch("planned").getAttribute("stroke-dasharray")).toBe(
+      barFor("b")!.getAttribute("stroke-dasharray"),
+    )
     expect(swatch("blocked").getAttribute("class")).toBe(barFor("x")!.getAttribute("class"))
     expect(swatch("done").getAttribute("class")).toBe(barFor("c")!.getAttribute("class"))
-    expect(swatch("inferred").getAttribute("stroke-dasharray")).toBe(barFor("c")!.getAttribute("stroke-dasharray"))
-    expect(swatch("inferred").getAttribute("fill-opacity")).toBe(barFor("c")!.getAttribute("fill-opacity"))
+    expect(swatch("inferred").getAttribute("stroke-dasharray")).toBe(
+      barFor("c")!.getAttribute("stroke-dasharray"),
+    )
+    expect(swatch("inferred").getAttribute("fill-opacity")).toBe(
+      barFor("c")!.getAttribute("fill-opacity"),
+    )
     // Markers and the now line.
     const dot = (label: string) =>
-      screen.getAllByTestId("gantt-marker").find((el) => el.getAttribute("aria-label") === label)!.querySelector("circle:last-child")!
-    expect(swatch("blocked-by").getAttribute("class")).toBe(dot("Blocked by a: Title a").getAttribute("class"))
-    expect(swatch("blocks").getAttribute("class")).toBe(dot("Blocks d: Title d").getAttribute("class"))
+      screen
+        .getAllByTestId("gantt-marker")
+        .find((el) => el.getAttribute("aria-label") === label)!
+        .querySelector("circle:last-child")!
+    expect(swatch("blocked-by").getAttribute("class")).toBe(
+      dot("Blocked by a: Title a").getAttribute("class"),
+    )
+    expect(swatch("blocks").getAttribute("class")).toBe(
+      dot("Blocks d: Title d").getAttribute("class"),
+    )
     const now = screen.getByTestId("gantt-now")
     expect(swatch("now").getAttribute("class")).toBe(now.getAttribute("class"))
-    expect(swatch("now").getAttribute("stroke-dasharray")).toBe(now.getAttribute("stroke-dasharray"))
+    expect(swatch("now").getAttribute("stroke-dasharray")).toBe(
+      now.getAttribute("stroke-dasharray"),
+    )
     expect(legend.querySelector('[data-testid="legend-connector"]')?.textContent).toMatch(/Blocks/)
     expect(legend.querySelectorAll("li")).toHaveLength(9)
   }, 20_000)
 
   test("missing dependency data shows the notice and draws no arrows", async () => {
-    blocksAnswer = { blockedBy: {}, degraded: { reason: "error", message: "failed to open database" } }
+    blocksAnswer = {
+      blockedBy: {},
+      degraded: { reason: "error", message: "failed to open database" },
+    }
     setFiltersPreference(FILTERS)
     await mounted()
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Blocked-by markers are unavailable/), {
-      timeout: 5_000,
-    })
+    await waitFor(
+      () =>
+        expect(screen.getByRole("alert").textContent).toMatch(/Blocked-by markers are unavailable/),
+      {
+        timeout: 5_000,
+      },
+    )
     expect(screen.queryAllByTestId("gantt-arrow")).toEqual([])
     expect(screen.queryAllByTestId("gantt-marker")).toEqual([])
   }, 20_000)
@@ -559,7 +629,10 @@ describe("Chart view — stepwise zoom (PR #51)", () => {
     treeFn = () => [
       {
         ...bead("P", { type: "epic", title: "Past epic", status: "closed", closedAt: day(5) }),
-        children: [bead("p1", { status: "closed", closedAt: day(3) }), bead("p2", { status: "closed", closedAt: day(5) })],
+        children: [
+          bead("p1", { status: "closed", closedAt: day(3) }),
+          bead("p2", { status: "closed", closedAt: day(5) }),
+        ],
         childEpics: [],
       },
     ]
@@ -629,8 +702,10 @@ describe("useNow", () => {
 
 describe("Chart view — links across epics (PR #53)", () => {
   const toggle = () => screen.getByRole("button", { name: "Links across epics" })
-  const crossPaths = () => document.querySelectorAll('[data-testid="gantt-arrow"][data-cross="true"]')
-  const markerLabels = () => screen.queryAllByTestId("gantt-marker").map((el) => el.getAttribute("aria-label"))
+  const crossPaths = () =>
+    document.querySelectorAll('[data-testid="gantt-arrow"][data-cross="true"]')
+  const markerLabels = () =>
+    screen.queryAllByTestId("gantt-marker").map((el) => el.getAttribute("aria-label"))
   const pathPoints = (path: Element) =>
     path
       .getAttribute("d")!
@@ -661,7 +736,11 @@ describe("Chart view — links across epics (PR #53)", () => {
     expect(path.getAttribute("data-from")).toBe("a")
     expect(path.getAttribute("data-to")).toBe("d")
     const points = pathPoints(path)
-    const [first, last, beforeLast] = [points[0], points[points.length - 1], points[points.length - 2]]
+    const [first, last, beforeLast] = [
+      points[0],
+      points[points.length - 1],
+      points[points.length - 2],
+    ]
     const [a, d] = [barFor("a")!, barFor("d")!]
     expect(first[0]).toBeCloseTo(Number(a.getAttribute("x")) + Number(a.getAttribute("width")))
     expect(last[0]).toBeCloseTo(Number(d.getAttribute("x")))
@@ -691,13 +770,20 @@ describe("Chart view — links across epics (PR #53)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Epic one/ }))
     fireEvent.click(screen.getByRole("button", { name: /Epic two/ }))
     expect(crossPaths()).toHaveLength(1)
-    expect([crossPaths()[0].getAttribute("data-from"), crossPaths()[0].getAttribute("data-to")]).toEqual(["E1", "E2"])
+    expect([
+      crossPaths()[0].getAttribute("data-from"),
+      crossPaths()[0].getAttribute("data-to"),
+    ]).toEqual(["E1", "E2"])
   }, 20_000)
 
   test("a bead in a child epic of a collapsed epic links to the outer epic's header", async () => {
     treeFn = () => {
       const [e1, e2] = tree()
-      const child = { ...bead("E2c", { type: "epic", title: "Child epic" }), children: [bead("n", { assignee: "bob" })], childEpics: [] }
+      const child = {
+        ...bead("E2c", { type: "epic", title: "Child epic" }),
+        children: [bead("n", { assignee: "bob" })],
+        childEpics: [],
+      }
       return [e1, { ...e2, childEpics: [child] }]
     }
     blocksAnswer = { blockedBy: { n: ["a"] } }
@@ -721,8 +807,11 @@ describe("Chart view — links across epics (PR #53)", () => {
 
 describe("Chart view — minute labels past Hours (PR #53)", () => {
   const axisLabels = () =>
-    Array.from(screen.getByTestId("gantt-header-row").querySelectorAll("text")).map((t) => t.textContent ?? "")
-  const minutesOf = (labels: string[]) => new Set(labels.filter((l) => /^\d\d:\d\d$/.test(l)).map((l) => l.slice(3)))
+    Array.from(screen.getByTestId("gantt-header-row").querySelectorAll("text")).map(
+      (t) => t.textContent ?? "",
+    )
+  const minutesOf = (labels: string[]) =>
+    new Set(labels.filter((l) => /^\d\d:\d\d$/.test(l)).map((l) => l.slice(3)))
 
   test("Hours labels full hours; + once adds :30, + twice adds :15 and :45", async () => {
     setFiltersPreference(FILTERS)
@@ -775,7 +864,16 @@ describe("Chart view — keeps its view across views (PR #54)", () => {
     const domainBefore = nowX()
     treeFn = () => {
       const [e1, e2] = tree()
-      return [{ ...e1, children: [...e1.children, bead("old", { status: "closed", createdAt: day(-5), closedAt: day(-4) })] }, e2]
+      return [
+        {
+          ...e1,
+          children: [
+            ...e1.children,
+            bead("old", { status: "closed", createdAt: day(-5), closedAt: day(-4) }),
+          ],
+        },
+        e2,
+      ]
     }
     await remount()
     expect(nowX()).toBeGreaterThan(domainBefore) // the timeline now starts earlier
@@ -783,7 +881,10 @@ describe("Chart view — keeps its view across views (PR #54)", () => {
   }, 20_000)
 
   test("a missing or garbled saved view leaves the default view", async () => {
-    sessionStorage.setItem("beadbox:chart-view", JSON.stringify({ leftTime: "yesterday", scrollTop: 10 }))
+    sessionStorage.setItem(
+      "beadbox:chart-view",
+      JSON.stringify({ leftTime: "yesterday", scrollTop: 10 }),
+    )
     setFiltersPreference(FILTERS)
     await mounted()
     expect(scroller().scrollLeft).toBe(0)
@@ -803,7 +904,9 @@ describe("Chart view — pinch to zoom (PR #54)", () => {
   }
   const width = () => Number(screen.getByTestId("gantt-timeline").getAttribute("width"))
   const pressed = () =>
-    ["Fit", "Hours", "Days", "Weeks"].filter((name) => screen.getByRole("button", { name }).getAttribute("aria-pressed") === "true")
+    ["Fit", "Hours", "Days", "Weeks"].filter(
+      (name) => screen.getByRole("button", { name }).getAttribute("aria-pressed") === "true",
+    )
   const gesture = (el: Element, type: string, props: Record<string, number> = {}) => {
     const e = Object.assign(new Event(type, { bubbles: true, cancelable: true }), props)
     act(() => {
@@ -849,9 +952,13 @@ describe("Chart view — pinch to zoom (PR #54)", () => {
   test("pinching past the limit stops there and disables +", async () => {
     const scroller = await setup()
     pinchWheel(scroller, -2_000, 100)
-    expect((screen.getByRole("button", { name: "Zoom in" }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Zoom in" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
     pinchWheel(scroller, 5_000, 100)
-    expect((screen.getByRole("button", { name: "Zoom out" }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Zoom out" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
   }, 20_000)
 
   test("a plain wheel (no Ctrl) does not zoom", async () => {
@@ -873,7 +980,8 @@ describe("Chart view — pinch to zoom (PR #54)", () => {
 describe("Chart view — live updates keep one cached copy per query (beadbox-005)", () => {
   test("20 change events leave one chart-epics / chart-blocks / trains-present entry, refetched each time", async () => {
     await mounted()
-    const refresh = (rpc.epics as unknown as { incrementalRefresh: { mock: { calls: unknown[] } } }).incrementalRefresh
+    const refresh = (rpc.epics as unknown as { incrementalRefresh: { mock: { calls: unknown[] } } })
+      .incrementalRefresh
     const before = refresh.mock.calls.length
     const changes = 20
     for (let i = 0; i < changes; i++) {
@@ -881,16 +989,25 @@ describe("Chart view — live updates keep one cached copy per query (beadbox-00
       await act(async () => {
         _emitChangeForTests()
       })
-      await waitFor(() => expect(refresh.mock.calls.length).toBeGreaterThan(calls), { timeout: 3_000 })
+      await waitFor(() => expect(refresh.mock.calls.length).toBeGreaterThan(calls), {
+        timeout: 3_000,
+      })
     }
     // Live updates still work: one tree refetch per change.
     expect(refresh.mock.calls.length - before).toBeGreaterThanOrEqual(changes)
     // Entries for the workspace's database (an empty, disabled entry from before
     // the workspace resolved has a null path and never grows).
     const entries = (key: string) =>
-      queryClient.getQueryCache().findAll({ queryKey: [key] }).filter((q) => q.queryKey[1] != null).length
+      queryClient
+        .getQueryCache()
+        .findAll({ queryKey: [key] })
+        .filter((q) => q.queryKey[1] != null).length
     expect(entries("chart-epics")).toBe(1)
     expect(entries("chart-blocks")).toBe(1)
     expect(entries("trains-present")).toBe(1)
   }, 60_000)
 })
+
+// Put the default rpc back after this file, so the mock installed above
+// cannot leak into a later test file (beadbox-r72.4).
+afterAll(() => _resetRpc())

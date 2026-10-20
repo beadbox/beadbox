@@ -10,15 +10,26 @@ import type { Bead, BeadPriority, BeadStatus, Comment, Epic, Workspace } from "@
 
 // kkrpc bindings — same names as the legacy actions/beads.ts exports so the
 // home-page port can call them with zero edit-site changes.
-const updateBeadPriority = rpc.beads.updateBeadPriority
-const updateBeadParent = rpc.beads.updateBeadParent
-const updateBeadType = rpc.beads.updateBeadType
-const addCommentAction = rpc.beads.addComment
-const deleteBead = rpc.beads.deleteBead
-const archiveBead = rpc.beads.archiveBead
-const closeBeadChildren = rpc.beads.closeBeadChildren
-const archiveBeadChildren = rpc.beads.archiveBeadChildren
-const closeBead = rpc.beads.closeBead
+// Each handler is looked up on the rpc proxy at call time, never captured at
+// module load (rpc.ts): a captured one freezes whichever transport was
+// installed when this module first loaded, and defeats the _setRpc test seam.
+const updateBeadPriority = (...args: Parameters<typeof rpc.beads.updateBeadPriority>) =>
+  rpc.beads.updateBeadPriority(...args)
+const updateBeadParent = (...args: Parameters<typeof rpc.beads.updateBeadParent>) =>
+  rpc.beads.updateBeadParent(...args)
+const updateBeadType = (...args: Parameters<typeof rpc.beads.updateBeadType>) =>
+  rpc.beads.updateBeadType(...args)
+const addCommentAction = (...args: Parameters<typeof rpc.beads.addComment>) =>
+  rpc.beads.addComment(...args)
+const deleteBead = (...args: Parameters<typeof rpc.beads.deleteBead>) =>
+  rpc.beads.deleteBead(...args)
+const archiveBead = (...args: Parameters<typeof rpc.beads.archiveBead>) =>
+  rpc.beads.archiveBead(...args)
+const closeBeadChildren = (...args: Parameters<typeof rpc.beads.closeBeadChildren>) =>
+  rpc.beads.closeBeadChildren(...args)
+const archiveBeadChildren = (...args: Parameters<typeof rpc.beads.archiveBeadChildren>) =>
+  rpc.beads.archiveBeadChildren(...args)
+const closeBead = (...args: Parameters<typeof rpc.beads.closeBead>) => rpc.beads.closeBead(...args)
 
 interface EpicCloseConfirm {
   epicId: string
@@ -154,7 +165,10 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
     // fetches the authoritative tree once after bd commits; fetching here as
     // well doubles the slow remote read for every title edit. A hierarchy
     // change still needs an immediate rebuild to move the item between roots.
-    if (previous && (previous.type !== updatedBead.type || previous.parentId !== updatedBead.parentId)) {
+    if (
+      previous &&
+      (previous.type !== updatedBead.type || previous.parentId !== updatedBead.parentId)
+    ) {
       void loadEpics()
     }
   }

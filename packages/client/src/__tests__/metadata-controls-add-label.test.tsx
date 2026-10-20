@@ -20,6 +20,7 @@ import { TooltipProvider } from "../components/ui/tooltip"
 import { useBeadMutations } from "../hooks/use-bead-mutations"
 import { dispatchKeyDown, type KeyNavContext } from "../lib/epic-navigation-keys"
 import { extractLabels } from "../lib/epic-tree-utils"
+import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import type { Bead, Epic } from "../lib/types"
 
 afterEach(cleanup)
@@ -158,8 +159,17 @@ describe("useBeadMutations.handleAddLabel", () => {
   } as unknown as Bead
 
   test("adds optimistically, then rolls back with a toast when the write throws", async () => {
-    // No sidecar under test, so every rpc call throws RpcUnavailableError: the
-    // same shape as a sidecar deadline or restart mid-call.
+    // The write throws, the same shape as a sidecar deadline or restart
+    // mid-call. Installed here rather than assumed: another test file's rpc
+    // mock may still be in place, and this test would then see the write
+    // succeed (beadbox-r72.4, intermittent on CI).
+    _setRpc({
+      beads: {
+        addLabelAction: async () => {
+          throw new Error("sidecar unavailable")
+        },
+      },
+    } as unknown as RemoteApi)
     const errorToast = spyOn(toast, "error").mockImplementation(() => "")
     try {
       const onUpdate = mock((_b: Bead) => {})
@@ -178,6 +188,7 @@ describe("useBeadMutations.handleAddLabel", () => {
       expect(errorToast.mock.calls[0][0]).toBe("Failed to add label")
     } finally {
       errorToast.mockRestore()
+      _resetRpc()
     }
   })
 

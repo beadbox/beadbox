@@ -5,23 +5,43 @@ import { getAnalyticsEnabled, getArchiveHintShown, setArchiveHintShown } from "@
 import { safeCapture } from "@/lib/posthog-safe"
 import { rpc } from "@/lib/rpc"
 
-const updateBeadTitle = rpc.beads.updateBeadTitle
-const updateBeadType = rpc.beads.updateBeadType
-const updateBeadStatus = rpc.beads.updateBeadStatus
-const updateBeadPriority = rpc.beads.updateBeadPriority
-const updateBeadAssignee = rpc.beads.updateBeadAssignee
-const updateBeadSpecId = rpc.beads.updateBeadSpecId
-const updateBeadDue = rpc.beads.updateBeadDue
-const updateBeadDefer = rpc.beads.updateBeadDefer
-const updateBeadEstimate = rpc.beads.updateBeadEstimate
-const updateBeadDesign = rpc.beads.updateBeadDesign
-const updateBeadTextField = rpc.beads.updateBeadTextField
-const deleteCommentAction = rpc.beads.deleteCommentAction
-const removeLabelAction = rpc.beads.removeLabelAction
-const removeDependencyAction = rpc.beads.removeDependencyAction
-const addLabelAction = rpc.beads.addLabelAction
-const readSpecFile = rpc.beads.readSpecFile
-const archiveBead = rpc.beads.archiveBead
+// Each handler is looked up on the rpc proxy at call time, never captured at
+// module load (rpc.ts): a captured one freezes whichever transport was
+// installed when this module first loaded, and defeats the _setRpc test seam.
+const updateBeadTitle = (...args: Parameters<typeof rpc.beads.updateBeadTitle>) =>
+  rpc.beads.updateBeadTitle(...args)
+const updateBeadType = (...args: Parameters<typeof rpc.beads.updateBeadType>) =>
+  rpc.beads.updateBeadType(...args)
+const updateBeadStatus = (...args: Parameters<typeof rpc.beads.updateBeadStatus>) =>
+  rpc.beads.updateBeadStatus(...args)
+const updateBeadPriority = (...args: Parameters<typeof rpc.beads.updateBeadPriority>) =>
+  rpc.beads.updateBeadPriority(...args)
+const updateBeadAssignee = (...args: Parameters<typeof rpc.beads.updateBeadAssignee>) =>
+  rpc.beads.updateBeadAssignee(...args)
+const updateBeadSpecId = (...args: Parameters<typeof rpc.beads.updateBeadSpecId>) =>
+  rpc.beads.updateBeadSpecId(...args)
+const updateBeadDue = (...args: Parameters<typeof rpc.beads.updateBeadDue>) =>
+  rpc.beads.updateBeadDue(...args)
+const updateBeadDefer = (...args: Parameters<typeof rpc.beads.updateBeadDefer>) =>
+  rpc.beads.updateBeadDefer(...args)
+const updateBeadEstimate = (...args: Parameters<typeof rpc.beads.updateBeadEstimate>) =>
+  rpc.beads.updateBeadEstimate(...args)
+const updateBeadDesign = (...args: Parameters<typeof rpc.beads.updateBeadDesign>) =>
+  rpc.beads.updateBeadDesign(...args)
+const updateBeadTextField = (...args: Parameters<typeof rpc.beads.updateBeadTextField>) =>
+  rpc.beads.updateBeadTextField(...args)
+const deleteCommentAction = (...args: Parameters<typeof rpc.beads.deleteCommentAction>) =>
+  rpc.beads.deleteCommentAction(...args)
+const removeLabelAction = (...args: Parameters<typeof rpc.beads.removeLabelAction>) =>
+  rpc.beads.removeLabelAction(...args)
+const removeDependencyAction = (...args: Parameters<typeof rpc.beads.removeDependencyAction>) =>
+  rpc.beads.removeDependencyAction(...args)
+const addLabelAction = (...args: Parameters<typeof rpc.beads.addLabelAction>) =>
+  rpc.beads.addLabelAction(...args)
+const readSpecFile = (...args: Parameters<typeof rpc.beads.readSpecFile>) =>
+  rpc.beads.readSpecFile(...args)
+const archiveBead = (...args: Parameters<typeof rpc.beads.archiveBead>) =>
+  rpc.beads.archiveBead(...args)
 
 import {
   captureDetailPanelAction,
@@ -473,7 +493,10 @@ export function useBeadMutations({ bead, dbPath, onUpdate }: UseBeadMutationsOpt
   )
 
   const saveTextField = useCallback(
-    async (field: "description" | "acceptanceCriteria" | "notes", value: string): Promise<boolean> => {
+    async (
+      field: "description" | "acceptanceCriteria" | "notes",
+      value: string,
+    ): Promise<boolean> => {
       if (!bead) return false
       if (value === (bead[field] || "")) return true
       setFieldSaving(field)

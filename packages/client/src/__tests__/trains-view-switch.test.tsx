@@ -1,7 +1,8 @@
 // Trains had no view-switch keys; ⌘5 must reach the Chart view from it too
 // (PR #51).
 
-import { afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -10,12 +11,11 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
-import { QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import { StartupGate } from "../components/startup-gate"
 import { queryClient } from "../lib/query-client"
-import { _setRpc, type RemoteApi } from "../lib/rpc"
+import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import type { Workspace } from "../lib/types"
 import { clearWorkspaceCookie, setWorkspaceCookie } from "../lib/workspace-cookie"
 import { _resetWorkspaceSessions } from "../lib/workspace-session-cache"
@@ -78,10 +78,17 @@ describe("Trains view switching", () => {
     })
     const routeTree = rootRoute.addChildren([
       createRoute({ getParentRoute: () => rootRoute, path: "/trains", component: TrainsPage }),
-      createRoute({ getParentRoute: () => rootRoute, path: "/chart", component: () => <p>CHART VIEW</p> }),
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/chart",
+        component: () => <p>CHART VIEW</p>,
+      }),
       createRoute({ getParentRoute: () => rootRoute, path: "/workspaces", component: () => null }),
     ])
-    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/trains"] }) })
+    const router = createRouter({
+      routeTree,
+      history: createMemoryHistory({ initialEntries: ["/trains"] }),
+    })
     render(
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router as never} />
@@ -92,3 +99,7 @@ describe("Trains view switching", () => {
     expect(await screen.findByText("CHART VIEW", {}, { timeout: 5_000 })).toBeTruthy()
   }, 20_000)
 })
+
+// Put the default rpc back after this file, so the mock installed above
+// cannot leak into a later test file (beadbox-r72.4).
+afterAll(() => _resetRpc())

@@ -2,7 +2,7 @@
 // app with an empty workspace list. Without a word about it the user just sees
 // a blank selector (beadbox-4n0, folded into beadbox-x3y).
 
-import { afterEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -14,7 +14,7 @@ import {
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { StartupGate } from "../components/startup-gate"
-import { _setRpc, type RemoteApi } from "../lib/rpc"
+import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 
 const quarantine = {
   registryPath: "/Users/me/.beadbox/registry.json",
@@ -28,7 +28,12 @@ function installRpc(registryQuarantine?: typeof quarantine) {
       {
         health: {
           runStartupHealth: mock(() =>
-            Promise.resolve({ hasWorkspaces: false, workspaces: [], platform: "darwin", registryQuarantine }),
+            Promise.resolve({
+              hasWorkspaces: false,
+              workspaces: [],
+              platform: "darwin",
+              registryQuarantine,
+            }),
           ),
         },
       },
@@ -36,7 +41,10 @@ function installRpc(registryQuarantine?: typeof quarantine) {
         get: (t, k) =>
           k in t
             ? t[k as keyof typeof t]
-            : new Proxy({}, { get: () => mock(() => Promise.resolve({ success: true, data: [] })) }),
+            : new Proxy(
+                {},
+                { get: () => mock(() => Promise.resolve({ success: true, data: [] })) },
+              ),
       },
     ) as unknown as RemoteApi,
   )
@@ -52,9 +60,16 @@ function mountGate() {
   })
   const routeTree = rootRoute.addChildren([
     createRoute({ getParentRoute: () => rootRoute, path: "/", component: () => <div>HOME</div> }),
-    createRoute({ getParentRoute: () => rootRoute, path: "/workspaces", component: () => <div>WORKSPACE SELECTOR</div> }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/workspaces",
+      component: () => <div>WORKSPACE SELECTOR</div>,
+    }),
   ])
-  const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/"] }) })
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  })
   render(<RouterProvider router={router as never} />)
 }
 
@@ -65,9 +80,12 @@ describe("startup gate: an unusable registry is explained, not silently emptied"
     installRpc(quarantine)
     mountGate()
 
-    await waitFor(() => expect(screen.getByText("Your workspace list could not be read")).toBeTruthy(), {
-      timeout: 5_000,
-    })
+    await waitFor(
+      () => expect(screen.getByText("Your workspace list could not be read")).toBeTruthy(),
+      {
+        timeout: 5_000,
+      },
+    )
     const alert = screen.getByRole("alert").textContent ?? ""
     expect(alert).toContain(quarantine.registryPath)
     expect(alert).toContain(quarantine.reason)
@@ -75,14 +93,22 @@ describe("startup gate: an unusable registry is explained, not silently emptied"
     expect(screen.queryByText("WORKSPACE SELECTOR")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Continue with an empty list" }))
-    await waitFor(() => expect(screen.getByText("WORKSPACE SELECTOR")).toBeTruthy(), { timeout: 5_000 })
+    await waitFor(() => expect(screen.getByText("WORKSPACE SELECTOR")).toBeTruthy(), {
+      timeout: 5_000,
+    })
     expect(screen.queryByText("Your workspace list could not be read")).toBeNull()
   }, 20_000)
 
   test("control: an empty registry that was never quarantined goes straight to the selector", async () => {
     installRpc(undefined)
     mountGate()
-    await waitFor(() => expect(screen.getByText("WORKSPACE SELECTOR")).toBeTruthy(), { timeout: 5_000 })
+    await waitFor(() => expect(screen.getByText("WORKSPACE SELECTOR")).toBeTruthy(), {
+      timeout: 5_000,
+    })
     expect(screen.queryByText("Your workspace list could not be read")).toBeNull()
   }, 20_000)
 })
+
+// Put the default rpc back after this file, so the mock installed above
+// cannot leak into a later test file (beadbox-r72.4).
+afterAll(() => _resetRpc())
