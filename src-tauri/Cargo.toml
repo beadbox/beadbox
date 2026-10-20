@@ -57,6 +57,12 @@ objc2 = { version = "0.6", default-features = false }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSString", "NSURL"] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["UIApplication", "UIResponder"] }
 
+# beadbox-vxq: tests/updater_verify.rs runs the shipped updater plugin on
+# Tauri's mock runtime. Dev-only: resolver 2 keeps this feature out of every
+# release build, and `test` is an empty feature that adds no crate.
+[dev-dependencies]
+tauri = { version = "2.11", features = ["test"] }
+
 [profile.release]
 lto = "thin"
 codegen-units = 8
