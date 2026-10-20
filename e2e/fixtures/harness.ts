@@ -157,7 +157,15 @@ export const test = base.extend<object, WorkerFixtures>({
     { scope: "worker" },
   ],
 
-  page: async ({ page, sidecar }, use) => {
+  page: async ({ page, sidecar, workspaces }, use) => {
+    // Every test starts on the standard workspace. A switch made from the rail
+    // persists in this worker's registry (the sidecar re-reads the file on
+    // every call), so without this a spec that switches would leave the next
+    // spec in the same worker on another workspace (beadbox-r72.4, seen on CI's
+    // single worker). Cookies and storage are already fresh per test.
+    const registry = JSON.parse(readFileSync(workspaces.standard.registryPath, "utf-8"))
+    registry.activeWorkspace = workspaces.standard.id
+    writeFileSync(workspaces.standard.registryPath, JSON.stringify(registry))
     await sidecar.attach(page)
     await use(page)
   },
