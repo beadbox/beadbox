@@ -1,0 +1,134 @@
+name: Updater verify
+
+# beadbox-ceih (systemdesign §7.4, ADR-003): runs the headless updater proof,
+# src-tauri/tests/updater_verify.rs. The shipped tauri-plugin-updater, on
+# Tauri's mock runtime with the shipped endpoint and pubkey, fetches the live
+# release manifest and every platform's bundle over its own reqwest/rustls
+# client and verifies each minisign signature; a throwaway key must be
+# refused. Nothing is installed and nothing is published.
+#
+# It runs on every change to the host crate, so a bump of rustls,
+# rustls-webpki, reqwest or the updater plugin that breaks download or
+# signature verification fails here instead of waiting for a person at the
+# QA Mac. On ubuntu the TLS roots come through the Linux path. Re-run by
+# dispatch after a network failure: the test retries transport errors three
+# times and names the stage and URL when it gives up.
+#
+# Not part of quality-gates.yml's coverage job, so the coverage floor never
+# depends on github.com. One job, no `needs:`, so there is no upstream skip
+# to inherit; the last step fails the job unless the proof actually ran.
+#
+# Never make this a required status check. It is path-filtered, so a pull
+# request that touches none of the paths below never gets the check and
+# would wait for it forever. It gates by failing, not by being required.
+#
+# Security note: no ${{ github.event.* }} fields in run: blocks, no secrets.
+# The manifest keys read below come from the live release and are validated
+# before use.
+
+on:
+  push:
+    branches: [main]
+    # Keep the two lists identical.
+    paths:
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/src/**"
+      - "src-tauri/tests/**"
+      - "src-tauri/tauri.conf.json"
+      - ".github/workflows/updater-verify.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/src/**"
+      - "src-tauri/tests/**"
+      - "src-tauri/tauri.conf.json"
+      - ".github/workflows/updater-verify.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: updater-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  updater-verify:
+    name: Updater verify (live release, shipped plugin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Toolchain, apt deps, cache and sidecar placeholder as in
+      # quality-gates.yml's coverage-rust job.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03; toolchain chosen via input
+        with:
+          toolchain: stable
+      - name: Install Tauri Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          # Its own key: this job builds the plain test profile, the coverage
+          # job builds the instrumented one.
+          shared-key: updater-verify
+      - name: Stage sidecar placeholders for tauri-build
+        # tauri-build only checks that bundle.externalBin exists; the test
+        # never runs the sidecar.
+        run: |
+          set -euo pipefail
+          TRIPLE=$(rustc -vV | awk '/^host:/{print $2}')
+          mkdir -p src-tauri/binaries
+          touch "src-tauri/binaries/beadbox-sidecar-${TRIPLE}"
+          echo "staged placeholder for $TRIPLE"
+
+      - name: Headless updater proof
+        run: |
+          set -euo pipefail
+          cd src-tauri
+          cargo test --locked --test updater_verify -- --ignored --nocapture 2>&1 \
+            | tee "$RUNNER_TEMP/updater-verify.log"
+
+      - name: The proof covered every published platform
+        # Fail closed: a passing cargo run is not enough. Zero tests run, a
+        # test renamed out of the filter, or a platform added to the manifest
+        # with no test of its own all fail here.
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/updater-verify.log"
+          bad=0
+          keys=$(curl -fsSL --proto '=https' --tlsv1.2 --retry 3 \
+            https://github.com/beadbox/beadbox/releases/latest/download/latest.json \
+            | jq -r '.platforms | keys[]')
+          [ -n "$keys" ] || { echo "::error::the live manifest lists no platforms"; exit 1; }
+          for key in $keys; do
+            if ! [[ "$key" =~ ^[a-z0-9_-]+$ ]]; then
+              echo "::error::unexpected manifest key '$key'"
+              bad=1
+            elif grep -qE "^${key}: v[^ ]+ https://[^ ]+ verified, [0-9]+ bytes" "$log"; then
+              grep -E "^${key}: v[^ ]+ https://[^ ]+ verified, " "$log"
+            else
+              echo "::error::manifest platform '$key' was not verified (no test for it, or it did not run)"
+              bad=1
+            fi
+          done
+          if ! grep -E 'refused: Minisign\(' "$log"; then
+            echo "::error::the wrong-key negative did not report a Minisign refusal"
+            bad=1
+          fi
+          if ! grep -qE '^test result: ok\. [0-9]+ passed; 0 failed; 0 ignored' "$log"; then
+            echo "::error::cargo did not report an all-passed run with nothing ignored"
+            bad=1
+          fi
+          [ "$bad" -eq 0 ]
+          echo "OK: every manifest platform verified; the wrong key was refused"
