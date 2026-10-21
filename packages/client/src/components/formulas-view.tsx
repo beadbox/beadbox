@@ -14,6 +14,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import { useHasTrains } from "@/hooks/use-has-trains"
+import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import {
   Activity,
   AlertTriangle,
@@ -200,6 +201,7 @@ export function FormulasView() {
   // Cookie-resolved active workspace (subscribed — see use-active-workspace).
   const [currentWorkspace, setCurrentWorkspace] = useActiveWorkspace(workspaces)
   const hasTrains = useHasTrains(currentWorkspace?.databasePath)
+  const hasWaiting = useHasWaiting(currentWorkspace?.databasePath)
   const [loadingWorkspaceId, setLoadingWorkspaceId] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -482,18 +484,19 @@ export function FormulasView() {
         setSettingsOpen(true)
         return
       }
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "4" || e.key === "5")) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "4" || e.key === "5" || e.key === "6")) {
         e.preventDefault()
         if (e.key === "1") router.navigate({ to: "/" as never })
         if (e.key === "2") router.navigate({ to: "/activity" as never })
         if (e.key === "4" && hasTrains) router.navigate({ to: "/trains" as never })
         if (e.key === "5") router.navigate({ to: "/chart" as never })
+        if (e.key === "6" && hasWaiting) router.navigate({ to: "/waiting" as never })
         return
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [router, hasTrains])
+  }, [router, hasTrains, hasWaiting])
 
   // Track page view
   useEffect(() => {

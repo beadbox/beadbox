@@ -13,6 +13,7 @@
 //   P1.5 -> formulas, molecules
 //   P1.6 -> subscribe (dual-channel: kkrpc start/stop + stderr event stream)
 //   P3.6 -> console (dev console + window.bd helper; allowlisted bd inspection)
+//   gates -> Waiting view (open gates + resolving a human gate)
 
 import { wrapNamespace } from "../lib/handler-timeout"
 import * as activity from "./activity"
@@ -21,6 +22,7 @@ import * as console from "./console"
 import * as diagnostics from "./diagnostics"
 import * as epics from "./epics"
 import * as formulas from "./formulas"
+import * as gates from "./gates"
 import * as health from "./health"
 import * as memory from "./memory"
 import * as molecules from "./molecules"
@@ -46,6 +48,7 @@ export const handlers = {
   diagnostics: wrapNamespace(diagnostics, "diagnostics"),
   epics: wrapNamespace(epics, "epics"),
   formulas: wrapNamespace(formulas, "formulas"),
+  gates: wrapNamespace(gates, "gates"),
   health: wrapNamespace(health, "health"),
   memory: wrapNamespace(memory, "memory"),
   molecules: wrapNamespace(molecules, "molecules"),

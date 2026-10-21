@@ -64,6 +64,7 @@ const makeCtx = (overrides: Partial<KeyNavContext> = {}): KeyNavContext => {
     zoomLevel: 100,
     isTauri: false,
     hasTrains: false,
+    hasWaiting: false,
     setFocusedItemId: mock(() => {}),
     setFocusedPanel: mock(() => {}),
     handleToggleEpic: mock(() => {}),
@@ -209,6 +210,18 @@ describe("handleGlobalShortcut", () => {
     const ctx = makeCtx({ hasTrains: false })
     handleGlobalShortcut(fireKey("4", { metaKey: true }), ctx)
     expect(ctx.router.push).not.toHaveBeenCalledWith("/trains")
+  })
+
+  test("Cmd+6 navigates to /waiting when the workspace has an open gate", () => {
+    const ctx = makeCtx({ hasWaiting: true })
+    expect(handleGlobalShortcut(fireKey("6", { metaKey: true }), ctx)).toBe(true)
+    expect(ctx.router.push).toHaveBeenCalledWith("/waiting")
+  })
+
+  test("Cmd+6 does nothing when no gate is open (zero footprint)", () => {
+    const ctx = makeCtx({ hasWaiting: false })
+    expect(handleGlobalShortcut(fireKey("6", { metaKey: true }), ctx)).toBe(true)
+    expect(ctx.router.push).not.toHaveBeenCalled()
   })
 
   test("a stale flag override can no longer suppress Cmd+3 (beadbox-01f.1)", () => {

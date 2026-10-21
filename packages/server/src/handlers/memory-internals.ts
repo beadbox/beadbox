@@ -34,6 +34,7 @@ export const MEMORY_VIEWS = [
   "chart",
   "formulas",
   "trains",
+  "waiting",
   "workspaces",
 ] as const
 

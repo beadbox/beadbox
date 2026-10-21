@@ -209,6 +209,33 @@ export function buildCommentArgs(id: string, text: string): string[] {
 }
 
 /**
+ * Build argv for `bd gate resolve <id> [--reason=<text>]`.
+ *
+ * The reason is free text from the Waiting view's dialog, so it only ever
+ * travels as the value half of one --reason= token: newlines, '=' and a
+ * leading '-' stay data. An empty reason omits the flag.
+ */
+export function buildGateResolveArgs(id: string, reason: string): string[] {
+  const args = ["gate", "resolve", assertSafeBeadId(id)]
+  if (typeof reason !== "string") {
+    throw new BdArgvError(`Invalid gate reason: expected a string, got ${typeof reason}`)
+  }
+  if (reason) args.push(flagArg("--reason", reason))
+  return args
+}
+
+/**
+ * Build argv for `bd gate list`: open gates only, the cheap read behind the
+ * Waiting tab's presence. The argv is fixed; nothing from the caller reaches
+ * it. There is no --limit: bd already caps the list (50 in bd 1.3.1), and the
+ * flag is not needed to stay cheap on older bd, which this read must not
+ * depend on.
+ */
+export function buildOpenGateListArgs(): string[] {
+  return ["gate", "list"]
+}
+
+/**
  * Guard a free-form value that must occupy a positional slot (e.g. the value
  * of `bd config set <key> <value>`), where neither the --flag=value form nor
  * a "--" terminator is available. Anything starting with "-" would be lexed

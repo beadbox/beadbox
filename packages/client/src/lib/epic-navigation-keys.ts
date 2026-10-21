@@ -45,6 +45,7 @@ export interface KeyNavContext {
   zoomLevel: number
   isTauri: boolean
   hasTrains: boolean
+  hasWaiting: boolean
 
   // Setters / actions
   setFocusedItemId: (id: string | null) => void
@@ -110,12 +111,14 @@ const tryFilterBarShortcut = (e: KeyboardEvent, ctx: KeyNavContext): boolean => 
 
 const tryViewSwitchShortcut = (e: KeyboardEvent, ctx: KeyNavContext): boolean => {
   if (!(e.metaKey || e.ctrlKey)) return false
-  if (e.key !== "1" && e.key !== "2" && e.key !== "3" && e.key !== "4" && e.key !== "5") return false
+  const k = e.key
+  if (k !== "1" && k !== "2" && k !== "3" && k !== "4" && k !== "5" && k !== "6") return false
   e.preventDefault()
   if (e.key === "2") ctx.router.push("/activity")
   if (e.key === "3") ctx.router.push("/formulas")
   if (e.key === "4" && ctx.hasTrains) ctx.router.push("/trains")
   if (e.key === "5") ctx.router.push("/chart")
+  if (e.key === "6" && ctx.hasWaiting) ctx.router.push("/waiting")
   return true
 }
 
@@ -127,7 +130,7 @@ const tryRefreshShortcut = (e: KeyboardEvent, ctx: KeyNavContext): boolean => {
   return true
 }
 
-// Cmd+,, Cmd+F, Cmd+1/2/3, Cmd+R, F5. Run before the typing-target gate
+// Cmd+,, Cmd+F, Cmd+1–6, Cmd+R, F5. Run before the typing-target gate
 // because they should work even from inputs.
 export const handleGlobalShortcut = (e: KeyboardEvent, ctx: KeyNavContext): boolean =>
   trySettingsShortcut(e, ctx) ||

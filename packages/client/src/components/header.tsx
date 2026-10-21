@@ -19,6 +19,7 @@ import {
   Circle,
   FlaskConical,
   Heart,
+  Hourglass,
   Loader2,
   RefreshCw,
   ServerCrash,
@@ -29,6 +30,7 @@ import { safeCapture } from "@/lib/posthog-safe"
 import { Fragment, useCallback, useEffect, useState } from "react"
 import type { AppHealth } from "../hooks/use-app-health"
 import { useHasTrains } from "@/hooks/use-has-trains"
+import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { useViewport } from "../hooks/use-viewport"
 import { ERROR_CATEGORY_TITLES } from "../lib/epic-tree-utils"
 import {
@@ -169,6 +171,7 @@ export function Header({
   const [showHint, setShowHint] = useState(false)
   const [healthDetailsOpen, setHealthDetailsOpen] = useState(false)
   const hasTrains = useHasTrains(currentWorkspace.databasePath)
+  const hasWaiting = useHasWaiting(currentWorkspace.databasePath)
 
   const navigateTo = useCallback(
     (destination: string, source: "tab" | "dropdown") => {
@@ -365,6 +368,25 @@ export function Header({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>Trains ⌘4</TooltipContent>
+              </Tooltip>
+              )}
+              {hasWaiting && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => navigateTo("waiting", "tab")}
+                    className={cn(
+                      "px-2.5 py-1.5 text-sm font-medium rounded-md transition-colors inline-flex items-center gap-1.5",
+                      pathname === "/waiting"
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                    )}
+                  >
+                    <Hourglass className="h-3.5 w-3.5" />
+                    Waiting
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Waiting ⌘6</TooltipContent>
               </Tooltip>
               )}
             </div>

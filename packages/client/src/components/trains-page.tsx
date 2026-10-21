@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useAppHealth } from "../hooks/use-app-health"
 import { usePreferences } from "../hooks/use-preferences"
 import { useUpdateChecker } from "../hooks/use-update-checker"
+import { useHasWaiting } from "../hooks/use-waiting-gates"
 import { setSelectedBead as persistSelectedBead } from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
 import { tryViewSwitchShortcut } from "../lib/view-switch-keys"
@@ -263,14 +264,19 @@ export function TrainsPage() {
     void navigate({ to: "/" })
   }
 
-  // ⌘1–⌘5 view switching; this page is only reachable when plans exist.
+  // ⌘1–⌘6 view switching; this page is only reachable when plans exist.
+  const hasWaiting = useHasWaiting(dbPath)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      tryViewSwitchShortcut(e, { push: (to) => void navigate({ to: to as never }), hasTrains: true })
+      tryViewSwitchShortcut(e, {
+        push: (to) => void navigate({ to: to as never }),
+        hasTrains: true,
+        hasWaiting,
+      })
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [navigate])
+  }, [navigate, hasWaiting])
 
   return (
     <div className="h-full flex flex-col bg-background safe-area-inset">

@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Filters } from "@/components/filter-bar"
 import { useHasTrains } from "@/hooks/use-has-trains"
+import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { dispatchKeyDown, type KeyNavContext } from "@/lib/epic-navigation-keys"
 import { countAllBeads, findBeadById, findParentPath } from "@/lib/epic-tree-utils"
 import { type GroupedSection, groupedNavigationOrder } from "@/lib/grouped-layout"
@@ -94,6 +95,10 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
   const hasTrains = useHasTrains(currentWorkspace?.databasePath)
   const hasTrainsRef = useRef(hasTrains)
   hasTrainsRef.current = hasTrains
+  // Cmd/Ctrl+6 exists only while the workspace has an open gate.
+  const hasWaiting = useHasWaiting(currentWorkspace?.databasePath)
+  const hasWaitingRef = useRef(hasWaiting)
+  hasWaitingRef.current = hasWaiting
 
   const navigate = useNavigate()
   const router = {
@@ -507,6 +512,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
         zoomLevel,
         isTauri: !!isTauriRef.current,
         hasTrains: hasTrainsRef.current,
+        hasWaiting: hasWaitingRef.current,
         setFocusedItemId,
         setFocusedPanel,
         handleToggleEpic,

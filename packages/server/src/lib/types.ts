@@ -249,3 +249,29 @@ export interface StepOverlay {
   assignee?: string
   updatedAt?: string
 }
+
+// Waiting view types (from `bd list --include-gates --json`)
+
+// An open issue a gate keeps out of `bd ready`.
+export interface GateHeldIssue {
+  id: string
+  title: string
+  status: string
+  issueType: string
+  // Set when the issue is held only because an ancestor is gated: the ID of
+  // that gated ancestor (an epic's children wait through the epic).
+  via?: string
+}
+
+// An open gate: what waits, on what, since when.
+export interface WaitingGate {
+  id: string
+  title: string
+  description: string
+  awaitType: string // "human" | "timer" | "gh:run" | "gh:pr" | "bead"; "" if bd sent none
+  awaitId?: string // gh run ID, PR number or bead ID; absent for human/timer
+  createdAt: string // ISO
+  timeoutMs?: number // timer gates: bd's timeout (nanoseconds) in ms
+  deadline?: string // ISO; createdAt + timeout, when the gate has a timeout
+  held: GateHeldIssue[]
+}
