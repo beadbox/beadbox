@@ -49,6 +49,11 @@ export const TEMPLATE_GAMMA_WS_DIR = templateWs("gamma")
 // bd 1.3 custom statuses in name:category form (beadbox-r72.4, check C).
 export const TEMPLATE_STATUSES_WS_DIR = templateWs("statuses")
 export const CUSTOM_STATUSES = "ticket_awaiting:active,ticket_active:wip,unit_escalated:frozen"
+// Open bd gates for the Waiting view (beadbox-37h5): its own workspace, so no
+// other spec sees a gate, a Waiting tab or a blocked bead.
+export const TEMPLATE_GATES_WS_DIR = templateWs("gates")
+/** Children of the gates workspace's "Big epic": past the view's per-gate cap of 200. */
+export const BIG_EPIC_CHILDREN = 250
 
 // Port used by the temporary Dolt server during template creation.
 // Not used at runtime; workers pick their own ephemeral ports.
@@ -161,6 +166,45 @@ function seedStandardData(dbPath: string): void {
 }
 
 /** Fail with the cause on the first line when a required tool is missing. */
+// beadbox-37h5: one gate of each kind the Waiting view lists, plus a human gate
+// on an epic whose children exceed the per-gate cap. The 250 children go in
+// with one bd import of synthetic rows (one bd create each would take minutes).
+function seedGatesWorkspace(dbPath: string): void {
+  const port = TEMPLATE_DOLT_PORT
+  const gate = (args: string[]) =>
+    (JSON.parse(bd(dbPath, ["gate", "create", ...args, "--json"], port)) as { id: string }).id
+  const ship = bdCreate(dbPath, ["--title", "Ship feature", "--type", "task"], port)
+  const deploy = bdCreate(dbPath, ["--title", "Deploy", "--type", "task"], port)
+  for (let i = 1; i <= 3; i++) bdCreate(dbPath, ["--title", `Spare task ${i}`, "--type", "task"], port)
+
+  const now = new Date().toISOString().replace(/\.\d+Z$/, "Z")
+  const row = (id: string, title: string, type: string, parent?: string) =>
+    JSON.stringify({
+      _type: "issue",
+      id,
+      title,
+      status: "open",
+      priority: 2,
+      issue_type: type,
+      created_at: now,
+      updated_at: now,
+      ...(parent
+        ? { dependencies: [{ issue_id: id, depends_on_id: parent, type: "parent-child", created_at: now }] }
+        : {}),
+    })
+  const rows = [row("gw-big", "Big epic", "epic")]
+  for (let i = 1; i <= BIG_EPIC_CHILDREN; i++) rows.push(row(`gw-big.${i}`, `Big child ${i}`, "task", "gw-big"))
+  const jsonl = join(TEMPLATE_GATES_WS_DIR, "big-epic.jsonl")
+  writeFileSync(jsonl, `${rows.join("\n")}\n`)
+  bd(dbPath, ["import", jsonl], port)
+  rmSync(jsonl)
+
+  gate(["--type=human", `--blocks=${ship}`, "--reason=Need design review"])
+  gate(["--type=timer", `--blocks=${deploy}`, "--timeout=2h"])
+  gate(["--type=gh:run", `--blocks=${deploy}`, "--await-id=123456789"])
+  gate(["--type=human", "--blocks=gw-big", "--title=Gate: big epic sign-off"])
+}
+
 function requireTool(name: string, path: string): void {
   try {
     execFileSync(path, ["version"], { encoding: "utf-8", timeout: 15_000, env: childEnv() })
@@ -252,6 +296,8 @@ export default function globalSetup() {
       const id = bdCreate(statusesDbPath, ["--title", `Bead in ${status}`, "--type", "task", "--priority", "2"], TEMPLATE_DOLT_PORT)
       bd(statusesDbPath, ["update", id, "--status", status], TEMPLATE_DOLT_PORT)
     }
+
+    seedGatesWorkspace(initWorkspace(TEMPLATE_GATES_WS_DIR, "gw"))
   } finally {
     // 6. Stop the template server. Data persists in TEMPLATE_DATA_DIR.
     stopDoltServer(server)

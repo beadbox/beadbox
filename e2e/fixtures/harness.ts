@@ -6,6 +6,8 @@
 //              registry; plus bd() to read or write it the way a user would.
 //   statusesWorkspace (worker) a second registered workspace whose beads sit
 //              in bd 1.3 name:category custom statuses (beadbox-r72.4).
+//   gatesWorkspace (worker) a third registered workspace with open bd gates
+//              and an epic past the Waiting view's per-gate cap (beadbox-37h5).
 //   sidecar    (worker) one real sidecar for the worker (SidecarBridge).
 //   page       a page with window.__beadboxTestBridge installed, so the test
 //              build's rpc.* reaches that sidecar.
@@ -18,7 +20,7 @@ import { execFileSync } from "child_process"
 import { randomUUID } from "crypto"
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
 import { join, resolve } from "path"
-import { TEMPLATE_DATA_DIR, TEMPLATE_STATUSES_WS_DIR, TEMPLATE_WS_DIR } from "../global-setup"
+import { TEMPLATE_DATA_DIR, TEMPLATE_GATES_WS_DIR, TEMPLATE_STATUSES_WS_DIR, TEMPLATE_WS_DIR } from "../global-setup"
 import {
   childEnv,
   findBd,
@@ -80,9 +82,10 @@ function harnessWorkspace(name: string, projectDir: string, beadsDir: string, do
 }
 
 type WorkerFixtures = {
-  workspaces: { standard: HarnessWorkspace; statuses: HarnessWorkspace }
+  workspaces: { standard: HarnessWorkspace; statuses: HarnessWorkspace; gates: HarnessWorkspace }
   workspace: HarnessWorkspace
   statusesWorkspace: HarnessWorkspace
+  gatesWorkspace: HarnessWorkspace
   sidecar: SidecarBridge
 }
 
@@ -103,12 +106,13 @@ export const test = base.extend<object, WorkerFixtures>({
         }
         const standard = make("e2e-standard", TEMPLATE_WS_DIR, "ws-standard")
         const statuses = make("e2e-statuses", TEMPLATE_STATUSES_WS_DIR, "ws-statuses")
+        const gates = make("e2e-gates", TEMPLATE_GATES_WS_DIR, "ws-gates")
         writeFileSync(
           registryPath,
           JSON.stringify({
             version: 2,
             activeWorkspace: standard.id,
-            workspaces: [standard, statuses].map((w) => ({
+            workspaces: [standard, statuses, gates].map((w) => ({
               id: w.id,
               name: w.name,
               addedAt: new Date().toISOString(),
@@ -119,7 +123,7 @@ export const test = base.extend<object, WorkerFixtures>({
           }),
         )
         writeFileSync(join(dir, "legacy-registry.json"), "[]")
-        await use({ standard, statuses })
+        await use({ standard, statuses, gates })
       } finally {
         const pid = server.process.pid
         stopDoltServer(server)
@@ -131,6 +135,7 @@ export const test = base.extend<object, WorkerFixtures>({
 
   workspace: [async ({ workspaces }, use) => use(workspaces.standard), { scope: "worker" }],
   statusesWorkspace: [async ({ workspaces }, use) => use(workspaces.statuses), { scope: "worker" }],
+  gatesWorkspace: [async ({ workspaces }, use) => use(workspaces.gates), { scope: "worker" }],
 
   sidecar: [
     async ({ workspace }, use, workerInfo) => {
