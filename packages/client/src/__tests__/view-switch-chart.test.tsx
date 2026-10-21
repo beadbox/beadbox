@@ -1,5 +1,7 @@
 // ⌘5 opens the Chart view from the Activity and Formulas views, through each
-// page's own view-switch handler (PR #51).
+// page's own view-switch handler (PR #51). ⌘6 opens the Waiting view the same
+// way, but only while the workspace has an open gate (#60), and the header's
+// presence check there is the gates-only read, never the full Waiting list.
 
 import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
 import { QueryClientProvider } from "@tanstack/react-query"
@@ -11,7 +13,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { StartupGate } from "../components/startup-gate"
 import { queryClient } from "../lib/query-client"
@@ -27,6 +29,10 @@ const ws: Workspace = {
   databasePath: "/tmp/switch-ws/.beads",
   mode: "embedded",
 }
+
+let gateOpen = false
+const hasOpenGate = mock(async (_dbPath?: string) => ({ success: true as const, data: gateOpen }))
+const listWaiting = mock(async (_dbPath?: string) => ({ success: true as const, data: [] }))
 
 let ActivityPage: typeof import("../components/activity-page").ActivityPage
 let FormulasView: typeof import("../components/formulas-view").FormulasView
@@ -67,6 +73,7 @@ beforeAll(async () => {
       },
       { get: (t, k) => (k in t ? t[k as keyof typeof t] : anyCall()) },
     ),
+    gates: { hasOpenGate, listWaiting },
   }
   _setRpc(
     new Proxy(api, {
@@ -78,6 +85,9 @@ beforeAll(async () => {
 })
 
 afterEach(() => {
+  gateOpen = false
+  hasOpenGate.mockClear()
+  listWaiting.mockClear()
   cleanup()
   queryClient.clear()
   _resetWorkspaceSessions()
@@ -99,6 +109,11 @@ function mountAt(path: string, Page: () => React.JSX.Element) {
       getParentRoute: () => rootRoute,
       path: "/chart",
       component: () => <p>CHART VIEW</p>,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/waiting",
+      component: () => <p>WAITING VIEW</p>,
     }),
     createRoute({ getParentRoute: () => rootRoute, path: "/workspaces", component: () => null }),
   ])
@@ -125,6 +140,44 @@ describe("⌘5 from views with their own handler", () => {
       expect(screen.queryByText("CHART VIEW")).toBeNull()
       fireEvent.keyDown(window, { key: "5", metaKey: true })
       expect(await screen.findByText("CHART VIEW", {}, { timeout: 5_000 })).toBeTruthy()
+    }, 20_000)
+  }
+})
+
+describe("⌘6 from views with their own handler", () => {
+  for (const [name, path, page] of [
+    ["Activity", "/activity", () => ActivityPage],
+    ["Formulas", "/formulas", () => FormulasView],
+  ] as const) {
+    test(`${name}: ⌘6 opens the Waiting view while a gate is open`, async () => {
+      gateOpen = true
+      mountAt(path, page())
+      // The tab appearing means the page's own hasWaiting is true as well:
+      // both read the same presence query.
+      await screen.findByRole("button", { name: "Waiting" }, { timeout: 5_000 })
+      expect(screen.queryByText("WAITING VIEW")).toBeNull()
+      fireEvent.keyDown(window, { key: "6", metaKey: true })
+      expect(await screen.findByText("WAITING VIEW", {}, { timeout: 5_000 })).toBeTruthy()
+    }, 20_000)
+
+    test(`${name}: ⌘6 does nothing while no gate is open`, async () => {
+      mountAt(path, page())
+      await screen.findByRole("button", { name: "Chart" }, { timeout: 5_000 })
+      await waitFor(() => expect(hasOpenGate).toHaveBeenCalled())
+      fireEvent.keyDown(window, { key: "6", metaKey: true })
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(screen.queryByText("WAITING VIEW")).toBeNull()
+      expect(screen.queryAllByRole("button", { name: "Waiting" }).length).toBe(0)
+    }, 20_000)
+
+    // Presence runs in every view on every change event: it must stay the
+    // gates-only read. If it goes back to the full list, this fails.
+    test(`${name}: the Waiting tab asks hasOpenGate, never the full Waiting list`, async () => {
+      gateOpen = true
+      mountAt(path, page())
+      await screen.findByRole("button", { name: "Waiting" }, { timeout: 5_000 })
+      expect(hasOpenGate).toHaveBeenCalled()
+      expect(listWaiting).not.toHaveBeenCalled()
     }, 20_000)
   }
 })

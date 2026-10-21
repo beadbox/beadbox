@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { hasOpenGate } from "../handlers/gates"
 import {
   __resetBdPathCache,
   cookFormula,
@@ -20,7 +21,13 @@ import {
   setCustomStatuses,
   showFormula,
 } from "../lib/bd"
-import { BdArgvError, buildCommentArgs, buildUpdateArgs } from "../lib/bd-argv"
+import {
+  BdArgvError,
+  buildCommentArgs,
+  buildGateResolveArgs,
+  buildOpenGateListArgs,
+  buildUpdateArgs,
+} from "../lib/bd-argv"
 
 const HOSTILE_ID = "--db=/tmp/evil"
 
@@ -80,6 +87,115 @@ describe("buildCommentArgs", () => {
 
   test("rejects a flag-shaped bead ID", () => {
     expect(() => buildCommentArgs(HOSTILE_ID, "text")).toThrow(BdArgvError)
+  })
+})
+
+describe("buildGateResolveArgs (Waiting view)", () => {
+  test("emits the reason as a single --reason= token", () => {
+    expect(buildGateResolveArgs("bb-1", "approved")).toEqual([
+      "gate",
+      "resolve",
+      "bb-1",
+      "--reason=approved",
+    ])
+  })
+
+  test("omits --reason when the reason is empty", () => {
+    expect(buildGateResolveArgs("bb-1", "")).toEqual(["gate", "resolve", "bb-1"])
+  })
+
+  test("keeps a flag-shaped, multi-line or '='-bearing reason inside the value token", () => {
+    for (const reason of [HOSTILE_ID, "-r", "--", "-", "a=b", "x\n--db=/tmp/evil", "--reason=x"]) {
+      const argv = buildGateResolveArgs("bb-1", reason)
+      expect(argv).toEqual(["gate", "resolve", "bb-1", `--reason=${reason}`])
+      expect(argv).toHaveLength(4)
+    }
+  })
+
+  test("rejects a reason containing a NUL byte", () => {
+    expect(() => buildGateResolveArgs("bb-1", "a\0b")).toThrow(BdArgvError)
+  })
+
+  test("rejects a reason that is not a string (RPC does not enforce TS types)", () => {
+    expect(() => buildGateResolveArgs("bb-1", 42 as unknown as string)).toThrow(BdArgvError)
+  })
+
+  test("rejects a flag-shaped, multi-line or empty gate ID", () => {
+    for (const id of [HOSTILE_ID, "-h", "--", "bb-1\n--db=/tmp/evil", "bb-1 --db /tmp", ""]) {
+      expect(() => buildGateResolveArgs(id, "x")).toThrow(BdArgvError)
+    }
+  })
+})
+
+describe("Waiting tab presence: a gates-only read (bd gate list)", () => {
+  const originalBdPath = process.env.BD_PATH
+  let root: string
+  let db: string
+  let log: string
+  let reply: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "beadbox-gate-presence-"))
+    db = join(root, ".beads")
+    await mkdir(db)
+    await writeFile(join(db, "metadata.json"), "{}")
+    log = join(root, "argv.log")
+    reply = join(root, "reply.json")
+    const fakeBd = join(root, "bd")
+    await writeFile(
+      fakeBd,
+      `#!/bin/sh\nprintf '%s\\037' "$@" >> "${log}"\nprintf '\\036' >> "${log}"\ncat "${reply}"\n`,
+      { mode: 0o700 },
+    )
+    process.env.BD_PATH = fakeBd
+    __resetBdPathCache()
+  })
+
+  afterEach(async () => {
+    if (originalBdPath === undefined) delete process.env.BD_PATH
+    else process.env.BD_PATH = originalBdPath
+    __resetBdPathCache()
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function spawned(): Promise<string[][]> {
+    const raw = await readFile(log, "utf-8").catch(() => "")
+    return raw
+      .split("\x1e")
+      .filter(Boolean)
+      .map((rec) => rec.split("\x1f").slice(0, -1))
+  }
+
+  test("the argv is fixed: gate list, no caller input", () => {
+    expect(buildOpenGateListArgs()).toEqual(["gate", "list"])
+  })
+
+  // The presence check runs in every view on every change event. If it ever
+  // goes back to the full `bd list --status all --limit 0 --include-*` walk,
+  // this fails.
+  test("hasOpenGate spawns exactly one `bd gate list --json`, never the full list", async () => {
+    await writeFile(reply, "null\n")
+    expect(await hasOpenGate(db)).toEqual({ success: true, data: false })
+    const calls = await spawned()
+    expect(calls).toHaveLength(1)
+    const argv = calls[0]!
+    expect(argv.slice(argv.indexOf("gate"))).toEqual(["gate", "list", "--json"])
+    expect(argv).not.toContain("--include-gates")
+    expect(argv).not.toContain("--status")
+  })
+
+  test("an open gate in bd's answer is presence; a closed one is not", async () => {
+    await writeFile(reply, JSON.stringify([{ id: "g-1", issue_type: "gate", status: "open" }]))
+    expect(await hasOpenGate(db)).toEqual({ success: true, data: true })
+    await writeFile(reply, JSON.stringify([{ id: "g-1", issue_type: "gate", status: "closed" }]))
+    expect(await hasOpenGate(db)).toEqual({ success: true, data: false })
+  })
+
+  test("a bd that cannot answer is a failure, not a fallback to the full list", async () => {
+    await writeFile(reply, "not json")
+    const r = await hasOpenGate(db)
+    expect(r.success).toBe(false)
+    expect(await spawned()).toHaveLength(1)
   })
 })
 

@@ -24,6 +24,8 @@ import {
   assertSafeName,
   assertSafeVarName,
   buildCommentArgs,
+  buildGateResolveArgs,
+  buildOpenGateListArgs,
   buildUpdateArgs,
   flagArg,
 } from "./bd-argv"
@@ -212,6 +214,11 @@ export interface BdBead {
   due_at?: string
   defer_until?: string
   estimated_minutes?: number
+  // Gate fields, present only on issue_type "gate" rows (`bd gate create`,
+  // or a formula step's gate). bd omits each key when it is unset.
+  await_type?: string // "human" | "timer" | "gh:run" | "gh:pr" | "bead"
+  await_id?: string // run ID, PR number or bead ID the gate waits on
+  timeout?: number // nanoseconds (Go time.Duration), e.g. 7200000000000 for 2h
   // Dependency fields (when this bead is a dependent of another)
   dependency_type?: "parent-child" | "blocks" | "related"
   // List output fields
@@ -891,6 +898,23 @@ export async function updateType(
 // Close a bead
 export async function closeBead(id: string, options: BdOptions = {}): Promise<void> {
   await bdExecRaw(["close", assertSafeBeadId(id)], options)
+}
+
+// Resolve (close) a gate. bd refuses an ID that is not a gate issue.
+export async function resolveGate(
+  id: string,
+  reason: string,
+  options: BdOptions = {},
+): Promise<void> {
+  await bdExecRaw(buildGateResolveArgs(id, reason), options)
+}
+
+// Open gates only (`bd gate list --json`; bd leaves closed gates out). This
+// is the Waiting tab's presence check, run on every change event in every
+// view, so it must stay a gates-only read: never the full issue list.
+// bd prints `null` when no gate is open.
+export async function listOpenGates(options: BdOptions = {}): Promise<BdBead[]> {
+  return (await bdExec<BdBead[] | null>(buildOpenGateListArgs(), options)) ?? []
 }
 
 // Reopen a bead

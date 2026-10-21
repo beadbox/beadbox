@@ -16,6 +16,7 @@ import { UpdateDialog } from "@/components/update-dialog"
 import { useActiveWorkspace } from "@/hooks/use-active-workspace"
 import { useAppHealth } from "@/hooks/use-app-health"
 import { useHasTrains } from "@/hooks/use-has-trains"
+import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { usePreferences } from "@/hooks/use-preferences"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { readSystemIssues, systemIssuesKey } from "@/hooks/use-workspace-lifecycle"
@@ -99,6 +100,7 @@ export function ChartView() {
   const { health: appHealth } = useAppHealth()
   const prefs = usePreferences()
   const hasTrains = useHasTrains(currentWorkspace?.databasePath)
+  const hasWaiting = useHasWaiting(currentWorkspace?.databasePath)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
   const {
@@ -146,11 +148,15 @@ export function ChartView() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      tryViewSwitchShortcut(e, { push: (to) => void navigate({ to: to as never }), hasTrains })
+      tryViewSwitchShortcut(e, {
+        push: (to) => void navigate({ to: to as never }),
+        hasTrains,
+        hasWaiting,
+      })
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [navigate, hasTrains])
+  }, [navigate, hasTrains, hasWaiting])
 
   const openBead = (id: string) => {
     persistSelectedBead(id)

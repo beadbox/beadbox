@@ -28,6 +28,7 @@ const VIEWS: Record<string, string> = {
   "/chart": "chart",
   "/formulas": "formulas",
   "/trains": "trains",
+  "/waiting": "waiting",
   "/workspaces": "workspaces",
 }
 

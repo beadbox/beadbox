@@ -1,5 +1,5 @@
-// ⌘1–⌘5 view switching for pages without their own key handler (Chart,
-// Trains). Beads, Activity and Formulas keep their existing handlers.
+// ⌘1–⌘6 view switching for pages without their own key handler (Chart,
+// Trains, Waiting). Beads, Activity and Formulas keep their existing handlers.
 
 const ROUTES: Record<string, string> = {
   "1": "/",
@@ -7,11 +7,13 @@ const ROUTES: Record<string, string> = {
   "3": "/formulas",
   "4": "/trains",
   "5": "/chart",
+  "6": "/waiting",
 }
 
 export interface ViewSwitchContext {
   push: (to: string) => void
   hasTrains: boolean
+  hasWaiting: boolean
 }
 
 // Returns true when the event was a view-switch shortcut (handled or not).
@@ -21,6 +23,7 @@ export function tryViewSwitchShortcut(e: KeyboardEvent, ctx: ViewSwitchContext):
   if (!to) return false
   e.preventDefault()
   if (to === "/trains" && !ctx.hasTrains) return true
+  if (to === "/waiting" && !ctx.hasWaiting) return true
   ctx.push(to)
   return true
 }
