@@ -18,7 +18,6 @@ import {
 } from "@tanstack/react-router"
 import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import posthog from "posthog-js"
 import { useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -66,14 +65,16 @@ afterEach(() => {
 })
 
 describe("trackedAction", () => {
+  // Spied on the module's own export, not on posthog: feature-flag.test.ts
+  // replaces posthog-js process-wide, so which posthog object posthog-safe
+  // holds depends on file order (green on macOS, 0 captures on Linux CI).
   let captured: ReturnType<typeof spyOn>
   beforeEach(() => {
-    captured = spyOn(posthog, "capture").mockImplementation(() => undefined)
+    captured = spyOn(capture, "captureServerActionFailed").mockImplementation(() => {})
   })
   afterEach(() => captured.mockRestore())
 
-  const failures = () =>
-    (captured.mock.calls as unknown[][]).filter((c) => c[0] === "app_server_action_failed")
+  const failures = () => captured.mock.calls as unknown[][]
 
   test("a rejecting call resolves to {success:false} with the error's message, captured once", async () => {
     const result = await capture.trackedAction("updateBeadStatus", async () => {
@@ -84,7 +85,10 @@ describe("trackedAction", () => {
       error: "rpc.beads.updateBeadStatus: the Beadbox sidecar did not respond within 45s",
     })
     expect(failures()).toHaveLength(1)
-    expect(failures()[0][1]).toMatchObject({ action: "updateBeadStatus" })
+    expect(failures()[0][0]).toBe("updateBeadStatus")
+    expect(failures()[0][1]).toBe(
+      "rpc.beads.updateBeadStatus: the Beadbox sidecar did not respond within 45s",
+    )
   })
 
   test("a non-Error rejection is stringified", async () => {
