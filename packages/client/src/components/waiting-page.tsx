@@ -231,24 +231,17 @@ function ResolveGateDialog({
     event.preventDefault()
     if (!gate) return
     setIsResolving(true)
-    let result: Awaited<ReturnType<typeof rpc.gates.resolveHumanGate>>
-    try {
-      result = await trackedAction("resolveHumanGate", () =>
-        rpc.gates.resolveHumanGate(gate.id, dbPath, reason),
-      )
-    } catch (error) {
-      // A rejected call (timeout, dropped connection) must not leave the
-      // dialog stuck with its buttons disabled.
-      toastError("Failed to resolve gate", {
-        description: error instanceof Error ? error.message : String(error),
-      })
-      void onRefresh()
-      return
-    } finally {
-      setIsResolving(false)
-    }
+    // A rejected call (timeout, dropped connection) comes back as a failure
+    // too, so the dialog is never left stuck with its buttons disabled.
+    const result = await trackedAction("resolveHumanGate", () =>
+      rpc.gates.resolveHumanGate(gate.id, dbPath, reason),
+    )
+    setIsResolving(false)
     if (!result.success) {
       toastError("Failed to resolve gate", { description: result.error })
+      // A call that timed out may have closed the gate in bd anyway; re-read
+      // rather than leave it listed until the next change event.
+      void onRefresh()
       return
     }
     toast.success(`Gate ${gate.id} resolved`)

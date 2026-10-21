@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
+import { settleAction } from "../lib/capture-action-failed"
 import { rpc } from "../lib/rpc"
 import type { FormulaDetail } from "../lib/types"
 import { Button } from "./ui/button"
@@ -62,11 +63,8 @@ export function FormulaPourModal({ open, onOpenChange, formula, dbPath }: Formul
   const handlePour = useCallback(async () => {
     if (!validate()) return
     setPouring(true)
-    const result = await rpc.formulas.pourFormulaAction(
-      formula.formula,
-      vars,
-      assignee.trim() || undefined,
-      dbPath,
+    const result = await settleAction(() =>
+      rpc.formulas.pourFormulaAction(formula.formula, vars, assignee.trim() || undefined, dbPath),
     )
     setPouring(false)
     if (result.success) {

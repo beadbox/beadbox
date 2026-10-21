@@ -527,11 +527,9 @@ export function useBeadMutations({ bead, dbPath, onUpdate }: UseBeadMutationsOpt
       const labelToAdd = normalizeNewLabel(raw, labels)
       if (!bead || labelToAdd === null) return
       setLabels([...labels, labelToAdd])
-      // A thrown rpc (sidecar deadline or restart mid-call) is a failed write
-      // too: without the catch the optimistic chip stays and no toast shows.
       const result = await trackedAction("addLabelAction", () =>
         addLabelAction(bead.id, labelToAdd, dbPath),
-      ).catch((error: unknown) => ({ success: false, error: String(error) }))
+      )
       if (result.success) {
         onUpdate({ ...bead, labels: [...labels, labelToAdd], updatedAt: new Date() })
       } else {

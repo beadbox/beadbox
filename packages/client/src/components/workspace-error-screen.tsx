@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import type { BdLoadError } from "../lib/bd-error"
+import { settleAction } from "../lib/capture-action-failed"
 import { safeCapture } from "../lib/posthog-safe"
 import { getAnalyticsEnabled } from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
@@ -102,7 +103,10 @@ export function WorkspaceErrorScreen({
     setFixError(null)
     setConfirmOpen(false)
 
-    const result = await rpc.recovery.runRecoveryCommand(error.fixCommand, databasePath)
+    const fixCommand = error.fixCommand
+    const result = await settleAction(() =>
+      rpc.recovery.runRecoveryCommand(fixCommand, databasePath),
+    )
     setIsFixing(false)
 
     if (result.success) {

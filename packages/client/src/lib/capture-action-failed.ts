@@ -21,12 +21,30 @@ export function captureServerActionFailed(
   })
 }
 
+type ActionFailure = { success: false; error: string }
+
+/**
+ * Runs a write and turns a rejection into a failed result. rpc calls reject,
+ * not return {success:false}, when the sidecar session is destroyed mid-call
+ * or the call deadline fires (beadbox-g9xr); without this the caller's failure
+ * branch never runs, so an optimistic value and its spinner stay on screen.
+ */
+export async function settleAction<T extends { success: boolean; error?: string }>(
+  fn: () => Promise<T>,
+): Promise<T | ActionFailure> {
+  try {
+    return await fn()
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 export async function trackedAction<T extends { success: boolean; error?: string }>(
   action: string,
   fn: () => Promise<T>,
-): Promise<T> {
+): Promise<T | ActionFailure> {
   const startMs = Date.now()
-  const result = await fn()
+  const result = await settleAction(fn)
   if (!result.success) {
     captureServerActionFailed(action, result.error ?? "Unknown error", Date.now() - startMs)
   }

@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { settleAction } from "@/lib/capture-action-failed"
 import { rpc } from "@/lib/rpc"
 import { validateStatusName } from "@/lib/status-validation"
 import { cn } from "@/lib/utils"
@@ -94,7 +95,7 @@ export function CustomStatusesManager({
     if (!databasePath || saving) return
     setSaving(true)
     try {
-      const result = await rpc.beads.updateCustomStatuses(current, databasePath)
+      const result = await settleAction(() => rpc.beads.updateCustomStatuses(current, databasePath))
       if (result.success) {
         setOriginal(current)
         toast.success("Custom statuses saved")
