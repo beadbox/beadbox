@@ -86,6 +86,26 @@ export function _getRpcTap(): ((evt: BdCommandEvent) => void) | null {
   return _rpcTap
 }
 
+/**
+ * Methods whose arguments carry a credential (beadbox-hqtp). Their Commands-tab
+ * row shows one "<redacted>" placeholder in place of every argument, not just
+ * the password: its position differs per method and moves when a signature
+ * changes. rpc-redaction-census.test.ts fails if a server handler takes a
+ * password-like parameter and is not listed here.
+ */
+export const REDACTED_ARG_METHODS: ReadonlySet<string> = new Set([
+  "workspaces.discoverServerDatabases",
+  "workspaces.addServerWorkspace",
+  "workspaces.setServerPassword",
+  "workspaces.replaceLocalWithServer",
+  "workspaces.updateServerConnection",
+])
+
+function tapArgs(ns: string, prop: string, args: unknown[]): string[] {
+  if (REDACTED_ARG_METHODS.has(`${ns}.${prop}`)) return [prop, "<redacted>"]
+  return [prop, ...args.map(summarizeArg)]
+}
+
 function summarizeArg(arg: unknown): string {
   if (arg === null) return "null"
   if (arg === undefined) return "undefined"
@@ -444,7 +464,7 @@ const sidecarManager = createSidecarManager(
  * access without listing every handler statically — adding a new handler
  * server-side appears here automatically (typecheck included).
  */
-function buildTauriRpc(): RemoteApi {
+function buildTauriRpc(manager: Pick<SidecarManager, "call"> = sidecarManager): RemoteApi {
   const namespaceProxy = (ns: string): unknown =>
     new Proxy(
       {},
@@ -453,7 +473,7 @@ function buildTauriRpc(): RemoteApi {
           return async (...args: unknown[]): Promise<unknown> => {
             const startMs = Date.now()
             try {
-              const result = await sidecarManager.call((api) => {
+              const result = await manager.call((api) => {
                 const namespace = (
                   api as unknown as Record<
                     string,
@@ -474,7 +494,7 @@ function buildTauriRpc(): RemoteApi {
                   id: crypto.randomUUID(),
                   timestamp: Date.now(),
                   command: ns,
-                  args: [prop, ...args.map(summarizeArg)],
+                  args: tapArgs(ns, prop, args),
                   dbPath: null,
                   durationMs: Date.now() - startMs,
                   exitCode: 0,
@@ -492,7 +512,7 @@ function buildTauriRpc(): RemoteApi {
                   id: crypto.randomUUID(),
                   timestamp: Date.now(),
                   command: ns,
-                  args: [prop, ...args.map(summarizeArg)],
+                  args: tapArgs(ns, prop, args),
                   dbPath: null,
                   durationMs: Date.now() - startMs,
                   exitCode: 1,
@@ -531,6 +551,13 @@ function buildTauriRpc(): RemoteApi {
   } satisfies Record<keyof RemoteApi, unknown>
 
   return tauri as unknown as RemoteApi
+}
+
+type SidecarManager = ReturnType<typeof createSidecarManager>
+
+/** Test-only: the tapped proxy over an injected manager, so tests drive it with a fake api. */
+export function _buildTauriRpc(manager: Pick<SidecarManager, "call">): RemoteApi {
+  return buildTauriRpc(manager)
 }
 
 function buildStubRpc(): RemoteApi {
