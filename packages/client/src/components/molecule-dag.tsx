@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import ForceGraph3D from "react-force-graph-3d"
 import * as THREE from "three"
+import { getNodeLabel } from "../lib/molecule-node-label"
 import { rpc } from "../lib/rpc"
 import type { MoleculeGraph, MoleculeNode } from "../lib/types"
 import { Spinner } from "./ui/spinner"
@@ -38,14 +39,6 @@ function getNodeSize(node: MoleculeNode, rootId: string): number {
   if (node.id === rootId) return 8
   if (node.type === "gate") return 6
   return 5
-}
-
-function getNodeLabel(node: MoleculeNode): string {
-  const statusLabel = node.status.replace(/_/g, " ")
-  return `<div style="background:rgba(0,0,0,0.85);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;max-width:250px">
-    <div style="font-weight:600;margin-bottom:2px">${node.title}</div>
-    <div style="opacity:0.7">${node.id} &middot; ${statusLabel}</div>
-  </div>`
 }
 
 interface MoleculeDagProps {
