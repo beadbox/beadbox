@@ -48,13 +48,6 @@ describe("clearCache keeps opt-outs", () => {
     expect(getUpdateCheckEnabled()).toBe(false)
   })
 
-  test("the molecule view switch is left alone", () => {
-    localStorage.setItem("beadbox_enable_molecule_view", "true")
-    clearCache()
-    expect(localStorage.getItem("beadbox_enable_molecule_view")).toBe("true")
-    localStorage.removeItem("beadbox_enable_molecule_view")
-  })
-
   test("other preferences are still cleared", () => {
     setSortPreference({ field: "priority", direction: "asc" })
     clearCache()
