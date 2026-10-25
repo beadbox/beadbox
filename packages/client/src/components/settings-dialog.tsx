@@ -1392,7 +1392,7 @@ function HelpTabContent({
         <h3 className="text-lg font-semibold">Cache</h3>
         <p className="text-sm text-muted-foreground mt-1">
           Beadbox uses local storage to cache preferences and UI state. If you&apos;re experiencing
-          issues, clearing the cache might help.
+          issues, clearing the cache might help. Your analytics and update-check choices are kept.
         </p>
         <Button variant="outline" size="sm" onClick={handleClearCache} className="mt-3">
           <Trash2 className="h-4 w-4" />
