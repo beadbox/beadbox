@@ -564,14 +564,16 @@ export function setWorkspaceRailCollapsed(collapsed: boolean): void {
 
 // --- Cache management ---
 
+// Clear Cache resets preferences and UI state, but never the user's opt-outs.
+// ANALYTICS_KEY and UPDATE_CHECK_ENABLED_KEY both default to "on" when absent,
+// so removing them here would silently turn analytics and automatic update
+// checks back on for someone who had switched them off.
 const CLEARABLE_KEYS = [
   SORT_KEY,
   FILTERS_KEY,
   THEME_KEY,
-  ANALYTICS_KEY,
   ZOOM_KEY,
   VIM_NAV_KEY,
-  UPDATE_CHECK_ENABLED_KEY,
   UPDATE_CHECK_FREQUENCY_KEY,
   UPDATE_DISMISSED_VERSION_KEY,
   WORKSPACE_HINT_KEY,
