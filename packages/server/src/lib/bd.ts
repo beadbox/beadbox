@@ -52,9 +52,10 @@ import { isWorkspacePresent, workspaceMissingError } from "./workspace-presence"
 import {
   findExternalWorkspaceByDbPath,
   isBeadboxScaffoldPath,
-  parseServerUri,
+  resolveServerUri,
   scaffoldRoot,
   type ServerConnection,
+  serverPasswordKey,
 } from "./workspace-registry"
 
 // Reset helpers are exported for test teardown only.
@@ -155,7 +156,8 @@ async function retryOnFlock<T>(fn: () => Promise<T>, dbPath: string | undefined)
   throw lastError
 }
 
-// In-memory password store keyed by server identity (host:port/database).
+// In-memory password store. Server passwords are keyed by serverPasswordKey
+// (host:port/database/user); local workspaces by their project path.
 // Passwords never touch disk; they live only in the Node.js sidecar process.
 const workspacePasswords = new Map<string, string>()
 
@@ -175,6 +177,13 @@ export function clearWorkspacePassword(workspacePath: string): void {
 
 export function getWorkspacePassword(workspacePath: string): string | undefined {
   return workspacePasswords.get(workspacePath)
+}
+
+/** The password stored for this server and user, never another user's (beadbox-yrfp). */
+export function getServerPassword(
+  server: Pick<ServerConnection, "host" | "port" | "database" | "user">,
+): string | undefined {
+  return workspacePasswords.get(serverPasswordKey(server))
 }
 
 // Re-export for existing consumers
@@ -306,10 +315,11 @@ function projectRootFromDb(dbPath: string): string | undefined {
 }
 
 // Resolve the effective ServerConnection from options.
-// Returns the explicit server field, or parses server:// from db, or null.
+// Returns the explicit server field, or the registered connection for a
+// server:// db (its user and tls come from the registry), or null.
 function resolveServer(options: BdOptions): ServerConnection | null {
   if (options.server) return options.server
-  if (options.db?.startsWith("server://")) return parseServerUri(options.db)
+  if (options.db?.startsWith("server://")) return resolveServerUri(options.db)
   return null
 }
 
@@ -433,16 +443,23 @@ export function tryReadJson(path: string): unknown {
   }
 }
 
-// Read a workspace's metadata.json and return its dolt server identity
-// triple, or null if metadata is missing/unparseable/incomplete.
+// Read a workspace's metadata.json and return its server password key
+// (host:port/database/user, user defaulting to root as bd's does), or null
+// if metadata is missing/unparseable/incomplete.
 export function readMetadataServerKey(dbPath: string): string | null {
   const meta = tryReadJson(join(resolveBeadsDir(dbPath), "metadata.json")) as {
     dolt_server_host?: string
     dolt_server_port?: number
+    dolt_server_user?: string
     dolt_database?: string
   } | null
   if (!meta?.dolt_server_host || !meta?.dolt_server_port || !meta?.dolt_database) return null
-  return `${meta.dolt_server_host}:${meta.dolt_server_port}/${meta.dolt_database}`
+  return serverPasswordKey({
+    host: meta.dolt_server_host,
+    port: meta.dolt_server_port,
+    database: meta.dolt_database,
+    user: typeof meta.dolt_server_user === "string" && meta.dolt_server_user ? meta.dolt_server_user : "root",
+  })
 }
 
 // Resolve the local-workspace password for a db path. Tries project root
@@ -491,11 +508,9 @@ export function buildEnv(options: BdOptions): NodeJS.ProcessEnv | undefined {
   // Server connection (explicit or server:// URI): inject all connection env vars
   const server = resolveServer(options)
   if (server) {
-    const serverKey = `${server.host}:${server.port}/${server.database}`
-    const password = workspacePasswords.get(serverKey)
     return {
       ...(env ?? process.env),
-      ...buildServerEnv(server, password),
+      ...buildServerEnv(server, getServerPassword(server)),
       BEADS_DOLT_AUTO_START: "0",
       BEADS_DOLT_SERVER_MODE: "1",
     }
@@ -506,11 +521,9 @@ export function buildEnv(options: BdOptions): NodeJS.ProcessEnv | undefined {
   const externalWorkspace = findExternalWorkspaceByDbPath(options.db)
   if (externalWorkspace?.server) {
     const configuredServer = externalWorkspace.server
-    const serverKey = `${configuredServer.host}:${configuredServer.port}/${configuredServer.database}`
-    const password = workspacePasswords.get(serverKey)
     return {
       ...(env ?? process.env),
-      ...buildServerEnv(configuredServer, password),
+      ...buildServerEnv(configuredServer, getServerPassword(configuredServer)),
       BEADS_DOLT_AUTO_START: "0",
       BEADS_DOLT_SERVER_MODE: "1",
     }
@@ -1335,30 +1348,18 @@ export async function initServerScaffold(
 // Run a SQL query via mysql2 for server-only workspaces (server:// URIs).
 // bd CLI requires a local .beads/ directory for all commands. Server-only
 // workspaces may not have one (scaffold not yet created or legacy entry).
-// Reads user/password from the workspace registry (parseServerUri only has
-// host:port/database, not the user).
+// resolveServer reads the user from the workspace registry.
 async function serverSqlQuery<T>(sql: string, options: BdOptions): Promise<T[]> {
   const server = resolveServer(options)
   if (!server) throw new Error("serverSqlQuery called without server connection")
-  // parseServerUri defaults user to "root". Look up the actual user from
-  // the registry entry, which stores the user provided during workspace add.
-  const { readRegistry } = await import("./workspace-registry")
-  const registry = await readRegistry()
-  const entry = registry.workspaces.find(
-    (w) =>
-      w.server?.host === server.host &&
-      w.server?.port === server.port &&
-      w.server?.database === server.database,
-  )
-  const user = entry?.server?.user ?? server.user
-  const serverKey = `${server.host}:${server.port}/${server.database}`
-  const password = workspacePasswords.get(serverKey)
+  const password = getServerPassword(server)
   const conn = await mysql.createConnection({
     host: server.host,
     port: server.port,
     database: server.database,
-    user,
+    user: server.user,
     password: password || undefined,
+    ssl: server.tls ? {} : undefined,
     connectTimeout: 5000,
   })
   try {

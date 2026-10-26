@@ -5,8 +5,8 @@ import { readFile } from "fs/promises"
 import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
 import { portFilePath, readPortFileSync } from "./dolt-port-file"
-import { getWorkspacePassword } from "./bd"
-import { findExternalWorkspaceByDbPath, parseServerUri } from "./workspace-registry"
+import { getServerPassword, getWorkspacePassword } from "./bd"
+import { findExternalWorkspaceByDbPath, resolveServerUri } from "./workspace-registry"
 
 /** Thrown when dolt-server.port doesn't exist yet (server not started). */
 export class PortFileMissingError extends Error {
@@ -95,7 +95,7 @@ export async function getPool(dbPath: string): Promise<mysql.Pool> {
   const cached = poolCache.get(key)
 
   // Server-only workspace: parse connection from URI
-  const server = parseServerUri(dbPath)
+  const server = resolveServerUri(dbPath)
   const external = server ? null : findExternalWorkspaceByDbPath(dbPath)?.server
   let host: string
   let port: number
@@ -111,8 +111,7 @@ export async function getPool(dbPath: string): Promise<mysql.Pool> {
     database = connection.database
     user = connection.user
     tls = connection.tls
-    const serverKey = `${host}:${port}/${database}`
-    password = getWorkspacePassword(serverKey)
+    password = getServerPassword(connection)
   } else {
     host = "127.0.0.1"
     port = readDoltPort(dbPath)

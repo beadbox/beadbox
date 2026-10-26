@@ -5,7 +5,7 @@ import { beadsDirOf, isWorkspacePresent } from "./workspace-presence"
 import { mkdir } from "fs/promises"
 import mysql from "mysql2/promise"
 import { basename, dirname, join } from "path"
-import { getWorkspacePassword, initServerScaffold, stripBdWarnings } from "./bd"
+import { getServerPassword, initServerScaffold, stripBdWarnings } from "./bd"
 import { resolveBdPath } from "./bd-paths"
 import { flagArg } from "./bd-argv"
 import { drainPool } from "./dolt-pool"
@@ -139,8 +139,7 @@ async function checkServerOnlyWorkspace(
     const mismatch = await probeScaffoldIdentity(workspace, bdPath)
     if (mismatch) return { ok: false, error: mismatch, bdVersion: bdResult.version, bdPath }
   }
-  const serverKey = `${s.host}:${s.port}/${s.database}`
-  const password = getWorkspacePassword(serverKey)
+  const password = getServerPassword(s)
   let conn: mysql.Connection | undefined
   try {
     conn = await mysql.createConnection({
@@ -226,11 +225,10 @@ async function probeScaffoldIdentity(
 
 function buildHealthEnv(workspace: RegistryEntry): NodeJS.ProcessEnv | undefined {
   // For server-backed workspaces (scaffolds), inject the password into bd's env.
-  // The password is stored under the server identity key (host:port/database),
-  // not the scaffold project path.
+  // The password is stored under the server's password key
+  // (host:port/database/user), not the scaffold project path.
   if (!workspace.server) return undefined
-  const serverKey = `${workspace.server.host}:${workspace.server.port}/${workspace.server.database}`
-  const serverPassword = getWorkspacePassword(serverKey)
+  const serverPassword = getServerPassword(workspace.server)
   if (!serverPassword) return undefined
   return { ...process.env, BEADS_DOLT_PASSWORD: serverPassword }
 }
@@ -417,7 +415,7 @@ export function classifyHealthError(
       const database = s.database ?? "unknown"
       const host = s.host ?? "127.0.0.1"
       const credentialKey = `${host}:${port}/${database}/${user}`
-      const passwordMapKey = `${host}:${port}/${database}`
+      const passwordMapKey = credentialKey
       return { kind: "access_denied", host, port, database, user, credentialKey, passwordMapKey }
     }
     // Fallback for non-server workspaces (unlikely but safe)

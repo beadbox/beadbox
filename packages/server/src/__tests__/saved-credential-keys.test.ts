@@ -2,7 +2,8 @@
 //
 // The keychain holds each password under its credentialKey
 // (host:port/database/user); the sidecar's in-memory map is keyed by
-// passwordMapKey (host:port/database). The client needs the KEYS to read the
+// passwordMapKey, the same string since beadbox-yrfp so a password stays
+// paired with its user. The client needs the KEYS to read the
 // keychain and hand each password to the sidecar — so the sidecar lists them,
 // and never returns a password.
 
@@ -67,7 +68,7 @@ describe("getSavedCredentialKeys", () => {
     )
     const keys = await getSavedCredentialKeys()
     expect(keys).toEqual([
-      { credentialKey: "127.0.0.1:14610/pw1/qa1pw", passwordMapKey: "127.0.0.1:14610/pw1" },
+      { credentialKey: "127.0.0.1:14610/pw1/qa1pw", passwordMapKey: "127.0.0.1:14610/pw1/qa1pw" },
     ])
     expect(JSON.stringify(keys)).not.toContain('password":')
   })

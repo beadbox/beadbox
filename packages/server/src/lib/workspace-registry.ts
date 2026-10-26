@@ -883,6 +883,39 @@ export function parseServerUri(uri: string): ServerConnection | null {
   return { host, port, database, user: "root", tls: false }
 }
 
+/**
+ * Resolve a server:// URI to the registered connection (beadbox-yrfp). The
+ * URI carries only host:port/database; the user and tls live on the registry
+ * entry, which is unique per host+port+database (addServerWorkspaceEntry).
+ * An unregistered URI keeps parseServerUri's root default.
+ */
+export function resolveServerUri(uri: string): ServerConnection | null {
+  const parsed = parseServerUri(uri)
+  if (!parsed) return null
+  try {
+    const registry = JSON.parse(readFileSync(getBeadboxRegistryPath(), "utf-8")) as WorkspaceRegistry
+    if (!Array.isArray(registry.workspaces)) return parsed
+    const entry = registry.workspaces.find(
+      (w) =>
+        w.server?.host === parsed.host &&
+        w.server?.port === parsed.port &&
+        w.server?.database === parsed.database,
+    )
+    return entry?.server ? { ...parsed, user: entry.server.user || "root", tls: entry.server.tls === true } : parsed
+  } catch {
+    return parsed
+  }
+}
+
+/**
+ * Key of a server password in the sidecar's in-memory map: host:port/database/user,
+ * the same string as the keychain credentialKey. The user is part of the key so
+ * a password is only ever sent with the user it was stored for (beadbox-yrfp).
+ */
+export function serverPasswordKey(server: Pick<ServerConnection, "host" | "port" | "database" | "user">): string {
+  return `${server.host}:${server.port}/${server.database}/${server.user}`
+}
+
 // ---------------------------------------------------------------------------
 // Utility: derive project directory from a database path
 // ---------------------------------------------------------------------------

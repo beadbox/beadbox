@@ -54,7 +54,7 @@ import { tmpdir } from "os"
 import { readFile } from "fs/promises"
 import { basename, dirname, join } from "path"
 import { SUBSCRIPTION_PREFIX, type SubscriptionEvent } from "../subscribe-protocol"
-import { buildServerEnv, getWorkspacePassword } from "./bd"
+import { buildServerEnv, getServerPassword, getWorkspacePassword } from "./bd"
 import { resolveBdPath } from "./bd-paths"
 import { beadsDirFromDatabasePath } from "./beadtrain-fs"
 import { drainPool, getPool, PortFileMissingError } from "./dolt-pool"
@@ -62,7 +62,7 @@ import { readPortFileSync } from "./dolt-port-file"
 import { markEmbeddedByRefusal, resolveDoltMode } from "./dolt-metadata"
 import { getDoltDir, getWorkspaceWriteMarkerPaths } from "./dolt-write-marker"
 import { beadsDirOf, isWorkspacePresent } from "./workspace-presence"
-import { findExternalWorkspaceByDbPath, parseServerUri } from "./workspace-registry"
+import { findExternalWorkspaceByDbPath, resolveServerUri } from "./workspace-registry"
 import { activeLogPath } from "./log-file"
 
 // Re-export getDoltDir for any out-of-tree consumer that imported it from
@@ -237,15 +237,13 @@ function readDoltPort(dbPath: string): string | undefined {
 
 function bdServerPoll(dbPath: string): Promise<string> {
   const env: NodeJS.ProcessEnv = { ...process.env }
-  const server = parseServerUri(dbPath) ?? findExternalWorkspaceByDbPath(dbPath)?.server
+  const server = resolveServerUri(dbPath) ?? findExternalWorkspaceByDbPath(dbPath)?.server
 
   let args: string[]
   let cwd: string | undefined
 
   if (server) {
-    const serverKey = `${server.host}:${server.port}/${server.database}`
-    const password = getWorkspacePassword(serverKey)
-    Object.assign(env, buildServerEnv(server, password))
+    Object.assign(env, buildServerEnv(server, getServerPassword(server)))
     env.BEADS_DOLT_AUTO_START = "0"
     env.BEADS_DOLT_SERVER_MODE = "1"
     args = ["sql", SERVER_POLL_SQL, "--json", "--quiet", "--readonly"]
@@ -794,13 +792,11 @@ function startServerPollChild(state: DetectorState, id: string): void {
   // Mirror bdServerPoll's env construction so the child's bd CLI hits
   // the same Dolt server with the same credentials.
   const env: NodeJS.ProcessEnv = { ...process.env }
-  const server = parseServerUri(state.dbPath) ?? findExternalWorkspaceByDbPath(state.dbPath)?.server
+  const server = resolveServerUri(state.dbPath) ?? findExternalWorkspaceByDbPath(state.dbPath)?.server
   let cwd: string | undefined
   let dbArg: string
   if (server) {
-    const serverKey = `${server.host}:${server.port}/${server.database}`
-    const password = getWorkspacePassword(serverKey)
-    Object.assign(env, buildServerEnv(server, password))
+    Object.assign(env, buildServerEnv(server, getServerPassword(server)))
     env.BEADS_DOLT_AUTO_START = "0"
     env.BEADS_DOLT_SERVER_MODE = "1"
     dbArg = state.dbPath.startsWith("server://") ? state.dbPath : normalizeDbPath(state.dbPath)

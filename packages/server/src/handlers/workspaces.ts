@@ -47,6 +47,7 @@ import {
   removeWorkspaceFromRegistry,
   scaffoldDirFor,
   type ServerConnection,
+  serverPasswordKey,
   updateWorkspaceLabel,
   updateWorkspaceLocal,
   updateWorkspaceServer,
@@ -862,11 +863,8 @@ export async function addServerWorkspace(
 > {
   const server: ServerConnection = { host, port, database: databaseName, user, tls }
 
-  // Store password in process memory keyed by server identity
-  if (password) {
-    const serverKey = `${host}:${port}/${databaseName}`
-    bdSetWorkspacePassword(serverKey, password)
-  }
+  // Store password in process memory keyed by server identity and user
+  if (password) bdSetWorkspacePassword(serverPasswordKey(server), password)
 
   // Derive display name from database name (strip beads_ prefix if present)
   const name = databaseName.startsWith("beads_")
@@ -876,7 +874,7 @@ export async function addServerWorkspace(
   // Write to registry (deduplicates by server identity: host+port+database)
   const workspaceId = await addServerWorkspaceEntry(name, server)
 
-  const credentialKey = `${host}:${port}/${databaseName}/${user}`
+  const credentialKey = serverPasswordKey(server)
   console.log(
     `[workspace-server] registered server workspace for ${databaseName} (${host}:${port})`,
   )
@@ -926,7 +924,9 @@ export async function addServerWorkspace(
 // Saved server credentials, as KEYS only (beadbox-ct1). The client reads each
 // password from the OS keychain (account = credentialKey) and hands it back
 // through setServerPassword under passwordMapKey, on every sidecar start.
-// Passwords never cross this call.
+// Passwords never cross this call. The map key is the credential key itself
+// (host:port/database/user), so a password stays paired with its user
+// (beadbox-yrfp).
 export async function getSavedCredentialKeys(): Promise<
   Array<{ credentialKey: string; passwordMapKey: string }>
 > {
@@ -934,9 +934,8 @@ export async function getSavedCredentialKeys(): Promise<
   return registry.workspaces.flatMap((entry) => {
     const credentialKey = entry.credentialKey
     if (!credentialKey) return []
-    const lastSlash = credentialKey.lastIndexOf("/")
-    if (lastSlash <= 0) return []
-    return [{ credentialKey, passwordMapKey: credentialKey.slice(0, lastSlash) }]
+    if (credentialKey.lastIndexOf("/") <= 0) return []
+    return [{ credentialKey, passwordMapKey: credentialKey }]
   })
 }
 
@@ -1190,10 +1189,7 @@ export async function replaceLocalWithServer(
 > {
   const server: ServerConnection = { host, port, database: databaseName, user, tls }
 
-  if (password) {
-    const serverKey = `${host}:${port}/${databaseName}`
-    bdSetWorkspacePassword(serverKey, password)
-  }
+  if (password) bdSetWorkspacePassword(serverPasswordKey(server), password)
 
   const name = databaseName.startsWith("beads_")
     ? databaseName.slice("beads_".length)
@@ -1204,7 +1200,7 @@ export async function replaceLocalWithServer(
     return { success: false, error: "Local workspace not found in registry." }
   }
 
-  const credentialKey = `${host}:${port}/${databaseName}/${user}`
+  const credentialKey = serverPasswordKey(server)
   return {
     success: true,
     credentialKey,
@@ -1284,10 +1280,7 @@ export async function updateServerConnection(
   }
 
   // Store password in process memory
-  const serverKey = `${host}:${port}/${database}`
-  if (password) {
-    bdSetWorkspacePassword(serverKey, password)
-  }
+  if (password) bdSetWorkspacePassword(serverPasswordKey(newServer), password)
 
   const externalScaffold =
     getServerOwnership(entry) === "external" && entry.local ? entry.local.path : null
