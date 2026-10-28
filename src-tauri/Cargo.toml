@@ -69,3 +69,4 @@ codegen-units = 8
 strip = "symbols"
 opt-level = "z"
 panic = "abort"
+
