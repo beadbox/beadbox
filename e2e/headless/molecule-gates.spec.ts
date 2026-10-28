@@ -65,7 +65,9 @@ async function openGatesWorkspace(page: Page, ws: HarnessWorkspace): Promise<voi
 async function expand(page: Page, id: string): Promise<void> {
   const row = page.locator(`[data-item-id="${id}"]`).first()
   await expect(row).toBeVisible()
-  await row.locator("button").first().click()
+  // A molecule's step is a header that is itself the toggle (beadbox-e04o.1).
+  if ((await row.getAttribute("data-step-header")) !== null) await row.click()
+  else await row.locator("button").first().click()
 }
 
 test("each gate under a molecule is a row in its step, with bd's kind and status", async ({
@@ -87,7 +89,8 @@ test("each gate under a molecule is a row in its step, with bd's kind and status
     for (const step of steps) await expand(page, step)
 
     for (const gate of gates) {
-      const stepRow = page.locator(`[data-item-id="${gate.parent}"]`).first()
+      // A molecule's step is a section: its header, then its rows (beadbox-e04o.1).
+      const stepRow = page.locator(`[data-step-section="${gate.parent}"]`).first()
       const row = stepRow.locator(`[data-item-id="${gate.id}"]`)
       await expect(row).toBeVisible()
       await expect(row).toContainText(gate.title)

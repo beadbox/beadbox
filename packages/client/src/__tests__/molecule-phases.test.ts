@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { computeMoleculePhases } from "../lib/molecule-phases"
-import type { Bead } from "../lib/types"
+import { computeMoleculePhases, computeStepGroups } from "../lib/molecule-phases"
+import type { Bead, Epic } from "../lib/types"
 
 // bb-fe03.7 regression suite for computeMoleculePhases. CCN was 26
 // (5 distinct steps: gate/task split, gate-source map, gate-info map,
@@ -204,3 +204,27 @@ describe("computeMoleculePhases", () => {
     expect(phases[0]?.totalCount).toBe(3)
   })
 })
+
+// beadbox-e04o.1 helpers for computeStepGroups.
+const stepRow = (id: string, over: Partial<Bead> = {}): Bead => bead(id, over)
+const stepEpic = (id: string, over: Partial<Epic> = {}): Epic =>
+  ({ ...bead(id, { type: "epic" }), children: [], childEpics: [], ...over }) as unknown as Epic
+
+describe("computeStepGroups (beadbox-e04o.1)", () => {
+  test("steps and their rows in pour order, with a gate row's badge as a flat phase gives it", () => {
+    const gate = stepRow("t-mol-g", { type: "gate", title: "Gate: human", status: "open" })
+    const held = stepRow("t-mol-h", { blockedBy: [{ id: "t-mol-g", title: "Gate: human" }] as Bead["blockedBy"] })
+    const steps = [
+      stepEpic("t-mol-b", { parentId: "r", children: [stepRow("t-mol-b2"), stepRow("t-mol-b1")] }),
+      stepEpic("t-mol-a", { parentId: "r", children: [held, gate] }),
+    ]
+    const groups = computeStepGroups(steps)
+    expect(groups.map((g) => g.step.id)).toEqual(["t-mol-b", "t-mol-a"])
+    expect(groups[0]!.rows.map((r) => r.id)).toEqual(["t-mol-b2", "t-mol-b1"])
+    expect(groups[1]!.rows.map((r) => [r.id, r.gate?.type])).toEqual([
+      ["t-mol-h", "human"],
+      ["t-mol-g", "human"],
+    ])
+  })
+})
+

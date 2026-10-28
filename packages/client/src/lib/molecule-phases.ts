@@ -1,4 +1,4 @@
-import type { Bead } from "./types"
+import type { Bead, Epic } from "./types"
 
 export interface GateInfo {
   id: string
@@ -207,4 +207,26 @@ export function computeMoleculePhases(children: Bead[]): MoleculePhase[] {
   const phaseOf = assignPhases(tasks, taskPredecessors)
   for (const [id, phase] of assignGatePhases(gates, tasks, phaseOf)) phaseOf.set(id, phase)
   return groupTasksByPhase(children, phaseOf, gateInfoByTask)
+}
+
+// beadbox-e04o.1: a nested molecule's steps (the root's step epics), each with
+// its children as rows, in the order the tree delivers them (no phasing: a
+// step is a phase of the molecule, its children are not phased from Phase 1
+// on their own). Rows carry the same gate badge a flat phase row gets.
+export interface StepGroup {
+  step: Epic
+  rows: PhaseTask[]
+}
+
+export function computeStepGroups(steps: Epic[]): StepGroup[] {
+  return steps.map((step) => {
+    const children = step.children ?? []
+    const { gates, tasks, gateIds } = splitGatesAndTasks(children)
+    const gateInfoByTask = buildGateInfoByTask(tasks, gates, gateIds)
+    const rows = children.map((row) => ({
+      ...row,
+      gate: row.type === "gate" ? toGateInfo(row) : gateInfoByTask.get(row.id),
+    }))
+    return { step, rows }
+  })
 }

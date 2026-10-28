@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useViewport } from "@/hooks/use-viewport"
 import { getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
 import { getArchiveExpanded, setArchiveExpanded } from "@/lib/local-storage"
+import { computeStepGroups } from "@/lib/molecule-phases"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import type { Bead, Epic, ReadState } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -1215,6 +1216,10 @@ export function EpicRow({
   const isEmpty = !((epic.childEpics?.length ?? 0) > 0 || (epic.children?.length ?? 0) > 0)
   const rows = grouped ? groupedRows : (epic.children ?? [])
   const hasChildEpics = !grouped && (epic.childEpics?.length ?? 0) > 0
+  // beadbox-e04o.1: a molecule's child epics are its steps (bd 1.3 nested pour):
+  // each is a phase of the molecule, drawn as a header after the loose rows'
+  // phases, never as a nested epic row.
+  const stepsAsPhases = hasChildEpics && isMoleculePresentation(epic)
   const hasChildBeads = rows.length > 0
   // A grouped card always opens (to its rows, or to an "empty here" line).
   const hasContent = grouped || hasChildEpics || hasChildBeads
@@ -1233,6 +1238,41 @@ export function EpicRow({
   // - Top-level epics can be archived
   // - Archived epics can be unarchived
   const isDraggable = !isStandalone
+
+  // One child epic row: an ordinary epic's child epics, and a step's own child
+  // epics (beadbox-e04o.1), so the step draws what j/k walks into.
+  const renderChildEpic = (childEpic: Epic, index: number, childDepth: number) => (
+    <EpicRow
+      key={`${childEpic.id}-${childDepth - 1}-${index}`}
+      epic={childEpic}
+      depth={childDepth}
+      expandedEpics={expandedEpics}
+      onToggle={onToggle}
+      onBeadClick={onBeadClick}
+      onRequestDelete={onRequestDelete}
+      onArchiveBead={onArchiveBead}
+      onArchiveEpic={onArchiveEpic}
+      onBacklogEpic={onBacklogEpic}
+      onBeadMove={onBeadMove}
+      canMoveEpic={canMoveEpic}
+      dragOverEpicId={dragOverEpicId}
+      onDragOver={onDragOver}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      draggedBeadId={draggedBeadId}
+      expandedBeads={expandedBeads}
+      onToggleBead={onToggleBead}
+      focusedItemId={focusedItemId}
+      onFocusItem={onFocusItem}
+      selectedBeadId={selectedBeadId}
+      showWaves={showWaves}
+      selectedIds={selectedIds}
+      onToggleSelect={onToggleSelect}
+      onToggleSelectAll={onToggleSelectAll}
+      isMobile={isMobile}
+      readState={readState}
+    />
+  )
 
   // Render standalone beads with a minimal header instead of a full card
   if (isStandalone) {
@@ -1621,46 +1661,15 @@ export function EpicRow({
           }}
         >
           {/* Render child epics first */}
-          {hasChildEpics && (
+          {hasChildEpics && !stepsAsPhases && (
             <div className="py-3 pr-3 space-y-3 bg-black/20">
-              {epic.childEpics!.map((childEpic, index) => (
-                <EpicRow
-                  key={`${childEpic.id}-${depth}-${index}`}
-                  epic={childEpic}
-                  depth={depth + 1}
-                  expandedEpics={expandedEpics}
-                  onToggle={onToggle}
-                  onBeadClick={onBeadClick}
-                  onRequestDelete={onRequestDelete}
-                  onArchiveBead={onArchiveBead}
-                  onArchiveEpic={onArchiveEpic}
-                  onBacklogEpic={onBacklogEpic}
-                  onBeadMove={onBeadMove}
-                  canMoveEpic={canMoveEpic}
-                  dragOverEpicId={dragOverEpicId}
-                  onDragOver={onDragOver}
-                  onDragStart={onDragStart}
-                  onDragEnd={onDragEnd}
-                  draggedBeadId={draggedBeadId}
-                  expandedBeads={expandedBeads}
-                  onToggleBead={onToggleBead}
-                  focusedItemId={focusedItemId}
-                  onFocusItem={onFocusItem}
-                  selectedBeadId={selectedBeadId}
-                  showWaves={showWaves}
-                  selectedIds={selectedIds}
-                  onToggleSelect={onToggleSelect}
-                  onToggleSelectAll={onToggleSelectAll}
-                  isMobile={isMobile}
-                  readState={readState}
-                />
-              ))}
+              {epic.childEpics!.map((childEpic, index) => renderChildEpic(childEpic, index, depth + 1))}
             </div>
           )}
 
           {/* Render child beads */}
           {hasChildBeads && (
-            <div className={cn(hasChildEpics && "border-t border-border/30")}>
+            <div className={cn(hasChildEpics && !stepsAsPhases && "border-t border-border/30")}>
               {isMoleculePresentation(epic) ? (
                 <MoleculePhaseView
                   beads={rows}
@@ -1706,6 +1715,61 @@ export function EpicRow({
               )}
             </div>
           )}
+          {/* beadbox-e04o.1: a nested molecule's steps, after the loose rows' phases */}
+          {stepsAsPhases &&
+            computeStepGroups(epic.childEpics!).map(({ step, rows: stepRows }, index) => {
+              const open = expandedEpics.has(step.id)
+              return (
+                <div key={step.id} data-step-section={step.id}>
+                  <button
+                    type="button"
+                    data-step-header=""
+                    data-item-id={step.id}
+                    onClick={() => onToggle(step.id)}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors text-left",
+                      "bg-white/[0.02] hover:bg-white/[0.05] border-b border-border/20 text-muted-foreground",
+                      (hasChildBeads || index > 0) && "border-t border-border/30",
+                      focusedItemId === step.id && "ring-1 ring-primary/60",
+                    )}
+                  >
+                    {open ? (
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                    )}
+                    <span className="font-medium truncate">{step.title}</span>
+                  </button>
+                  {open && (step.childEpics?.length ?? 0) > 0 && (
+                    <div className="py-3 pr-3 space-y-3 bg-black/20">
+                      {step.childEpics!.map((childEpic, i) => renderChildEpic(childEpic, i, depth + 1))}
+                    </div>
+                  )}
+                  {open && stepRows.length > 0 && (
+                    <BeadTable
+                      beads={stepRows}
+                      epicId={step.id}
+                      onBeadClick={onBeadClick}
+                      onArchive={onArchiveBead}
+                      onDelete={onRequestDelete}
+                      onDragStart={onDragStart}
+                      onDragEnd={onDragEnd}
+                      draggedBeadId={draggedBeadId}
+                      expandedBeads={expandedBeads}
+                      onToggleBead={onToggleBead}
+                      focusedItemId={focusedItemId}
+                      onFocusItem={onFocusItem}
+                      selectedBeadId={selectedBeadId}
+                      showWaves={showWaves}
+                      selectedIds={selectedIds}
+                      onToggleSelect={onToggleSelect}
+                      onToggleSelectAll={onToggleSelectAll}
+                      readState={readState}
+                    />
+                  )}
+                </div>
+              )
+            })}
           {grouped && !hasChildBeads && (
             <div className="px-3 py-2 text-xs text-muted-foreground">No beads with this status</div>
           )}

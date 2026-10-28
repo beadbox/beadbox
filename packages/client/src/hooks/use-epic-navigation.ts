@@ -15,6 +15,7 @@ import {
   setExpandedEpics as setStoredExpandedEpics,
   setSelectedBead as setStoredSelectedBead,
 } from "@/lib/local-storage"
+import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import { safeCapture } from "@/lib/posthog-safe"
 import { rpc } from "@/lib/rpc"
 import type { Bead, Epic, Workspace } from "@/lib/types"
@@ -278,8 +279,15 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
       indexMap.set(epic.id, items.length)
       items.push({ id: epic.id, type: "epic", bead: epic })
       if (expandedEpics.has(epic.id)) {
-        epic.childEpics?.forEach(addEpic)
-        epic.children?.forEach(addBead)
+        // beadbox-e04o.1: a molecule draws its loose rows' phases first, then a
+        // header per step (its child epics); the walk follows what is drawn.
+        if (isMoleculePresentation(epic)) {
+          epic.children?.forEach(addBead)
+          epic.childEpics?.forEach(addEpic)
+        } else {
+          epic.childEpics?.forEach(addEpic)
+          epic.children?.forEach(addBead)
+        }
       }
     }
 
