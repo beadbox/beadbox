@@ -41,6 +41,11 @@ bun run lint
 bun --cwd=packages/server run typecheck
 bun --cwd=packages/client run typecheck
 
+# 2b. Rust compile check, only when the push changes src-tauri/
+#     (beadbox-mol-0zm): Rust coverage runs nightly, not on push, so this is
+#     what stops a compile error before main. Seconds on a warm target dir.
+bash scripts/prepush-cargo-check.sh
+
 # 3. Existing bb-y0me side-effect lint
 python3 src-tauri/scripts/lint-test-side-effects.py
 

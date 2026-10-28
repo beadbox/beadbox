@@ -57,7 +57,7 @@ jobs:
     timeout-minutes: 15
     steps:
       # Toolchain, apt deps, cache and sidecar placeholder as in
-      # quality-gates.yml's coverage-rust job.
+      # nightly.yml's coverage-rust job.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false

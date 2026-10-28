@@ -120,12 +120,123 @@ jobs:
           path: test-results/
           retention-days: 14
 
+  # Moved from quality-gates.yml (beadbox-mol-0zm), verbatim except that the
+  # checkout takes the tree this run proves and keeps no credentials. The
+  # push-time control is the pre-push hook's cargo check on src-tauri changes
+  # (scripts/prepush-cargo-check.sh).
+  coverage-rust:
+    name: Coverage — src-tauri Rust (floor 65% lines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master 2026-09-03; toolchain chosen via input
+        with:
+          toolchain: stable
+          # cargo-llvm-cov needs llvm-tools (llvm-profdata/llvm-cov). The
+          # retired homelab runner had the component installed out of band.
+          components: llvm-tools-preview
+      - name: Install Tauri Linux system dependencies
+        # ubuntu-latest does not ship the GTK/WebKit headers tauri-build links
+        # against; the retired homelab runner had them pre-provisioned.
+        # ubuntu-24.04 ships webkit2gtk-4.1 (4.0 is gone).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          shared-key: quality-gates-coverage
+      - name: Install cargo-llvm-cov
+        # beadbox-l5i.1: was pinned to 0.6.15 solely because the homelab
+        # runner was stuck on rustc 1.75 (bb-grhe); 0.7+ needs 1.87+.
+        # ubuntu-latest ships current stable, so that constraint is gone.
+        # Prebuilt tarball rather than `cargo install` to stay inside the
+        # 15-minute budget. Version pinned on purpose (public-repo supply-chain
+        # hygiene) — bump by editing LLVM_COV_VERSION.
+        env:
+          LLVM_COV_VERSION: "0.9.0"
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cargo/bin"
+          curl -fsSL --proto '=https' --tlsv1.2 \
+            "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v${LLVM_COV_VERSION}/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar xzf - -C "$HOME/.cargo/bin"
+          cargo llvm-cov --version
+      - name: Stage sidecar placeholders for tauri-build
+        # beadbox-bva: tauri.conf.json declares bundle.externalBin
+        # ["binaries/beadbox-sidecar"], and tauri-build's build script hard-
+        # fails ("resource path ... doesn't exist") when the per-triple file
+        # is absent. This job never staged them — it silently depended on the
+        # retired persistent runner having one left over from an earlier job.
+        #
+        # Empty placeholders are the right fix here, not a real sidecar build:
+        # tauri-build only checks the path exists, and the sidecar is a
+        # compiled Bun binary that contributes nothing to RUST coverage.
+        # Building it for real would add bun + bun install + bun build
+        # --compile to this job for zero measurement benefit. release.yml's
+        # build-frontend already uses exactly this convention before
+        # cargo check.
+        run: |
+          set -euo pipefail
+          TRIPLE=$(rustc -vV | awk '/^host:/{print $2}')
+          mkdir -p src-tauri/binaries
+          touch "src-tauri/binaries/beadbox-sidecar-${TRIPLE}"
+          echo "staged placeholder for $TRIPLE"
+
+      - name: Run Rust coverage with built-in floor enforcement
+        # Floor RESTORED to 65 (beadbox-l5i.6.4; super-ruled 2026-08-21).
+        #
+        # History, because a floor that moves twice deserves an explanation:
+        # it was lowered 65 -> 60 during beadbox-l5i.1 when the gate ran
+        # honestly for the first time and measured 64.60% (427/661 lines). The
+        # aggregate was dragged by src/updater.rs ALONE — 179 lines at 37.99%,
+        # beadbox-b2p's self-update work — while every other file together was
+        # 74.48%. The lowering was explicitly tied to that one file.
+        #
+        # Cutover phase D deleted updater.rs: a public repo needs no
+        # credentialed fetch, so the whole b2p mechanism retired. The reason
+        # for the lowered floor went with it. First hosted run afterwards
+        # (32517106425) measured 359/482 = 74.48% lines — the ex-updater
+        # figure exactly, as predicted. So 65 is restored with ~9.5 points of
+        # headroom rather than left at a number that had lost its
+        # justification.
+        #
+        # cargo-llvm-cov has --fail-under-lines built in, so the threshold is
+        # the gate and no parsing is required — but ONLY with pipefail set.
+        #
+        # beadbox-bva: without it this step was inert. With no `shell:` key
+        # GitHub runs `bash -e {0}`, which does NOT enable pipefail, so the
+        # pipeline exited with tee's status (always 0) and cargo-llvm-cov's
+        # exit 1 was discarded. `set -o pipefail` here rather than
+        # `shell: bash` so all three coverage gates read identically —
+        # coverage-server and coverage-client do it this way too.
+        run: |
+          set -o pipefail
+          cd src-tauri
+          cargo llvm-cov --workspace --fail-under-lines 65 --json --output-path ../coverage-rust.json 2>&1 \
+            | tee ../coverage-rust.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: coverage-rust
+          path: |
+            coverage-rust.json
+            coverage-rust.txt
+          retention-days: 14
+
   # Runs last and decides the night. Fails closed: a needed job that failed,
   # was cancelled or was skipped makes the night red and is named in an
   # annotation.
   verdict:
     name: Nightly verdict
-    needs: [e2e-headless]
+    needs: [e2e-headless, coverage-rust]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
