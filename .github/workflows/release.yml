@@ -365,7 +365,7 @@ jobs:
     if: >-
       !cancelled()
       && needs.validate-tag.result == 'success'
-      && (github.event_name == 'push' || inputs.build_macos_arm64)
+      && (github.event_name == 'push' || inputs.mode == 'build' || inputs.build_macos_arm64)
     needs: [validate-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -580,7 +580,7 @@ jobs:
       && needs.build-frontend.result == 'success'
       && (needs.create-draft.result == 'success' || (inputs.mode == 'build' && needs.create-draft.result == 'skipped'))
       && needs.pick-macos-runner.result == 'success'
-      && (github.event_name == 'push' || inputs.build_macos_arm64)
+      && (github.event_name == 'push' || inputs.mode == 'build' || inputs.build_macos_arm64)
     needs: [validate-tag, build-frontend, create-draft, pick-macos-runner]
     runs-on: ${{ fromJSON(needs.pick-macos-runner.outputs.runs_on) }}
     timeout-minutes: 45
@@ -819,7 +819,7 @@ jobs:
       && needs.validate-tag.result == 'success'
       && needs.build-macos-arm64.result == 'success'
       && needs.pick-macos-runner.result == 'success'
-      && (github.event_name == 'push' || inputs.build_macos_arm64)
+      && (github.event_name == 'push' || inputs.mode == 'build' || inputs.build_macos_arm64)
     needs: [validate-tag, build-macos-arm64, pick-macos-runner]
     runs-on: ${{ fromJSON(needs.pick-macos-runner.outputs.runs_on) }}
     timeout-minutes: 15
@@ -977,7 +977,7 @@ jobs:
       && needs.validate-tag.result == 'success'
       && needs.build-frontend.result == 'success'
       && (needs.create-draft.result == 'success' || (inputs.mode == 'build' && needs.create-draft.result == 'skipped'))
-      && (github.event_name == 'push' || inputs.build_linux)
+      && (github.event_name == 'push' || inputs.mode == 'build' || inputs.build_linux)
     needs: [validate-tag, build-frontend, create-draft]
     runs-on: ubuntu-latest
     timeout-minutes: 10
