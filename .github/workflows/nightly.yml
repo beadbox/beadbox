@@ -1,0 +1,103 @@
+# Nightly proofs (beadbox-mol-jbc, step 1A of beadbox-mol-cfe).
+#
+# Main's push run keeps only jobs that finish in under 30 s. The slow proofs
+# (coverage floors, the headless suite against the compiled sidecar, Rust
+# coverage) leave it and run here instead: every night on main's head, and on
+# demand against any ref. This file has no push or pull_request trigger, so
+# nothing in it can ever run on push.
+#
+# Which tree a run proves:
+#   - schedule: main's head, from main's own copy of this file.
+#   - workflow_dispatch: `gh workflow run nightly.yml --ref <branch>` runs THAT
+#     branch's copy of this file. To prove a release, dispatch from
+#     release/<tag> so the tag is proven by its own workflow files (root
+#     CLAUDE.md, Production cuts). The optional `ref` input names what to
+#     check out (the tag, say); left empty, the dispatched commit is checked
+#     out.
+#   Every job checks out `inputs.ref || github.sha`, the same expression the
+#   verdict job uses.
+#
+# Adding a moved job (steps 2A-2D): add its job block below, checking out the
+# tree above, and add its id to `verdict.needs`. That is the one place.
+#
+# Reading a red night: `gh run view <id> -R beadbox/beadbox` lists an
+# ANNOTATIONS entry "Nightly red: <job> <result>" for every job that did not
+# pass, above the job list.
+#
+# Security note: the `ref` input reaches run: steps only through env:, never
+# as ${{ }} inside a run: block.
+
+name: Nightly proofs
+run-name: Nightly proofs (${{ github.event_name }}) on ${{ inputs.ref || github.ref_name }}
+
+on:
+  schedule:
+    # 06:41 UTC daily, off the hour (GitHub delays on-the-hour schedules).
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or SHA to check out and prove (empty: the dispatched commit)"
+        required: false
+        default: ""
+        type: string
+
+# One run per workflow ref and target; a nightly never cancels another proof.
+concurrency:
+  group: nightly-${{ github.ref }}-${{ inputs.ref || github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs last and decides the night. Fails closed: a needed job that failed,
+  # was cancelled or was skipped makes the night red and is named in an
+  # annotation. With nothing moved here yet, `needs` is absent and the run is
+  # green once it has recorded the tree it proves.
+  verdict:
+    name: Nightly verdict
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Record the tree this run proves
+        env:
+          EVENT: ${{ github.event_name }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          REQUESTED_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          proven=$(git rev-parse HEAD)
+          {
+            echo "### Nightly proofs"
+            echo "- event: \`${EVENT}\`"
+            echo "- workflow file: \`${WORKFLOW_REF}\`"
+            echo "- requested ref: \`${REQUESTED_REF:-(dispatched commit)}\`"
+            echo "- proven commit: \`${proven}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Proving ${proven} (event ${EVENT}, workflow ${WORKFLOW_REF})"
+
+      - name: Every moved job passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          red=0
+          while IFS=$'\t' read -r job result; do
+            [ -z "$job" ] && continue
+            if [ "$result" != "success" ]; then
+              echo "::error title=Nightly red::${job} ${result}"
+              red=1
+            fi
+          done < <(printf '%s' "$NEEDS" | jq -r 'to_entries[] | [.key, .value.result] | @tsv')
+          count=$(printf '%s' "$NEEDS" | jq 'length')
+          if [ "$red" -ne 0 ]; then
+            exit 1
+          fi
+          echo "OK: ${count} moved job(s), all passed"
