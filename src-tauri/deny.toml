@@ -32,7 +32,6 @@ allow = [
   # shipping inside an MIT work.
   # Recorded as decision D4 on beadbox-l5i.5 for Nelson; allowed here so the
   # gate reflects current practice rather than blocking on a formality.
-  "MPL-2.0",
 ]
 
 # Note on r-efi: it appears under LGPL-2.1-or-later in a raw license listing,
