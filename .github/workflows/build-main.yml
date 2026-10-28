@@ -18,13 +18,11 @@ on:
   schedule:
     # 07:41 UTC, nightly: off the hour, and clear of rust-cache-warm (06:17).
     - cron: "41 7 * * *"
+  # No ref input: a dispatch builds the head of the branch it runs on, and the
+  # `release` environment admits main and v* tags only, so its secrets (signing,
+  # notarization) never build a commit outside them. A free-form SHA would let a
+  # main run sign any commit in the repo, a PR head included.
   workflow_dispatch:
-    inputs:
-      ref:
-        description: "Commit SHA to build (empty = the head of the branch dispatched on)"
-        type: string
-        required: false
-        default: ""
 
 # The called jobs declare contents: write for their release uploads (skipped in
 # build mode); a caller must grant at least what the callee's jobs request.
@@ -40,5 +38,5 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       mode: build
-      ref: ${{ inputs.ref || github.sha }}
+      ref: ${{ github.sha }}
     secrets: inherit
