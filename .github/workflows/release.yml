@@ -660,6 +660,12 @@ jobs:
           # beside it (rustup-init.sha256) and recomputed on 2026-10-28.
           RUSTUP_INIT_SHA256: "f7c7e11eb2e07f006e532a8aaac77b32f4527d305ac386c0c633ca6133d35ca9"
           RUST_VERSION: "1.99.1"
+          # Node for this job only: hosted runners ship one, the fleet Mac's job
+          # PATH is system dirs only, and bun install's prepare script (husky)
+          # runs under node. sha256 from nodejs.org's SHASUMS256.txt, recomputed
+          # on 2026-10-28.
+          NODE_VERSION: "22.23.4"
+          NODE_SHA256: "c9e1dbc748b33ed2d14f42445191ecaf14c56259c7a9a26d0042c49ec2b66428"
         run: |
           set -euo pipefail
           export RUSTUP_HOME="$RUNNER_TEMP/rustup" CARGO_HOME="$RUNNER_TEMP/cargo-home"
@@ -670,6 +676,12 @@ jobs:
           chmod 700 "$RUNNER_TEMP/rustup-init"
           "$RUNNER_TEMP/rustup-init" -y --no-modify-path --profile minimal --default-toolchain "$RUST_VERSION"
           rm -f "$RUNNER_TEMP/rustup-init"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "$RUNNER_TEMP/node.tgz" \
+            "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz"
+          echo "$NODE_SHA256  $RUNNER_TEMP/node.tgz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xzf "$RUNNER_TEMP/node.tgz" -C "$RUNNER_TEMP/node" --strip-components=1
+          rm -f "$RUNNER_TEMP/node.tgz"
           # Every PATH entry this job uses and the whole toolchain: no other
           # account on the machine may be able to change them (owner root or
           # this runner user, no group or other write, ancestors included).
@@ -689,7 +701,9 @@ jobs:
             echo "XDG_CONFIG_HOME=$RUNNER_TEMP/xdg-config"
           } >> "$GITHUB_ENV"
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
           "$CARGO_HOME/bin/rustc" --version
+          "$RUNNER_TEMP/node/bin/node" --version
 
       - name: Install dependencies and stage Bun sidecar
         run: |
