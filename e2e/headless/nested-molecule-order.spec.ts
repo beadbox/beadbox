@@ -103,32 +103,42 @@ test("steps follow the children's cross-step needs, children their in-step needs
   const headers = await page.$$eval(`[data-item-id="${root}"] [data-step-header]`, (els) =>
     els.map((el) => el.getAttribute("data-item-id")),
   )
-  expect(headers).toEqual([sB.id, sA.id, sC.id])
+  // The plan decides only that B comes before A. C has no edge either way, so
+  // it keeps its place in the tree's own order (bd's list order, which is not
+  // the formula's); it is not pinned here.
+  expect([...headers].sort()).toEqual([sA.id, sB.id, sC.id].sort())
+  expect(headers.indexOf(sB.id)).toBeLessThan(headers.indexOf(sA.id))
 
-  // j/k: header, l to open it, its rows in drawn order, then the next header.
+  // j/k: each header in drawn order, l to open it, its rows in drawn order,
+  // then the next header. Inside Step A, A1 comes before A2 (A2 needs A1).
   const press = async (key: string, expected: string) => {
     await page.keyboard.press(key)
     await expect.poll(() => focusedId(page)).toEqual([expected])
   }
-  await press("j", sB.id)
-  await page.keyboard.press("l")
-  await press("j", b1.id)
-  await press("j", sA.id)
-  await page.keyboard.press("l")
-  // Inside Step A: A1 before A2 on screen and on the keys.
-  const drawnA = (
-    await page.$$eval(`[data-step-section="${sA.id}"] [data-item-id]`, (els) =>
-      els.map((el) => el.getAttribute("data-item-id")),
-    )
-  ).filter((id) => id !== sA.id)
-  expect(drawnA).toEqual([a1.id, a2.id])
-  await press("j", a1.id)
-  await press("j", a2.id)
-  await press("j", sC.id)
-  await page.keyboard.press("l")
-  await press("j", c1.id)
-  await press("k", sC.id)
-  await press("k", a2.id)
+  const rowsOf: Record<string, string[]> = {
+    [sB.id]: [b1.id],
+    [sA.id]: [a1.id, a2.id],
+    [sC.id]: [c1.id],
+  }
+  const walked: string[] = []
+  for (const h of headers as string[]) {
+    await press("j", h)
+    walked.push(h)
+    await page.keyboard.press("l")
+    const drawn = (
+      await page.$$eval(`[data-step-section="${h}"] [data-item-id]`, (els) =>
+        els.map((el) => el.getAttribute("data-item-id")),
+      )
+    ).filter((id) => id !== h)
+    expect(drawn).toEqual(rowsOf[h]!)
+    for (const row of drawn) {
+      await press("j", row!)
+      walked.push(row!)
+    }
+  }
+  // And back: k retraces the same order.
+  await press("k", walked[walked.length - 2]!)
+  await press("k", walked[walked.length - 3]!)
   // Every step open: the root's card, for the bead.
   await page
     .locator(`[data-item-id="${root}"]`)
@@ -152,7 +162,8 @@ test("steps follow the children's cross-step needs, children their in-step needs
         .filter((id) => !id.includes("__start__") && !id.includes("__end__")),
     )
   await expect.poll(stepPairs).toEqual(["sB->sA"])
-  const treeOrder = ["sB", "sA", "sC"]
+  const formulaId: Record<string, string> = { [sA.id]: "sA", [sB.id]: "sB", [sC.id]: "sC" }
+  const treeOrder = (headers as string[]).map((h) => formulaId[h])
   for (const pair of await stepPairs()) {
     const [from, to] = pair.split("->") as [string, string]
     expect(treeOrder.indexOf(from)).toBeLessThan(treeOrder.indexOf(to))
