@@ -20,9 +20,9 @@
 # Adding a moved job (steps 2A-2D): add its job block below, checking out the
 # tree above, and add its id to `verdict.needs`. That is the one place.
 #
-# Reading a red night: `gh run view <id> -R beadbox/beadbox` lists an
-# ANNOTATIONS entry "Nightly red: <job> <result>" for every job that did not
-# pass, above the job list.
+# Reading a red night: under ANNOTATIONS, `gh run view <id> -R beadbox/beadbox`
+# prints "X <job> <result>" filed under "Nightly verdict:" for every job that
+# did not pass; the run page shows the same annotation titled "Nightly red".
 #
 # Security note: the `ref` input reaches run: steps only through env:, never
 # as ${{ }} inside a run: block.
