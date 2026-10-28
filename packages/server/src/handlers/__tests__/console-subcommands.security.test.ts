@@ -26,7 +26,12 @@ mock.module("../../lib/exec", () => ({
     return { stdout: "", stderr: "" }
   },
 }))
+// The real module underneath, so exports this mock does not name
+// (COMMON_BD_PATHS, which handlers/health imports) still resolve when this
+// file loads first in a shard (beadbox-mol-dph).
+const realBdPaths = await import("../../lib/bd-paths")
 mock.module("../../lib/bd-paths", () => ({
+  ...realBdPaths,
   resolveBdPath: () => "/fake/bin/bd",
   __resetBdPathCache: () => {},
 }))

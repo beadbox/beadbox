@@ -20,11 +20,17 @@ import { describe, expect, mock, test } from "bun:test"
 // the handler import so handlers/beads closes over the mocked symbols.
 let nextUpdateParentBehavior: () => void = () => {}
 
+// The real module underneath, so every export the mock does not name still
+// resolves: a shard that loads this file first otherwise fails to link
+// (beadbox-mol-dph: getWorkspacePassword, getStatusCatalog, ...).
+const realBd = await import("../../lib/bd")
+
 mock.module("../../lib/bd", () => {
   const stub = (name: string) => () => {
     throw new Error(`mock stub ${name} called unexpectedly`)
   }
   return {
+    ...realBd,
     // The one symbol these tests exercise.
     updateParent: async () => {
       nextUpdateParentBehavior()

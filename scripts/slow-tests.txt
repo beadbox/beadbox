@@ -1,0 +1,71 @@
+# Test files that leave the push run and run nightly (beadbox-mol-dph).
+#
+# scripts/ci-tests.sh fast runs every test file NOT listed here, plus every
+# *.security.test.ts (which may never be listed). full runs everything.
+# packages/server/src/__tests__/slow-test-census.test.ts checks this list
+# against the files.
+#
+# One file per line: <path from the repo root>  <cause>  <seconds on CI>
+# Seconds: per-file wall time on CI (Build run 40765408992, 2026-10-28, from
+# bun test's ##[group] per-file timestamps). They are for the reader and are
+# not checked; the nightly full run prints the slowest files, and a # fast:
+# file over 5 s there moves to the slow list on review.
+#
+# Causes: bd-workspace (imports __tests__/fixtures/bd-workspace) and
+# vite build are mechanical: such a file is always listed. spawn, sleep>=1s,
+# setTimeout>=1s and timeout>=10s are weak: a file with one is either listed
+# or in the "# fast:" section at the end, with its seconds and why.
+
+# --- server: real bd + Dolt workspaces (they import __tests__/fixtures/bd-workspace) ---
+packages/server/src/__tests__/epics.unit.test.ts                     bd-workspace       46.3
+packages/server/src/__tests__/gates-handler.unit.test.ts             bd-workspace       15.4
+packages/server/src/__tests__/formulas.unit.test.ts                  bd-workspace       17.3
+packages/server/src/__tests__/beads.unit.test.ts                     bd-workspace       12.6
+packages/server/src/__tests__/detail-cache-label-write.test.ts       bd-workspace       11.4
+packages/server/src/__tests__/beads-status-category.test.ts          bd-workspace       9.3
+packages/server/src/__tests__/bd-getBeadDetail-comments.test.ts      bd-workspace       7.1
+packages/server/src/__tests__/molecules.unit.test.ts                 bd-workspace       6.6
+packages/server/src/__tests__/beads-bulk-status.unit.test.ts         bd-workspace       8.5
+packages/server/src/__tests__/beads-bulk-archive.unit.test.ts        bd-workspace       7.0
+packages/server/src/__tests__/beads-custom-statuses.unit.test.ts     bd-workspace       7.6
+packages/server/src/__tests__/bd-workspace.fixture.test.ts           bd-workspace       4.6
+
+# --- server: real processes and real waits ---
+packages/server/src/__tests__/embedded-refusal-fallback.test.ts      spawn              22.2
+packages/server/src/__tests__/poll-child-resilience.test.ts          spawn              27.0
+packages/server/src/__tests__/serve-proxy-reap.test.ts               spawn              15.3
+packages/server/src/__tests__/subscribe.leak.test.ts                 timeout>=10s       6.6
+packages/server/src/__tests__/workspace-presence.test.ts             spawn              10.1
+packages/server/src/__tests__/parent-death-watcher.test.ts           spawn              6.0
+
+# --- client: compute-bound (each declares its own long timeout) ---
+packages/client/src/__tests__/activity-feed-cap.test.tsx             timeout>=10s       16.5
+packages/client/src/__tests__/gantt-routing.test.ts                  timeout>=10s       22.6
+packages/client/src/__tests__/chart-view.test.tsx                    timeout>=10s       8.0
+
+# --- decided fast: a weak cause, measured under the 5 s line (comment lines to ci-tests.sh) ---
+# fast: packages/client/src/__tests__/blocks-degraded-alert.test.tsx         timeout>=10s    0.5     the long timeout is a ceiling for slow CI runners, not a wait
+# fast: packages/client/src/__tests__/gantt-bounds.test.ts                   timeout>=10s    0.1     the long timeout is a ceiling for slow CI runners, not a wait
+# fast: packages/client/src/__tests__/home-page-subscription-refresh.test.tsx setTimeout>=1s  1.3     one real wait of 1-1.5 s; the whole file is under the 5 s line
+# fast: packages/client/src/__tests__/home-page-tree-blocked-by.test.tsx     timeout>=10s    0.9     the long timeout is a ceiling for slow CI runners, not a wait
+# fast: packages/client/src/__tests__/startup-gate-registry-quarantine.test.tsx timeout>=10s    0.0     the long timeout is a ceiling for slow CI runners, not a wait
+# fast: packages/client/src/__tests__/test-transport.test.ts                 spawn           0.2     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/client/src/__tests__/trains-view-switch.test.tsx            timeout>=10s    0.1     the long timeout is a ceiling for slow CI runners, not a wait
+# fast: packages/client/src/__tests__/view-switch-chart.test.tsx             timeout>=10s    0.9     the long timeout is a ceiling for slow CI runners, not a wait
+# fast: packages/client/src/__tests__/waiting-page.test.tsx                  timeout>=10s    1.4     the long timeout is a ceiling for slow CI runners, not a wait
+# fast: packages/server/src/__tests__/dolt-write-marker-mode.test.ts         setTimeout>=1s  1.5     one real wait of 1-1.5 s; the whole file is under the 5 s line
+# fast: packages/server/src/__tests__/e2e-browser.test.ts                    spawn           0.2   (local; newer than the CI run) spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/health.unit.test.ts                    timeout>=10s    0.2     the long timeout is a ceiling for slow CI runners, not a wait
+# fast: packages/server/src/__tests__/index.test.ts                          spawn           0.2     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/kill-owned.test.ts                     spawn           0.1     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/log-file-append.test.ts                spawn           0.1     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/log-file-capture.test.ts               spawn           4.2     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/log-file-upgrade.test.ts               spawn           0.3     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/poll-child-lifetime.test.ts            spawn           3.6     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/prepush-cargo-check.test.ts            spawn           0.3   spawns git and the hook script for a moment (CI run 40776150388); under the 5 s line
+# fast: packages/server/src/__tests__/prepush-deletion-skip.test.ts          spawn           0.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/serve-lifetime.test.ts                 spawn           1.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/serve-manager.unit.test.ts             spawn           1.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/session-attached.test.ts               spawn           0.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/subscribe.parity.test.ts               spawn           0.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/workspace-removal-stops-poll.test.ts   spawn           0.1     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
