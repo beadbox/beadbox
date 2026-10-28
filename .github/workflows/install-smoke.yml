@@ -160,12 +160,24 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Install bd CLI
-        # Gate 3 drives `bd create` against the running app. Hosted runners
-        # start with no bd, so install it rather than probing for it.
+        # Gate 3 drives `bd create` against the running app. The runner starts
+        # with no bd of its own, so install it rather than probing for it.
+        # beadbox-449.5: a pinned, checksum-verified release into this job's
+        # $RUNNER_TEMP, not brew: the Mac runner's user is not an admin and
+        # must not use another account's Homebrew.
+        env:
+          BD_VERSION: "1.3.1"
+          # sha256 of beads_1.3.1_darwin_arm64.tar.gz, as in the release's checksums.txt.
+          BD_SHA256: "508ba807996e2b9c992c538a6f405f2fc7d2e16cf8b4e5b0d1bf9fe860367007"
         run: |
           set -euo pipefail
-          command -v bd >/dev/null 2>&1 || brew install beads
-          bd version
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "$RUNNER_TEMP/beads.tgz" \
+            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_darwin_arm64.tar.gz"
+          echo "$BD_SHA256  $RUNNER_TEMP/beads.tgz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/beads.tgz" -C "$RUNNER_TEMP/bin" ./bd
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/bd" version
 
       - name: Download release DMG and extract the .app
         env:
@@ -182,43 +194,81 @@ jobs:
           # The DMG is durable (one of the three artifacts check-promote
           # validates), and it is what a user actually installs, so smoking it
           # also exercises the DMG's own signature and staple.
-          mkdir -p _smoke
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Beadbox-*-macOS-arm64.dmg' --dir _smoke
-          DMG=$(ls _smoke/Beadbox-*-macOS-arm64.dmg | head -1)
+          #
+          # beadbox-449.5: everything lives under this job's $RUNNER_TEMP. The
+          # Mac this runs on is shared (the QA Mac), so the smoke never touches
+          # /Applications/Beadbox.app or any app it did not start.
+          SMOKE="$RUNNER_TEMP/smoke"
+          mkdir -p "$SMOKE/dmg"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'Beadbox-*-macOS-arm64.dmg' --dir "$SMOKE/dmg"
+          DMG=$(ls "$SMOKE"/dmg/Beadbox-*-macOS-arm64.dmg | head -1)
           [ -n "$DMG" ] || { echo "::error::no macOS arm64 DMG found on $TAG"; exit 1; }
           echo "Smoking $DMG"
           MOUNT=$(mktemp -d)
           hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT"
           # Copy the app out before detaching; the mountpoint is read-only.
-          cp -R "$MOUNT/Beadbox.app" _smoke/
+          mkdir -p "$SMOKE/install"
+          cp -R "$MOUNT/Beadbox.app" "$SMOKE/install/"
           hdiutil detach "$MOUNT"
-          ls -la _smoke
+          echo "SMOKE_APP=$SMOKE/install/Beadbox.app" >> "$GITHUB_ENV"
+          ls -la "$SMOKE/install/Beadbox.app/Contents/MacOS"
 
-      - name: Install (drop into /Applications)
+      - name: Verify the app before anything runs it
+        # beadbox-449.5: the bundle is a downloaded artifact about to run on a
+        # shared Mac. It must be intact, accepted by Gatekeeper (signed and
+        # notarized), and signed by our team; anything else stops here.
         run: |
           set -euo pipefail
-          # Idempotent: remove any prior install before copying.
-          rm -rf "/Applications/Beadbox.app"
-          cp -R _smoke/Beadbox.app "/Applications/Beadbox.app"
-          ls -la "/Applications/Beadbox.app/Contents/MacOS"
+          codesign --verify --deep --strict --verbose=2 "$SMOKE_APP"
+          spctl --assess --type execute --verbose=2 "$SMOKE_APP"
+          TEAM=$(codesign -dv --verbose=2 "$SMOKE_APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+          if [ "$TEAM" != "K7Z8YKVA8G" ]; then
+            echo "::error::Beadbox.app is signed by team '$TEAM', not K7Z8YKVA8G; refusing to run it"
+            exit 1
+          fi
+          echo "OK: signature intact, Gatekeeper accepts it, team $TEAM"
 
       - name: Launch app
         run: |
           set -euo pipefail
-          # Clean log dir so Gate 1 only counts errors from THIS launch.
+          # Gate 1 counts errors from THIS launch only. The log dir is the
+          # runner user's own and may hold earlier runs: record each file's
+          # size now and read only what is written after, never delete it.
           LOG_DIR="$HOME/Library/Logs/Beadbox"
-          rm -rf "$LOG_DIR"
           mkdir -p "$LOG_DIR"
-          open "/Applications/Beadbox.app"
+          : > "$RUNNER_TEMP/smoke/log-offsets"
+          for f in "$LOG_DIR"/*; do
+            [ -f "$f" ] && printf '%s\t%s\n' "$(stat -f %z "$f")" "$f" >> "$RUNNER_TEMP/smoke/log-offsets"
+          done
+          open -n "$SMOKE_APP"
+          # This launch's own process: its executable path is unique to this
+          # job's $RUNNER_TEMP, and it belongs to this user.
+          APP_PID=""
+          for _ in $(seq 1 30); do
+            APP_PID=$(pgrep -U "$(id -u)" -f "^$SMOKE_APP/Contents/MacOS/beadbox\$" | head -1 || true)
+            [ -n "$APP_PID" ] && break
+            sleep 1
+          done
+          [ -n "$APP_PID" ] || { echo "::error::Beadbox process not running after launch"; exit 1; }
+          echo "APP_PID=$APP_PID" >> "$GITHUB_ENV"
           # Allow Tauri/sidecar to boot + write initial log lines.
           sleep 6
-          # Sanity: process must be alive.
-          pgrep -f "Beadbox" >/dev/null || { echo "::error::Beadbox process not running after launch"; exit 1; }
+          kill -0 "$APP_PID" || { echo "::error::Beadbox ($APP_PID) exited after launch"; exit 1; }
+          echo "launched $SMOKE_APP as pid $APP_PID"
 
       - name: "Gate 1 — capability-error-zero"
         run: |
           set -euo pipefail
           LOG_DIR="$HOME/Library/Logs/Beadbox"
+          # Only what this launch wrote: each file from its recorded size on,
+          # and files that did not exist before the launch in full.
+          NEW="$RUNNER_TEMP/smoke/this-launch.log"
+          : > "$NEW"
+          for f in "$LOG_DIR"/*; do
+            [ -f "$f" ] || continue
+            off=$(awk -F'\t' -v f="$f" '$2 == f {print $1}' "$RUNNER_TEMP/smoke/log-offsets")
+            tail -c +"$(( ${off:-0} + 1 ))" "$f" >> "$NEW"
+          done
           # Match: permission denied / not allowed / capability denied / capability missing.
           # Forgiving regex per p4-verification-rubric.md.
           # The `|| true` must be INSIDE the pipeline. grep exits 1 on no match —
@@ -227,11 +277,11 @@ jobs:
           # a SECOND line, making MATCHES "0\n0", which is != "0", so the gate
           # failed on clean logs and dirty ones alike. `wc -l` on empty input
           # already yields 0, so nothing here is needed for the value itself.
-          MATCHES=$( { grep -riE 'permission denied|not allowed|capability|permission' "$LOG_DIR" 2>/dev/null || true; } | wc -l | tr -d ' ' )
+          MATCHES=$( { grep -iE 'permission denied|not allowed|capability|permission' "$NEW" 2>/dev/null || true; } | wc -l | tr -d ' ' )
           echo "Capability error matches: $MATCHES"
           if [ "$MATCHES" != "0" ]; then
             echo "::error::Gate 1 failed — $MATCHES capability/permission log lines (expected 0)"
-            grep -riE 'permission denied|not allowed|capability|permission' "$LOG_DIR" || true
+            grep -iE 'permission denied|not allowed|capability|permission' "$NEW" || true
             exit 1
           fi
 
@@ -245,23 +295,32 @@ jobs:
       - name: "Gate 4 — clean process exit within 500ms"
         run: |
           set -euo pipefail
-          # Send polite quit (mirrors macOS Cmd+Q semantics).
-          osascript -e 'tell application "Beadbox" to quit' 2>/dev/null || true
-          # SIGTERM as fallback for any straggling sidecar.
-          pkill -TERM -f "Beadbox" 2>/dev/null || true
-          pkill -TERM -f "beadbox-sidecar" 2>/dev/null || true
+          # beadbox-449.5: only this launch's processes. The app pid recorded at
+          # launch, the processes it started (the sidecar), and anything whose
+          # command line holds this job's own app path. Never a process found
+          # by name: the shared Mac may be running other copies of Beadbox.
+          ours() {
+            { echo "$APP_PID"
+              pgrep -P "$APP_PID" || true
+              pgrep -U "$(id -u)" -f "$SMOKE_APP/" || true
+            } | sort -u | while read -r p; do kill -0 "$p" 2>/dev/null && echo "$p"; done
+          }
+          CHILDREN=$(pgrep -P "$APP_PID" || true)
+          # Quit by SIGTERM to this launch's processes only. No AppleScript:
+          # on an unattended Mac session an Apple Event to the app can wait on
+          # a consent prompt nobody answers, and by name or bundle id it could
+          # reach another copy (beadbox-449.2 test).
+          for p in $APP_PID $CHILDREN; do kill -TERM "$p" 2>/dev/null || true; done
           # 500ms grace.
           sleep 0.5
-          # Same pipefail defect as Gate 1, and here the CLEAN case is the one that
-          # broke: pgrep exits 1 when nothing matches — i.e. when there are no
-          # orphaned processes, which is exactly what this gate wants to see.
-          STRAGGLERS=$( { pgrep -f "Beadbox|beadbox-sidecar" || true; } | wc -l | tr -d ' ' )
+          # Same pipefail defect as Gate 1: count lines, never pgrep's exit code.
+          LEFT=$(ours; for p in $CHILDREN; do kill -0 "$p" 2>/dev/null && echo "$p"; done)
+          STRAGGLERS=$(printf '%s\n' "$LEFT" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
           if [ "$STRAGGLERS" != "0" ]; then
-            echo "::error::Gate 4 failed — $STRAGGLERS process(es) still running after 500ms"
-            ps aux | grep -E "Beadbox|beadbox-sidecar" | grep -v grep || true
-            # Force-kill so the runner is clean for the next run.
-            pkill -KILL -f "Beadbox" 2>/dev/null || true
-            pkill -KILL -f "beadbox-sidecar" 2>/dev/null || true
+            echo "::error::Gate 4 failed — $STRAGGLERS of this launch's process(es) still running after 500ms"
+            printf '%s\n' "$LEFT" | sed '/^$/d' | sort -u | while read -r p; do ps -o pid=,ppid=,command= -p "$p" || true; done
+            # Force-kill this launch's processes so the runner is clean for the next run.
+            printf '%s\n' "$LEFT" | sed '/^$/d' | sort -u | while read -r p; do kill -KILL "$p" 2>/dev/null || true; done
             exit 1
           fi
 

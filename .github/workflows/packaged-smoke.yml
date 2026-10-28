@@ -79,9 +79,31 @@ jobs:
           ls "$RUNNER_TEMP/app"
 
       - name: Install bd and minisign
+        # beadbox-449.5: pinned, checksum-verified releases into this job's
+        # $RUNNER_TEMP, not brew: the Mac runner's user is not an admin and
+        # must not use another account's Homebrew.
+        env:
+          BD_VERSION: "1.3.1"
+          # sha256 of beads_1.3.1_darwin_arm64.tar.gz, as in the release's checksums.txt.
+          BD_SHA256: "508ba807996e2b9c992c538a6f405f2fc7d2e16cf8b4e5b0d1bf9fe860367007"
+          MINISIGN_VERSION: "0.12"
+          # sha256 of minisign-0.12-macos.zip (the zip holds one binary, `minisign`).
+          MINISIGN_SHA256: "89000b19535765f9cffc65a65d64a820f433ef6db8020667f7570e06bf6aac63"
         run: |
-          brew install beads minisign
-          bd --version
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "$RUNNER_TEMP/beads.tgz" \
+            "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_darwin_arm64.tar.gz"
+          echo "$BD_SHA256  $RUNNER_TEMP/beads.tgz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/beads.tgz" -C "$RUNNER_TEMP/bin" ./bd
+          curl -fsSL --proto '=https' --tlsv1.2 -o "$RUNNER_TEMP/minisign.zip" \
+            "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-macos.zip"
+          echo "$MINISIGN_SHA256  $RUNNER_TEMP/minisign.zip" | shasum -a 256 -c -
+          unzip -q -o "$RUNNER_TEMP/minisign.zip" minisign -d "$RUNNER_TEMP/bin"
+          chmod 755 "$RUNNER_TEMP/bin/minisign"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/bd" --version
+          "$RUNNER_TEMP/bin/minisign" -v
 
       - name: Smoke test
         env:

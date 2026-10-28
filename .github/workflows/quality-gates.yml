@@ -364,6 +364,27 @@ jobs:
           [ "$bad" -eq 0 ]
           echo "OK: all $found macOS jobs carry their guard (accident prevention only)"
 
+      - name: The macOS smokes touch only their own launch
+        # beadbox-449.5: the macOS smokes may run on a shared Mac (the QA Mac,
+        # which also hosts another project's runner). No kill by name, no
+        # AppleScript at all (by name or bundle id it reaches other copies, and
+        # on an unattended session it can hang on a consent prompt), no write
+        # to the installed /Applications copy, in the files that drive them.
+        # Comment lines are skipped; the patterns are split so this step does
+        # not match itself.
+        run: |
+          set -euo pipefail
+          FILES=".github/workflows/install-smoke.yml .github/workflows/packaged-smoke.yml scripts/packaged-smoke.sh"
+          bad=0
+          # shellcheck disable=SC2086 # FILES is a word list on purpose
+          if grep -nE 'pk''ill|kill''all|osa''script|tell applic''ation|(rm|cp|mv|ditto)[^#]*/Applic''ations/Beadbox' $FILES \
+            | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'; then
+            echo "::error::a macOS smoke reaches beyond its own launch (see the lines above)"
+            bad=1
+          fi
+          [ "$bad" -eq 0 ]
+          echo "OK: the macOS smokes stop only their own processes and never touch the installed app"
+
       - name: Self-hosted Mac PATH and toolchain trust tests
         # beadbox-449.4: the root-hook design (job-started hook, picker,
         # supervisor) is retired; what remains is the PATH and toolchain trust
