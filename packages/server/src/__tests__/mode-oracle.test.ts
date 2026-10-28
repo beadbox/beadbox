@@ -147,7 +147,11 @@ describe("the live case: embedded store + stale port file + registry mode=server
       await new Promise((r) => setTimeout(r, 300))
       // The real bd write pattern: the Dolt commit rewrites the manifest.
       await writeFile(manifest, "5:__DOLT__:root-after-bd-close")
-      const deadline = Date.now() + 5_000
+      // A hang guard, not a measurement: the loop ends as soon as the event
+      // arrives (debounce 50 ms); only a stalled detector waits it out. 20 s
+      // stays under the 30 s test default and above what a loaded Mac takes
+      // (beadbox-mol-uua.1).
+      const deadline = Date.now() + 20_000
       while (
         Date.now() < deadline &&
         !events.some((e) => e.type === "change" && e.trigger !== "initial")

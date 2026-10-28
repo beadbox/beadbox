@@ -20,6 +20,13 @@
 # script and the hooks, test preloads and fixtures, and the sidecar entry
 # (packages/server/src/index.ts, which tests spawn by path).
 #
+# PUSH TIER ONLY (beadbox-mol-uua.1): in both modes the hook runs the files of
+# the push tier, as scripts/ci-tests.sh fast --list shards them, never the slow
+# tier in scripts/slow-tests.txt (real bd + Dolt workspaces, long real waits,
+# vite builds). Those depend on how busy the machine is, and on a Mac shared by
+# several rigs they failed pushes on load, not code; CI's full run and the
+# nightly run them. "Full" here means the whole push tier.
+#
 # Input: PUSH_SPECS, one "<remote sha> <local sha>" line per pushed ref, set
 # by .husky/_is-deletion-only-push.sh from the refs git gives the hook.
 
@@ -111,28 +118,39 @@ run() { # label, dir, bun test args...
   labels+=("$label")
 }
 
-server_tests=()
-security_tests=()
-for f in packages/server/src/__tests__/*.test.ts; do
-  rel=${f#packages/server/}
-  case "$f" in
-    *.security.test.ts) security_tests+=("$rel") ;;
-    *) server_tests+=("$rel") ;;
-  esac
-done
+# The push tier's shards: "<shard>\t<package>\t<./file>" lines, the same
+# round-robin split CI uses, with this hook's shard count for the server.
+if ! tier=$(BEADBOX_CI_SERVER_SHARDS=$SHARDS bash scripts/ci-tests.sh fast --list); then
+  echo "[prepush-tests] scripts/ci-tests.sh fast --list failed; fix the tier list before pushing" >&2
+  exit 1
+fi
+names=()
+while IFS=$'\t' read -r name _ _; do
+  [ -z "$name" ] && continue
+  case " ${names[*]+"${names[*]}"} " in *" $name "*) ;; *) names+=("$name") ;; esac
+done <<<"$tier"
+slow_count=$(grep -cE '^[^#[:space:]]' scripts/slow-tests.txt)
+echo "[prepush-tests] push tier: $(grep -c . <<<"$tier") files in ${#names[@]} shards; the $slow_count slow-tier files run in CI and the nightly, not here"
+
 changed_args=()
 [ -n "$changed_flag" ] && changed_args=("$changed_flag")
 
-if [ "$mode" = "full" ] || $server_changed || $client_changed; then
-  for ((i = 0; i < SHARDS; i++)); do
-    shard=()
-    for ((j = i; j < ${#server_tests[@]}; j += SHARDS)); do shard+=("${server_tests[$j]}"); done
-    [ ${#shard[@]} -eq 0 ] && continue
-    run "server-$i" packages/server "${changed_args[@]+"${changed_args[@]}"}" "${shard[@]}"
-  done
-  run "server-security" packages/server "${security_tests[@]}"
-fi
-run "client" packages/client "${changed_args[@]+"${changed_args[@]}"}"
+for name in "${names[@]}"; do
+  pkg=""
+  files=()
+  while IFS=$'\t' read -r n p f; do
+    [ "$n" = "$name" ] || continue
+    pkg=$p
+    files+=("$f")
+  done <<<"$tier"
+  case "$name" in
+    # The security suite runs whole on every push: its tests scan sources
+    # instead of importing them, so --changed cannot see what they cover.
+    *-security) run "$name" "$pkg" "${files[@]}" ;;
+    server-*) if [ "$mode" = "full" ] || $server_changed || $client_changed; then run "$name" "$pkg" "${changed_args[@]+"${changed_args[@]}"}" "${files[@]}"; fi ;;
+    *) run "$name" "$pkg" "${changed_args[@]+"${changed_args[@]}"}" "${files[@]}" ;;
+  esac
+done
 
 failed=()
 for idx in "${!pids[@]}"; do

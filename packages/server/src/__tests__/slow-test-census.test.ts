@@ -35,7 +35,11 @@ const SELF = relative(REPO, import.meta.path)
 const FIXTURE = /(^|\/)fixtures\/bd-workspace(\.ts)?$/
 
 export const STRONG = ["bd-workspace", "vite build"] as const
-export const WEAK = ["spawn", "sleep>=1s", "setTimeout>=1s", "timeout>=10s"] as const
+// deadline (beadbox-mol-uua.1): a loop whose condition reads the wall clock
+// (Date.now() or performance.now()), the shape of "wait until X, or give up at
+// T". Its result depends on how busy the machine is, so a file with one is on
+// the slow list or decided fast with its reason, never in the push tier unseen.
+export const WEAK = ["spawn", "sleep>=1s", "setTimeout>=1s", "timeout>=10s", "deadline"] as const
 export type Cause = (typeof STRONG)[number] | (typeof WEAK)[number]
 const CAUSES: readonly string[] = [...STRONG, ...WEAK]
 
@@ -114,6 +118,20 @@ function declaredTimeout(call: ts.CallExpression, consts: Map<string, number>): 
   return undefined
 }
 
+/** Date.now() or performance.now() anywhere in an expression. */
+function readsWallClock(node: ts.Node): boolean {
+  if (
+    ts.isCallExpression(node) &&
+    ts.isPropertyAccessExpression(node.expression) &&
+    node.expression.name.text === "now" &&
+    ts.isIdentifier(node.expression.expression) &&
+    (node.expression.expression.text === "Date" || node.expression.expression.text === "performance")
+  ) {
+    return true
+  }
+  return ts.forEachChild(node, readsWallClock) ?? false
+}
+
 export interface Scan {
   causes: Set<Cause>
   imports: string[] // relative module specifiers, for following local helpers
@@ -166,6 +184,12 @@ export function scanSource(text: string, fileName = "x.ts"): Scan {
         causes.add("setTimeout>=1s")
       if (name && TEST_CALLS.has(name) && (declaredTimeout(node, consts) ?? 0) >= 10_000)
         causes.add("timeout>=10s")
+    }
+    if (
+      ((ts.isWhileStatement(node) || ts.isDoStatement(node)) && readsWallClock(node.expression)) ||
+      (ts.isForStatement(node) && node.condition !== undefined && readsWallClock(node.condition))
+    ) {
+      causes.add("deadline")
     }
     // `vite build` in any string or template: the command, not a comment.
     if (
@@ -372,6 +396,17 @@ describe("census detector (beadbox-mol-dph)", () => {
     expect(causesIn(`describe("x", () => { test("y", () => {}) })`)).toEqual([])
   })
 
+  test("a wall-clock deadline is a loop that reads the clock, not date arithmetic (beadbox-mol-uua.1)", () => {
+    expect(causesIn(`const end = Date.now() + 4000; while (Date.now() < end && !done()) await poll()`)).toEqual([
+      "deadline",
+    ])
+    expect(causesIn(`do { await poll() } while (performance.now() - t0 < 2000)`)).toEqual(["deadline"])
+    expect(causesIn(`for (let t = Date.now(); Date.now() - t < ms; ) step()`)).toEqual(["deadline"])
+    expect(causesIn(`const due = new Date(Date.now() + 86_400_000)`)).toEqual([])
+    expect(causesIn(`const elapsed = performance.now() - t0; expect(elapsed).toBeGreaterThan(0)`)).toEqual([])
+    expect(causesIn(`while (queue.length) drain()`)).toEqual([])
+  })
+
   test("vite build as a command string, not a comment", () => {
     expect(causesIn('Bun.spawnSync(["sh", "-c", "node_modules/.bin/vite build"])')).toEqual([
       "spawn",
@@ -437,6 +472,14 @@ describe("census contract (beadbox-mol-dph)", () => {
         'e.test.ts is in the fast list (line 3) for "timeout>=10s", which it no longer has',
       ),
     ])
+  })
+
+  test("a wall-clock deadline in the push tier with no entry fails, naming it (beadbox-mol-uua.1)", () => {
+    const withDeadline = (p: string) => (p === "c.test.ts" ? new Set<Cause>(["deadline"]) : of(p))
+    expect(census(files, good, withDeadline)).toEqual([
+      expect.stringContaining("c.test.ts has deadline and is in neither section"),
+    ])
+    expect(census(files, `${good}\n# fast: c.test.ts deadline 0.2 a hang guard on a quick poll`, withDeadline)).toEqual([])
   })
 
   test("a weak-cause file in neither section fails", () => {

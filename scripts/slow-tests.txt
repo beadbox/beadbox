@@ -13,8 +13,10 @@
 #
 # Causes: bd-workspace (imports __tests__/fixtures/bd-workspace) and
 # vite build are mechanical: such a file is always listed. spawn, sleep>=1s,
-# setTimeout>=1s and timeout>=10s are weak: a file with one is either listed
-# or in the "# fast:" section at the end, with its seconds and why.
+# setTimeout>=1s, timeout>=10s and deadline (a loop whose condition reads
+# Date.now() or performance.now(): a wall-clock deadline, beadbox-mol-uua.1)
+# are weak: a file with one is either listed or in the "# fast:" section at
+# the end, with its seconds and why.
 
 # --- server: real bd + Dolt workspaces (they import __tests__/fixtures/bd-workspace) ---
 packages/server/src/__tests__/epics.unit.test.ts                     bd-workspace       46.3
@@ -61,6 +63,7 @@ packages/client/src/__tests__/chart-view.test.tsx                    timeout>=10
 # fast: packages/server/src/__tests__/log-file-append.test.ts                spawn           0.1     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/log-file-capture.test.ts               spawn           4.2     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/log-file-upgrade.test.ts               spawn           0.3     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/mode-oracle.test.ts                  deadline        0.4   (local, at load 25) a 20 s hang guard on one change event that arrives in milliseconds (debounce 50 ms); under the 5 s line
 # fast: packages/server/src/__tests__/poll-child-lifetime.test.ts            spawn           3.6     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/prepush-cargo-check.test.ts            spawn           0.3   spawns git and the hook script for a moment (CI run 40776150388); under the 5 s line
 # fast: packages/server/src/__tests__/prepush-deletion-skip.test.ts          spawn           0.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
