@@ -35,7 +35,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
+        os: [ubuntu-latest, beadbox-macos-release]
+        # beadbox-449: macOS runs on the self-hosted Mac runner, which a pull
+        # request (a fork's above all) must never reach. On pull_request the
+        # Mac entry is excluded here; the runner's job-started hook refuses
+        # the event regardless. Other events exclude nothing.
+        exclude:
+          - os: ${{ github.event_name == 'pull_request' && 'beadbox-macos-release' || 'none' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 

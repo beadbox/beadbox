@@ -34,7 +34,7 @@ permissions:
 jobs:
   smoke:
     name: Packaged app smoke (macOS arm64, ${{ matrix.tag }})
-    runs-on: macos-14
+    runs-on: [beadbox-macos-release]
     timeout-minutes: 15
     strategy:
       fail-fast: false

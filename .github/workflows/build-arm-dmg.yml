@@ -1,13 +1,12 @@
 name: Build ARM64 DMG
 
+# beadbox-449 (D3): builds the dispatched commit only. It runs on the
+# self-hosted Mac runner next to the signing keys, whose job-started hook
+# checks the workflow ref but not what a job checks out, so there is no input
+# that could point the checkout at another branch. The hook admits a dispatch
+# on main only.
 on:
   workflow_dispatch:
-    inputs:
-      ref:
-        description: "Branch or ref to build from (default: main)"
-        required: false
-        type: string
-        default: main
 
 concurrency:
   group: build-arm-dmg
@@ -28,13 +27,11 @@ jobs:
     # environment to read them, and a fork PR's head ref matches neither, so a
     # fork-triggered run cannot reach these secrets even if it reaches this job.
     environment: release
-    runs-on: macos-14
+    runs-on: [beadbox-macos-release]
     timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Extract version from package.json
         id: version
@@ -191,13 +188,11 @@ jobs:
 
   create-dmg:
     needs: [build]
-    runs-on: macos-14
+    runs-on: [beadbox-macos-release]
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Extract version from package.json
         id: version
@@ -238,11 +233,6 @@ jobs:
 
       - name: Prepare release artifact
         id: artifact
-        env:
-          # Via env:, not ${{ }} inline — a dispatch input interpolated into a
-          # run: block is expanded by the runner before bash sees it, so its
-          # contents would execute as shell (zizmor template-injection).
-          INPUT_REF: ${{ inputs.ref }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           DMG_SRC=$(ls Beadbox_*_aarch64.dmg | head -1)
@@ -255,7 +245,7 @@ jobs:
           echo "- **Version:** ${VERSION}" >> "$GITHUB_STEP_SUMMARY"
           echo "- **DMG:** ${DMG_NAME}" >> "$GITHUB_STEP_SUMMARY"
           echo "- **SHA-256:** ${SHA}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Ref:** ${INPUT_REF}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Ref:** ${GITHUB_REF} @ ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -139,7 +139,7 @@ jobs:
   smoke-macos-arm64:
     needs: resolve-tag
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.smoke_macos_arm64 == 'true' }}
-    runs-on: macos-14
+    runs-on: [beadbox-macos-release]
     timeout-minutes: 20
     permissions:
       contents: read

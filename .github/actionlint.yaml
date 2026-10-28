@@ -7,6 +7,13 @@
 # SHELLCHECK_OPTS="--severity=warning", which drops shellcheck's info/style
 # advice on the pre-existing release scripts while still failing on real
 # warnings and on every actionlint check.
+
+# beadbox-449: every macOS job runs on the fleet's self-hosted Mac runner,
+# which carries this custom label. The workflow-hygiene step separately pins
+# where the label may appear.
+self-hosted-runner:
+  labels:
+    - beadbox-macos-release
 paths:
   .github/workflows/install-smoke.yml:
     ignore:
