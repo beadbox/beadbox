@@ -23,6 +23,7 @@ import { CopyableId } from "@/components/copyable-id"
 import { SimpleMarkdown } from "@/components/simple-markdown"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { formatDueAt } from "@/lib/due-format"
 import type { CommentSortOrder } from "@/lib/local-storage"
 import type { Bead, Comment } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -186,8 +187,7 @@ export function BeadExpandedViewModal({
                   )}
                 >
                   <CalendarClock className="h-3 w-3" />
-                  Due:{" "}
-                  {new Date(dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  Due: {formatDueAt(dueAt)}
                 </span>
               )}
               {deferUntil && (

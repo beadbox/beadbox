@@ -32,6 +32,7 @@ import { CopyableId } from "@/components/copyable-id"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useViewport } from "@/hooks/use-viewport"
+import { formatDueAt } from "@/lib/due-format"
 import { type BadgeConfig, getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
 import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
@@ -302,10 +303,7 @@ function BeadRow({
                 )}
               />
             </TooltipTrigger>
-            <TooltipContent>
-              Due:{" "}
-              {new Date(bead.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            </TooltipContent>
+            <TooltipContent>Due: {formatDueAt(bead.dueAt)}</TooltipContent>
           </Tooltip>
         )}
         {bead.estimatedMinutes && (

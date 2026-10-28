@@ -5,6 +5,7 @@ import { useCallback, useState } from "react"
 import type { FieldState } from "@/components/bead-detail-helpers"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { formatDueAt } from "@/lib/due-format"
 import { cn } from "@/lib/utils"
 
 interface SchedulingControlsProps {
@@ -94,10 +95,7 @@ export function SchedulingControls({
               )}
             >
               <CalendarClock className="h-3 w-3" />
-              <span className="text-xs">
-                Due:{" "}
-                {new Date(dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-              </span>
+              <span className="text-xs">Due: {formatDueAt(dueAt)}</span>
             </button>
           </TooltipTrigger>
           <TooltipContent>
