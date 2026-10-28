@@ -13,13 +13,13 @@ name: Rust cache warm (macOS)
 # crate, which embeds the real SPA and version, is always rebuilt by the
 # release job itself.
 #
+# beadbox-mol-wmu: daily and on dispatch only, never on a push (main's push
+# run is the fast gate). The nightly Build's macOS job saves the same key from
+# main too; a tag after a same-day src-tauri change pays at most one cold
+# compile of what changed.
+#
 # No secrets and no environment: this job signs nothing.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "src-tauri/**"
-      - ".github/workflows/rust-cache-warm.yml"
   schedule:
     # Daily: picks up a new stable toolchain (part of the key) before the next
     # tag, and keeps the entry clear of the 7-day unused-cache eviction.
