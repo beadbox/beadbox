@@ -132,4 +132,60 @@ else
   rfail=$((rfail + 1)); echo "FAIL: release.yml not found at $REL"
 fi
 echo "release.yml tests: $rpass passed, $rfail failed"
-[ "$tfail" -eq 0 ] && [ "$rfail" -eq 0 ]
+
+# ---------------------------------------------------------------------------
+# beadbox-449.4: nothing a signing job leaves on the long-lived Mac reaches the
+# next one. (1) check-cargo-ancestors.sh, run as written, against a synthetic
+# tree; (2) release.yml's always() cleanup of each macOS job's signing
+# material, and the per-job git/XDG config.
+spass=0; sfail=0
+CA="$DIR/check-cargo-ancestors.sh"
+# scase <expect: pass|refuse> <label> <checkout dir>
+scase() {
+  local expect=$1 label=$2 got
+  if [ ! -f "$CA" ]; then sfail=$((sfail + 1)); echo "FAIL [$label]: $CA is missing"; return; fi
+  if /bin/bash "$CA" "$3" >"$T/ca.out" 2>&1; then got=pass; else got=refuse; fi
+  if [ "$got" != "$expect" ]; then sfail=$((sfail + 1)); echo "FAIL [$label]: expected $expect, got $got ($(cat "$T/ca.out"))"; return; fi
+  if [ "$got" = refuse ] && ! grep -q "exists above the checkout" "$T/ca.out"; then
+    sfail=$((sfail + 1)); echo "FAIL [$label]: refused for another reason: $(cat "$T/ca.out")"; return
+  fi
+  spass=$((spass + 1))
+}
+CT="$T/cargo-tree"
+mkdir -p "$CT/home/actions-runner/_work/repo/repo"
+W="$CT/home/actions-runner/_work/repo/repo"
+scase pass "no cargo config anywhere above the checkout" "$W"
+mkdir -p "$CT/home/.cargo" && printf '[build]\nrustc-wrapper = "/tmp/evil"\n' > "$CT/home/.cargo/config.toml"
+scase refuse "config.toml in the runner's HOME (an ancestor)" "$W"
+rm "$CT/home/.cargo/config.toml"
+printf 'x' > "$CT/home/actions-runner/.cargo-not-it"
+mkdir -p "$CT/home/actions-runner/_work/.cargo" && printf 'x' > "$CT/home/actions-runner/_work/.cargo/config"
+scase refuse "legacy .cargo/config in the work dir (an ancestor)" "$W"
+rm "$CT/home/actions-runner/_work/.cargo/config"
+ln -s /nonexistent "$CT/home/actions-runner/_work/.cargo/config.toml"
+scase refuse "dangling symlink .cargo/config.toml above the checkout" "$W"
+rm "$CT/home/actions-runner/_work/.cargo/config.toml"
+mkdir -p "$W/.cargo" && printf '[build]\n' > "$W/.cargo/config.toml"
+scase pass "config inside the checkout itself (the reviewed tree)" "$W"
+# shellcheck disable=SC2016 # literal workflow text
+if [ -f "$REL" ]; then
+  s=ok
+  grep -q 'bash scripts/ci-runner/check-cargo-ancestors.sh "$GITHUB_WORKSPACE"' "$REL" || s="the cargo-config guard is not run"
+  grep -q 'echo "GIT_CONFIG_GLOBAL=$RUNNER_TEMP/gitconfig"' "$REL" || s="git's global config is not per job"
+  grep -q 'echo "XDG_CONFIG_HOME=$RUNNER_TEMP/xdg-config"' "$REL" || s="XDG config is not per job"
+  # Each macOS signing job: an always() step that restores the search list and
+  # removes its keychain, its certificate and the notarization key.
+  for pair in "signing.keychain-db certificate.p12" "dmg-signing.keychain-db dmg-cert.p12"; do
+    set -- $pair
+    blk=$(awk -v kc="$1" '/name: Remove this job.s signing material/ {inb=1; buf=""} inb {buf = buf $0 "\n"} inb && /OK: this job.s keychain/ {if (index(buf, kc)) {printf "%s", buf}; inb=0}' "$REL")
+    [ -n "$blk" ] || { s="no signing-material cleanup for $1"; continue; }
+    printf '%s' "$blk" | grep -q 'if: always()' || s="the cleanup for $1 is not if: always()"
+    printf '%s' "$blk" | grep -q "security delete-keychain \"\$RUNNER_TEMP/$1\"" || s="the cleanup does not delete $1"
+    printf '%s' "$blk" | grep -q "\$RUNNER_TEMP/$2" || s="the cleanup does not remove $2"
+    printf '%s' "$blk" | grep -q 'rm -rf "$GITHUB_WORKSPACE/private_keys"' || s="the cleanup for $1 leaves private_keys"
+    printf '%s' "$blk" | grep -q 'security list-keychains -d user -s ~/Library/Keychains/login.keychain-db' || s="the cleanup for $1 does not restore the search list"
+  done
+  if [ "$s" = ok ]; then spass=$((spass + 1)); else sfail=$((sfail + 1)); echo "FAIL release.yml signing cleanup: $s"; fi
+fi
+echo "signing-state tests: $spass passed, $sfail failed"
+[ "$tfail" -eq 0 ] && [ "$rfail" -eq 0 ] && [ "$sfail" -eq 0 ]

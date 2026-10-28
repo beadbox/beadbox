@@ -674,10 +674,19 @@ jobs:
           # account on the machine may be able to change them (owner root or
           # this runner user, no group or other write, ancestors included).
           bash scripts/ci-runner/check-runner-path.sh "$CARGO_HOME/bin:$PATH" "$RUSTUP_HOME"
+          # cargo reads .cargo/config.toml from every directory above the build
+          # dir, the runner's persistent HOME included: refuse if any is there.
+          bash scripts/ci-runner/check-cargo-ancestors.sh "$GITHUB_WORKSPACE"
+          # git and XDG-aware tools read their user config from this job's temp
+          # dir, not from the runner's persistent HOME.
+          mkdir -p "$RUNNER_TEMP/xdg-config"
+          : > "$RUNNER_TEMP/gitconfig"
           {
             echo "RUSTUP_HOME=$RUSTUP_HOME"
             echo "CARGO_HOME=$CARGO_HOME"
             echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/bun-cache"
+            echo "GIT_CONFIG_GLOBAL=$RUNNER_TEMP/gitconfig"
+            echo "XDG_CONFIG_HOME=$RUNNER_TEMP/xdg-config"
           } >> "$GITHUB_ENV"
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
           "$CARGO_HOME/bin/rustc" --version
@@ -804,9 +813,21 @@ jobs:
           # hand-off can be shown byte-identical.
           echo "handoff sha256 (sent): $(shasum -a 256 Beadbox-app-arm64.tar.gz | cut -d' ' -f1)"
 
-      - name: Restore keychain search list
+      - name: Remove this job's signing material
+        # beadbox-449.4: on the long-lived self-hosted Mac nothing a signing job
+        # writes may outlive it (the retired root job-completed hook used to
+        # wipe it). Always: restore the keychain search list, delete this job's
+        # keychain and certificate, and the notarization key in the workspace.
         if: always()
-        run: security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
+        run: |
+          security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/signing.keychain-db" "$RUNNER_TEMP/certificate.p12"
+          rm -rf "$GITHUB_WORKSPACE/private_keys"
+          for f in "$RUNNER_TEMP/signing.keychain-db" "$RUNNER_TEMP/certificate.p12" "$GITHUB_WORKSPACE/private_keys"; do
+            if [ -e "$f" ]; then echo "::error::$f is still present after cleanup"; exit 1; fi
+          done
+          echo "OK: this job's keychain, certificate and notarization key are gone"
 
       # beadbox-5yv: the signed .app goes to create-arm64-dmg as an Actions
       # artifact (was a temporary release asset), so a build needs no release.
@@ -998,9 +1019,21 @@ jobs:
           xcrun stapler validate "$DMG"
           spctl --assess --type open --context context:primary-signature -vvv "$DMG"
 
-      - name: Restore keychain search list
+      - name: Remove this job's signing material
+        # beadbox-449.4: on the long-lived self-hosted Mac nothing a signing job
+        # writes may outlive it (the retired root job-completed hook used to
+        # wipe it). Always: restore the keychain search list, delete this job's
+        # keychain and certificate, and the notarization key in the workspace.
         if: always()
-        run: security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
+        run: |
+          security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
+          security delete-keychain "$RUNNER_TEMP/dmg-signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/dmg-signing.keychain-db" "$RUNNER_TEMP/dmg-cert.p12"
+          rm -rf "$GITHUB_WORKSPACE/private_keys"
+          for f in "$RUNNER_TEMP/dmg-signing.keychain-db" "$RUNNER_TEMP/dmg-cert.p12" "$GITHUB_WORKSPACE/private_keys"; do
+            if [ -e "$f" ]; then echo "::error::$f is still present after cleanup"; exit 1; fi
+          done
+          echo "OK: this job's keychain, certificate and notarization key are gone"
 
       - name: Upload DMG to draft release
         if: env.BUILD_MODE != 'build'
