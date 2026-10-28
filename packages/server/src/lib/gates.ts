@@ -13,7 +13,7 @@
 // list was cut carries heldTruncated, and the view says so.
 
 import type { BdBead } from "./bd"
-import type { GateHeldIssue, WaitingGate } from "./types"
+import type { GateHeldIssue, GateWait, WaitingGate } from "./types"
 
 const DONE_STATUSES = new Set(["closed", "tombstone"])
 const NS_PER_MS = 1_000_000
@@ -125,12 +125,35 @@ function toWaitingGate(gate: BdBead, held: GateHeldIssue[], truncated: boolean):
   }
   if (truncated) out.heldTruncated = true
   if (gate.await_id) out.awaitId = gate.await_id
-  if (typeof gate.timeout === "number" && gate.timeout > 0) {
-    out.timeoutMs = Math.round(gate.timeout / NS_PER_MS)
-    const created = Date.parse(gate.created_at)
-    if (!Number.isNaN(created)) out.deadline = new Date(created + out.timeoutMs).toISOString()
+  const timeoutMs = gateTimeoutMs(gate)
+  if (timeoutMs !== undefined) {
+    out.timeoutMs = timeoutMs
+    const deadline = gateDeadline(gate)
+    if (deadline) out.deadline = deadline
   }
   return out
+}
+
+function gateTimeoutMs(gate: BdBead): number | undefined {
+  if (typeof gate.timeout !== "number" || gate.timeout <= 0) return undefined
+  return Math.round(gate.timeout / NS_PER_MS)
+}
+
+/** A gate's deadline: createdAt + bd's timeout, when it has one. */
+export function gateDeadline(gate: BdBead): string | undefined {
+  const timeoutMs = gateTimeoutMs(gate)
+  const created = Date.parse(gate.created_at)
+  if (timeoutMs === undefined || Number.isNaN(created)) return undefined
+  return new Date(created + timeoutMs).toISOString()
+}
+
+/** What a gate issue waits on, for the tree's gate rows (beadbox-wya0.2). */
+export function toGateWait(gate: BdBead): GateWait {
+  const wait: GateWait = { awaitType: gate.await_type ?? "" }
+  if (gate.await_id) wait.awaitId = gate.await_id
+  const deadline = gateDeadline(gate)
+  if (deadline) wait.deadline = deadline
+  return wait
 }
 
 // bd mixes second and sub-second precision across commands, so compare as

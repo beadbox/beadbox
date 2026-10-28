@@ -29,6 +29,7 @@ import {
 import type { BdLoadError } from "../lib/bd-error"
 import { toBdLoadError } from "../lib/bd-error"
 import { readMetadataMode } from "../lib/dolt-metadata"
+import { toGateWait } from "../lib/gates"
 import { assertDependencyDataComplete, tryServe } from "../lib/serve-reads"
 import {
   getBeadDetailCacheStats,
@@ -90,6 +91,7 @@ function convertBead(bdBead: BdBead, comments: Comment[] = []): Bead {
     updatedAt: toDate(bdBead.updated_at),
     closedAt: toDate(bdBead.closed_at),
     startedAt: toDate(bdBead.started_at),
+    ...(bdBead.issue_type === "gate" ? { gateWait: toGateWait(bdBead) } : {}),
   }
 }
 

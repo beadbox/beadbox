@@ -77,9 +77,8 @@ describe("computeMoleculePhases", () => {
       bead("g1", { type: "gate", blockedBy: [dep("t1")] } as Partial<Bead>),
       bead("t2", { blockedBy: [dep("g1")] }),
     ])
-    expect(phases).toHaveLength(2)
-    expect(phases[0]?.tasks[0]?.id).toBe("t1")
-    expect(phases[1]?.tasks[0]?.id).toBe("t2")
+    // beadbox-wya0.2: the gate is now a row, beside the task it holds.
+    expect(phases.map((p) => p.tasks.map((t) => t.id))).toEqual([["t1"], ["g1", "t2"]])
   })
 
   test("gate type detection: 'conditional' / 'human' / 'unknown'", () => {
@@ -139,12 +138,69 @@ describe("computeMoleculePhases", () => {
     expect(phases[0]?.tasks.map((t) => t.id)).toEqual(["z", "a", "m"])
   })
 
-  test("gates do NOT appear as tasks in output phases", () => {
+  // beadbox-wya0.2: gates are rows in their phase, not only a badge.
+  const gate = (id: string, over: Partial<Bead> = {}) =>
+    bead(id, { type: "gate", title: `Gate: ${id}`, ...over } as Partial<Bead>)
+  const ids = (phases: ReturnType<typeof computeMoleculePhases>) =>
+    phases.map((p) => p.tasks.map((t) => t.id))
+
+  test("a gate with only a parent-child link is a row (phase 1)", () => {
+    const phases = computeMoleculePhases([bead("t1"), gate("g1")])
+    expect(ids(phases)).toEqual([["t1", "g1"]])
+    expect(phases[0]?.totalCount).toBe(2)
+  })
+
+  test("a gate that blocks no task sits one phase after its latest predecessor", () => {
     const phases = computeMoleculePhases([
       bead("t1"),
-      bead("g1", { type: "gate" } as Partial<Bead>),
+      bead("t2", { blockedBy: [dep("t1")] }),
+      gate("g1", { blockedBy: [dep("t2")] }),
     ])
-    const allIds = phases.flatMap((p) => p.tasks).map((t) => t.id)
-    expect(allIds).not.toContain("g1")
+    expect(ids(phases)).toEqual([["t1"], ["t2"], ["g1"]])
+  })
+
+  test("a gate sits in the phase of the earliest task it blocks; task phases do not move", () => {
+    // A formula step's gate: no deps of its own, blocks the step it guards.
+    const phases = computeMoleculePhases([
+      bead("build"),
+      bead("review", { blockedBy: [dep("build"), dep("g-review")] }),
+      gate("g-review"),
+      bead("ship", { blockedBy: [dep("review")] }),
+    ])
+    expect(ids(phases)).toEqual([["build"], ["review", "g-review"], ["ship"]])
+  })
+
+  test("a gate row carries its own kind, status and deadline", () => {
+    const phases = computeMoleculePhases([
+      gate("g-h", { gateWait: { awaitType: "human" } }),
+      gate("g-t", { status: "closed", gateWait: { awaitType: "timer", deadline: "2026-10-28T21:00:00.000Z" } }),
+      gate("g-r", { gateWait: { awaitType: "gh:run", awaitId: "ci.yml" } }),
+      gate("g-b", { gateWait: { awaitType: "bead", awaitId: "x-1" } }),
+      gate("g-none", { title: "Approve release", gateWait: { awaitType: "" } }),
+    ])
+    const row = (id: string) => phases.flatMap((p) => p.tasks).find((t) => t.id === id)?.gate
+    expect(row("g-h")).toEqual({ id: "g-h", type: "human", status: "open" })
+    expect(row("g-t")).toEqual({ id: "g-t", type: "timer", status: "closed", deadline: "2026-10-28T21:00:00.000Z" })
+    expect(row("g-r")?.type).toBe("gh:run")
+    expect(row("g-b")?.type).toBe("bead")
+    expect(row("g-none")?.type).toBe("unknown")
+  })
+
+  test("the badge on a blocked task takes bd's kind over the title", () => {
+    const phases = computeMoleculePhases([
+      gate("g1", { title: "Gate: human", gateWait: { awaitType: "timer" } }),
+      bead("t1", { blockedBy: [dep("g1")] }),
+    ])
+    expect(phases.flatMap((p) => p.tasks).find((t) => t.id === "t1")?.gate?.type).toBe("timer")
+  })
+
+  test("a closed gate counts as done, so a phase of resolved gates and closed tasks is complete", () => {
+    const phases = computeMoleculePhases([
+      bead("t1", { status: "closed" }),
+      gate("g1", { status: "closed" }),
+      gate("g2"),
+    ])
+    expect(phases[0]?.closedCount).toBe(2)
+    expect(phases[0]?.totalCount).toBe(3)
   })
 })

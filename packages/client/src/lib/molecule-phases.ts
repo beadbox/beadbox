@@ -4,6 +4,7 @@ export interface GateInfo {
   id: string
   type: string
   status: string
+  deadline?: string // ISO; a timer gate's due time, when bd gave a timeout
 }
 
 export interface PhaseTask extends Bead {
@@ -60,6 +61,18 @@ function classifyGateType(gateTitle: string): GateInfo["type"] {
   return "unknown"
 }
 
+// bd's await_type when it sent one; the title heuristic only as the fallback
+// (a formula's type:gate step carries no await_type).
+function toGateInfo(gate: Bead): GateInfo {
+  const info: GateInfo = {
+    id: gate.id,
+    type: gate.gateWait?.awaitType || classifyGateType(gate.title || ""),
+    status: gate.status as string,
+  }
+  if (gate.gateWait?.deadline) info.deadline = gate.gateWait.deadline
+  return info
+}
+
 // Attach gate badge to the destination task (task blocked by the gate).
 function buildGateInfoByTask(
   tasks: Bead[],
@@ -72,11 +85,7 @@ function buildGateInfoByTask(
     if (!gateBlocker) continue
     const gate = gates.find((g) => g.id === gateBlocker.id)
     if (!gate) continue
-    map.set(task.id, {
-      id: gate.id,
-      type: classifyGateType(gate.title || ""),
-      status: gate.status as string,
-    })
+    map.set(task.id, toGateInfo(gate))
   }
   return map
 }
@@ -144,19 +153,38 @@ function assignPhases(
   return phaseOf
 }
 
-// Group tasks by phase number, preserve input order within each phase,
-// attach the gate-info badge.
+// beadbox-wya0.2: each gate is a row. It sits in the phase of the earliest
+// task it blocks (beside the work it holds); a gate that blocks no task goes
+// one phase after its latest predecessor task, or phase 1. Task phases are
+// computed without gates as nodes, so no task moves.
+function assignGatePhases(gates: Bead[], tasks: Bead[], taskPhase: Map<string, number>): Map<string, number> {
+  const phaseOf = new Map<string, number>()
+  for (const gate of gates) {
+    const held = tasks.filter((t) => t.blockedBy?.some((dep) => dep.id === gate.id))
+    if (held.length > 0) {
+      phaseOf.set(gate.id, Math.min(...held.map((t) => taskPhase.get(t.id) || 1)))
+      continue
+    }
+    const predPhases = (gate.blockedBy || []).map((dep) => taskPhase.get(dep.id) ?? 0)
+    phaseOf.set(gate.id, Math.max(0, ...predPhases) + 1)
+  }
+  return phaseOf
+}
+
+// Group rows (tasks and gates) by phase number, preserve input order within
+// each phase, attach the gate-info badge (a gate row carries its own).
 function groupTasksByPhase(
-  tasks: Bead[],
+  rows: Bead[],
   phaseOf: Map<string, number>,
   gateInfoByTask: Map<string, GateInfo>,
 ): MoleculePhase[] {
-  const taskIndex = new Map<string, number>(tasks.map((t, i) => [t.id, i]))
+  const taskIndex = new Map<string, number>(rows.map((t, i) => [t.id, i]))
   const phaseMap = new Map<number, PhaseTask[]>()
-  for (const task of tasks) {
-    const phase = phaseOf.get(task.id) || 1
+  for (const row of rows) {
+    const phase = phaseOf.get(row.id) || 1
     if (!phaseMap.has(phase)) phaseMap.set(phase, [])
-    phaseMap.get(phase)!.push({ ...task, gate: gateInfoByTask.get(task.id) })
+    const gate = row.type === "gate" ? toGateInfo(row) : gateInfoByTask.get(row.id)
+    phaseMap.get(phase)!.push({ ...row, gate })
   }
   const phaseNumbers = [...phaseMap.keys()].sort((a, b) => a - b)
   return phaseNumbers.map((num) => {
@@ -177,5 +205,6 @@ export function computeMoleculePhases(children: Bead[]): MoleculePhase[] {
   const gateInfoByTask = buildGateInfoByTask(tasks, gates, gateIds)
   const taskPredecessors = buildTaskPredecessors(tasks, taskIds, gateIds, gateToSourceTask)
   const phaseOf = assignPhases(tasks, taskPredecessors)
-  return groupTasksByPhase(tasks, phaseOf, gateInfoByTask)
+  for (const [id, phase] of assignGatePhases(gates, tasks, phaseOf)) phaseOf.set(id, phase)
+  return groupTasksByPhase(children, phaseOf, gateInfoByTask)
 }

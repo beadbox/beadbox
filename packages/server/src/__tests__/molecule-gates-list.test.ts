@@ -147,6 +147,20 @@ describe("the tree's molecules get their gates (beadbox-wya0.1)", () => {
     expect(calls.join(" ")).not.toContain("--include-infra")
   })
 
+  // beadbox-wya0.2: a gate row needs bd's kind and a timer's due time.
+  test("a gate carries what it waits on; a task carries nothing", async () => {
+    const ws = await workspace([...MOLECULE, ...ORDINARY])
+    const tree = await getEpics(ws.db)
+    if (!tree.success) throw new Error(tree.bdLoadError.message)
+    expect(find(tree.epics, "t-mol-gh")?.gateWait).toEqual({ awaitType: "human" })
+    // 2026-10-28T00:00:00Z + 7200000000000 ns (2h)
+    expect(find(tree.epics, "t-mol-gt")?.gateWait).toEqual({
+      awaitType: "timer",
+      deadline: "2026-10-28T02:00:00.000Z",
+    })
+    expect(find(tree.epics, "t-mol-t")?.gateWait).toBeUndefined()
+  })
+
   test("a list with no molecule runs no gates list", async () => {
     const ws = await workspace(ORDINARY)
     const tree = await getEpics(ws.db)

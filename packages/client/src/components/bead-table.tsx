@@ -38,6 +38,7 @@ import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
 import type { Bead, BeadPriority, ReadState } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { describeDeadline } from "@/lib/waiting"
 
 interface BeadTableProps {
   beads: Bead[]
@@ -395,6 +396,7 @@ function BeadRow({
             <Tooltip>
               <TooltipTrigger asChild>
                 <span
+                  data-testid="gate-chip"
                   className={cn(
                     "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0",
                     (bead as Bead & { gate?: GateInfo }).gate!.status === "closed"
@@ -413,6 +415,11 @@ function BeadRow({
                 ({(bead as Bead & { gate?: GateInfo }).gate!.id})
               </TooltipContent>
             </Tooltip>
+          )}
+          {bead.type === "gate" && bead.status !== "closed" && bead.gateWait?.deadline && (
+            <span className="text-[10px] text-muted-foreground/70 shrink-0" data-testid="gate-deadline">
+              {describeDeadline(bead.gateWait.deadline)}
+            </span>
           )}
           {bead.orphanedFromEpic && (
             <Tooltip>

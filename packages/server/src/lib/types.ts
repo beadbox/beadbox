@@ -49,6 +49,14 @@ export interface Bead {
   blocks?: BeadDependency[] // Beads waiting on this one to complete
   orphanedFromEpic?: { id: string; title: string } // Set when parent epic is closed/archived
   rigName?: string // From routes.jsonl prefix matching, undefined for non-Gastown workspaces
+  gateWait?: GateWait // Gate issues only: what bd says the gate waits on (beadbox-wya0.2)
+}
+
+/** What a gate issue waits on, from bd's await_type / await_id / timeout. */
+export interface GateWait {
+  awaitType: string // "human" | "timer" | "gh:run" | "gh:pr" | "bead"; "" if bd sent none
+  awaitId?: string // gh run ID, PR number or bead ID; absent for human/timer
+  deadline?: string // ISO; createdAt + timeout, when the gate has a timeout
 }
 
 export interface Epic extends Bead {
