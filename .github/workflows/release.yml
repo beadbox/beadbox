@@ -632,6 +632,19 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - name: Pinned gh for this job (self-hosted Mac)
+        # beadbox-449.6: hosted macOS images ship gh; the fleet Mac's job PATH
+        # is system dirs only. Runs in Build mode too, so a Build's log shows
+        # which gh the tag path's upload step would use.
+        if: runner.environment != 'github-hosted'
+        id: pinned-gh
+        uses: ./.github/actions/pinned-gh
+      - name: Pinned gh first on PATH for the later steps (self-hosted Mac)
+        if: runner.environment != 'github-hosted'
+        env:
+          GH_DIR: ${{ steps.pinned-gh.outputs.dir }}
+        run: echo "$GH_DIR" >> "$GITHUB_PATH"
+
       - name: Version (from validate-tag)
         id: version
         run: |
@@ -739,7 +752,9 @@ jobs:
         with:
           workspaces: src-tauri
           shared-key: macos-arm64
-          # beadbox-5p1: rust-cache-warm.yml saves this key from main, and a tag
+          # Hosted runners only. rust-cache-warm.yml, which saved this key from
+          # main, is retired (beadbox-449.6): macOS builds run on the fleet Mac
+          # with a per-job toolchain and no Rust cache. Formerly: a tag
           # restores it. A cache saved from a tag is readable only by that tag,
           # so saving here would cost ~20s per release for nothing.
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -845,7 +860,7 @@ jobs:
 
       # beadbox-5yv: the signed .app goes to create-arm64-dmg as an Actions
       # artifact (was a temporary release asset), so a build needs no release.
-      # tar.gz survives upload-artifact's zip layer (see build-arm-dmg.yml).
+      # tar.gz survives upload-artifact's zip layer.
       - name: Hand the signed .app to the DMG job
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -919,6 +934,19 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Pinned gh for this job (self-hosted Mac)
+        # beadbox-449.6: hosted macOS images ship gh; the fleet Mac's job PATH
+        # is system dirs only. Runs in Build mode too, so a Build's log shows
+        # which gh the tag path's upload step would use.
+        if: runner.environment != 'github-hosted'
+        id: pinned-gh
+        uses: ./.github/actions/pinned-gh
+      - name: Pinned gh first on PATH for the later steps (self-hosted Mac)
+        if: runner.environment != 'github-hosted'
+        env:
+          GH_DIR: ${{ steps.pinned-gh.outputs.dir }}
+        run: echo "$GH_DIR" >> "$GITHUB_PATH"
 
       - name: Version (from validate-tag)
         id: version

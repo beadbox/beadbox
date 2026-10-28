@@ -13,7 +13,6 @@ import { TEST_TRANSPORT_MARKER } from "../../../client/vite-plugins/test-transpo
 const REPO = join(import.meta.dir, "..", "..", "..", "..")
 const SCRIPT = join(REPO, "scripts", "check-release-bundle.ts")
 const RELEASE = join(REPO, ".github", "workflows", "release.yml")
-const ARM_DMG = join(REPO, ".github", "workflows", "build-arm-dmg.yml")
 
 const dirs: string[] = []
 afterEach(() => {
@@ -126,7 +125,6 @@ describe("the workflows run the scan after every shipped SPA build", () => {
     [RELEASE, "build-macos-arm64", "bun --cwd=packages/client run build"],
     [RELEASE, "build-linux", "bun --cwd=packages/client run build"],
     [RELEASE, "build-windows", "bun run build"],
-    [ARM_DMG, "build", "bun --cwd=packages/client run build"],
   ]
 
   function job(path: string, name: string): string {
@@ -159,7 +157,6 @@ describe("the workflows run the scan after every shipped SPA build", () => {
       release.match(/^\s*(?:run: )?bun (?:--cwd=packages\/client )?run build$/gm)?.length,
     ).toBe(4)
     expect(release.split(STEP).length - 1).toBe(3)
-    expect(readFileSync(ARM_DMG, "utf-8").split(STEP).length - 1).toBe(1)
   })
 
   test("the script takes the marker from the guard and does not spell it", () => {

@@ -157,7 +157,15 @@ jobs:
         with:
           sparse-checkout: |
             src-tauri/scripts
+            .github/actions
           sparse-checkout-cone-mode: false
+
+      - name: Pinned gh for this job
+        # beadbox-449.6: the fleet Mac's job PATH has no gh. This workflow runs
+        # on workflow_run, so no GITHUB_PATH write: the download step puts the
+        # pinned dir first on its own PATH instead.
+        id: gh
+        uses: ./.github/actions/pinned-gh
 
       - name: Install bd CLI
         # Gate 3 drives `bd create` against the running app. The runner starts
@@ -183,6 +191,8 @@ jobs:
         id: fetch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The pinned gh first, then the system dirs only (beadbox-449.6).
+          PATH: ${{ steps.gh.outputs.dir }}:/usr/bin:/bin:/usr/sbin:/sbin
         run: |
           set -euo pipefail
           # This used to fetch 'Beadbox-app-arm64.tar.gz'. That asset is an

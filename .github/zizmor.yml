@@ -22,7 +22,9 @@ rules:
     # already in place: release.yml uses distinct `shared-key`s per platform,
     # and the artifacts are signed + notarized after the build.
     #
-    # beadbox-5p1 made the macOS path live: rust-cache-warm.yml saves the
+    # beadbox-449.6: the macOS path is no longer live. macOS builds run on the
+    # fleet Mac with a per-job toolchain and no Rust cache, and
+    # rust-cache-warm.yml is retired. Historical, beadbox-5p1: rust-cache-warm.yml saved the
     # macos-arm64 key from main, and every tag's build-macos-arm64 restores
     # it. The writer is bounded to the same trust as the release itself: it
     # saves only when github.ref is refs/heads/main (push to main, the daily

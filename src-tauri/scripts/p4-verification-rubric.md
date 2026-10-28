@@ -439,7 +439,7 @@ verification.
 | Workflow | Trigger | Verification path |
 |---|---|---|
 | `release.yml` | `push: tags: ["v*"]` + `workflow_dispatch` | Push a test tag to a feature branch; observe the run end-to-end. |
-| `build-arm-dmg.yml` | `workflow_dispatch` + post-release hook | Trigger via `gh workflow run`; observe directly. |
+| `build-arm-dmg.yml` | RETIRED (beadbox-449.6) | A dispatched Build (nightly) on main makes the signed .app and DMG. |
 | `e2e-tests.yml` | `workflow_call` ONLY (callable by release.yml) | Structural-checks-as-fallback: grep for stale `pnpm`/`setup-node` refs, YAML lint, then transitive verification when `release.yml` fires (qa3 observation 2026-04-25). NOT directly dispatchable. |
 | `holistic-tests.yml` | `workflow_call` ONLY | Same as e2e-tests.yml — structural fallback + transitive via `release.yml`. NOT directly dispatchable. |
 | `install-smoke.yml` (P5.6) | `workflow_dispatch` + post-release hook | Trigger directly after release.yml lands artifacts. |

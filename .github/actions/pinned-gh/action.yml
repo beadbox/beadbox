@@ -1,0 +1,47 @@
+# Pinned gh for this job (beadbox-449.6). The fleet's self-hosted Mac runs jobs
+# with only the system dirs on PATH, while GitHub's hosted macOS images ship
+# the gh CLI. This installs a version-pinned gh for the job only, under
+# RUNNER_TEMP (emptied after every job), from the cli/cli release zip checked
+# against its sha256 before anything is unpacked, and checks that `gh`
+# resolves to that copy and nothing else. It writes no environment file (an
+# env-file write in a composite action is a zizmor github-env finding, since
+# it cannot know its caller's trigger): the caller puts the `dir` output on
+# PATH, through GITHUB_PATH in a workflow whose triggers allow it, or on a
+# single step's own PATH.
+name: Pinned gh for this job
+description: Install a version-pinned, checksum-verified gh into RUNNER_TEMP.
+outputs:
+  dir:
+    description: The directory holding the pinned gh.
+    value: ${{ steps.install.outputs.dir }}
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      env:
+        GH_VERSION: "2.103.3"
+        # sha256 of gh_2.103.3_macOS_arm64.zip, as in the release's
+        # gh_2.103.3_checksums.txt and recomputed on 2026-10-28.
+        GH_SHA256: "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062"
+      run: |
+        set -euo pipefail
+        zip="$RUNNER_TEMP/gh.zip"
+        curl -fsSL --proto '=https' --tlsv1.2 -o "$zip" \
+          "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_macOS_arm64.zip"
+        echo "$GH_SHA256  $zip" | shasum -a 256 -c -
+        rm -rf "$RUNNER_TEMP/gh-unpack" "$RUNNER_TEMP/gh"
+        mkdir -p "$RUNNER_TEMP/gh-unpack"
+        unzip -q "$zip" -d "$RUNNER_TEMP/gh-unpack"
+        mv "$RUNNER_TEMP/gh-unpack/gh_${GH_VERSION}_macOS_arm64" "$RUNNER_TEMP/gh"
+        rm -rf "$zip" "$RUNNER_TEMP/gh-unpack"
+        dir="$RUNNER_TEMP/gh/bin"
+        # With this dir first, `gh` must resolve to the pinned copy.
+        got=$(PATH="$dir:$PATH" command -v gh)
+        if [ "$got" != "$dir/gh" ]; then
+          echo "::error::gh resolves to '$got', not the pinned $dir/gh"
+          exit 1
+        fi
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "pinned gh: $got"
+        "$dir/gh" --version | head -1

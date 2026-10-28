@@ -265,7 +265,7 @@ jobs:
           HOSTED='^(ubuntu-latest|ubuntu-2[0-9]\.04(-arm)?|windows-latest|windows-20[0-9]{2})$'
           MAC_LABEL='beadbox-macos-release'
           MAC_RUNS_ON="[$MAC_LABEL]"
-          MAC_FILES=' .github/workflows/build-arm-dmg.yml .github/workflows/install-smoke.yml .github/workflows/packaged-smoke.yml .github/workflows/release.yml .github/workflows/rust-cache-warm.yml '
+          MAC_FILES=' .github/workflows/install-smoke.yml .github/workflows/packaged-smoke.yml .github/workflows/release.yml '
           MATRIX_MAC_FILES=' .github/workflows/install-script.yml '
           # Split so Actions does not evaluate this as an expression here.
           MATRIX='$''{{ matrix.os }}'
@@ -301,10 +301,11 @@ jobs:
               bad=1
             done
           done < <(grep -rnE '^[[:space:]]*os:' .github/workflows/ || true)
-          # The macOS jobs: build-arm-dmg (2), install-smoke, packaged-smoke,
-          # release (2), rust-cache-warm, and install-script's matrix entry.
-          if [ "$mac" -ne 8 ]; then
-            echo "::error::expected 8 macOS jobs on $MAC_LABEL, found $mac (a Mac job moved, was added, or lost its label: update MAC_FILES and this count together)"
+          # The macOS jobs: install-smoke, packaged-smoke, release (2), and
+          # install-script's matrix entry (build-arm-dmg and rust-cache-warm
+          # were retired, beadbox-449.6).
+          if [ "$mac" -ne 5 ]; then
+            echo "::error::expected 5 macOS jobs on $MAC_LABEL, found $mac (a Mac job moved, was added, or lost its label: update MAC_FILES and this count together)"
             bad=1
           fi
           # No GitHub-hosted macOS label anywhere under .github/, comments
@@ -357,8 +358,8 @@ jobs:
               fi
             done
           done
-          if [ "$found" -ne 8 ]; then
-            echo "::error::expected 8 macOS jobs to check, found $found"
+          if [ "$found" -ne 5 ]; then
+            echo "::error::expected 5 macOS jobs to check, found $found"
             bad=1
           fi
           [ "$bad" -eq 0 ]

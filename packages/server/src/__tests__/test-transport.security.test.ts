@@ -144,7 +144,10 @@ describe("no release path turns the flag on", () => {
   test("finds the release workflows (guards against an empty classification)", () => {
     const names = releaseWorkflows.map((f) => f.split("/").pop())
     expect(names).toContain("release.yml")
-    expect(names).toContain("build-arm-dmg.yml")
+    // build-arm-dmg.yml was the second anchor here; it is retired (beadbox-449.6):
+    // a dispatched Build (build-main.yml -> release.yml) now makes the signed
+    // .app and DMG on the fleet Mac, so release.yml is the one release builder.
+    expect(names).toContain("build-main.yml")
   })
 
   test("no release workflow mentions the flag", () => {
