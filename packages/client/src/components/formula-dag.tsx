@@ -19,6 +19,7 @@ const getElk = () => import("elkjs/lib/elk.bundled.js").then((m) => new m.defaul
 import { ArrowDownNarrowWide, CircleHelp, Columns2, FlaskConical, ShieldCheck } from "lucide-react"
 import type { FormulaStep, StepOverlay } from "../lib/types"
 import { cn } from "../lib/utils"
+import { StepCountBadge } from "./step-count-badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
 
 // ---------------------------------------------------------------------------
@@ -629,6 +630,7 @@ function StepNodeComponent({ data }: { data: StepNodeData }) {
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
+                  <StepCountBadge stepId={step.id} />
                   {overlay?.assignee && (
                     <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
                       @{overlay.assignee}
@@ -782,6 +784,7 @@ function StepGroupNodeComponent({ data }: { data: StepGroupData }) {
                           </span>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
+                          <StepCountBadge stepId={step.id} compact />
                           {stepOverlay?.assignee && (
                             <span className="text-[10px] px-1 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
                               @{stepOverlay.assignee}
@@ -931,6 +934,7 @@ function SeqGroupNodeComponent({ data }: { data: SeqGroupData }) {
                           </span>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
+                          <StepCountBadge stepId={step.id} compact />
                           {stepOverlay?.assignee && (
                             <span className="text-[10px] px-1 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
                               @{stepOverlay.assignee}
@@ -1083,6 +1087,7 @@ function GateGroupNodeComponent({ data }: { data: GateGroupData }) {
                           </span>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
+                          <StepCountBadge stepId={step.id} compact />
                           {stepOverlay?.assignee && (
                             <span className="text-[10px] px-1 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
                               @{stepOverlay.assignee}

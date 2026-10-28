@@ -52,6 +52,49 @@ export const CUSTOM_STATUSES = "ticket_awaiting:active,ticket_active:wip,unit_es
 // Open bd gates for the Waiting view (beadbox-37h5): its own workspace, so no
 // other spec sees a gate, a Waiting tab or a blocked bead.
 export const TEMPLATE_GATES_WS_DIR = templateWs("gates")
+// A nested formula poured once for the Formulas tab's closed/total per step
+// (beadbox-ptca.4): its own workspace, so no other spec sees a molecule. Step 1's
+// title is a template (resolved by --var on the pour), Step 3 has no children.
+export const TEMPLATE_MOLECULES_WS_DIR = templateWs("molecules")
+export const NESTED_FORMULA = "nest-flow"
+const NESTED_FORMULA_TOML = `formula = "${NESTED_FORMULA}"
+description = "synthetic nested"
+version = 1
+type = "workflow"
+
+[vars.who]
+default = "alice"
+
+[[steps]]
+id = "s1"
+title = "Step 1: {{who}} prepares"
+
+[[steps.children]]
+id = "c1a"
+title = "Child 1a"
+
+[[steps.children]]
+id = "c1b"
+title = "Child 1b"
+
+[[steps.children]]
+id = "c1c"
+title = "Child 1c"
+needs = ["c1a"]
+
+[[steps]]
+id = "s2"
+title = "Step 2: ship"
+needs = ["s1"]
+
+[[steps.children]]
+id = "c2a"
+title = "Child 2a"
+
+[[steps]]
+id = "s3"
+title = "Step 3: empty"
+`
 /** Children of the gates workspace's "Big epic": past the view's per-gate cap of 200. */
 export const BIG_EPIC_CHILDREN = 250
 
@@ -298,6 +341,11 @@ export default function globalSetup() {
     }
 
     seedGatesWorkspace(initWorkspace(TEMPLATE_GATES_WS_DIR, "gw"))
+
+    const moleculesDbPath = initWorkspace(TEMPLATE_MOLECULES_WS_DIR, "mf")
+    mkdirSync(join(TEMPLATE_MOLECULES_WS_DIR, ".beads", "formulas"), { recursive: true })
+    writeFileSync(join(TEMPLATE_MOLECULES_WS_DIR, ".beads", "formulas", `${NESTED_FORMULA}.formula.toml`), NESTED_FORMULA_TOML)
+    bd(moleculesDbPath, ["mol", "pour", NESTED_FORMULA, "--var", "who=bob"], TEMPLATE_DOLT_PORT)
   } finally {
     // 6. Stop the template server. Data persists in TEMPLATE_DATA_DIR.
     stopDoltServer(server)

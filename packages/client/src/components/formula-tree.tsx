@@ -2,6 +2,7 @@ import { ArrowDownNarrowWide, CircleHelp, Columns2, ShieldCheck } from "lucide-r
 import { useMemo } from "react"
 import type { FormulaStep, StepOverlay } from "../lib/types"
 import { cn } from "../lib/utils"
+import { StepCountBadge } from "./step-count-badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
 
 // ---------------------------------------------------------------------------
@@ -184,6 +185,7 @@ function NodeCard({
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
+                  <StepCountBadge stepId={step.id} />
                   {overlay?.status === "complete" && (
                     <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/20">
                       completed

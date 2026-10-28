@@ -260,6 +260,12 @@ export interface MoleculeStep extends MoleculeStepNode {
   children: MoleculeStepNode[]
 }
 
+// closed/total of a molecule step's children, keyed by formula step id (beadbox-ptca.4)
+export interface StepCount {
+  closed: number
+  total: number
+}
+
 // Step overlay data for coloring DAG nodes by molecule status
 export interface StepOverlay {
   status: "complete" | "in_progress" | "blocked" | "pending" | "failed"

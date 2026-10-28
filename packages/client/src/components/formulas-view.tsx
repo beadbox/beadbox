@@ -58,10 +58,12 @@ import type {
   FormulaSummary,
   MoleculeCard,
   MolProgress,
+  StepCount,
   StepOverlay,
   Workspace,
 } from "../lib/types"
 import { cn } from "../lib/utils"
+import { StepCountsContext } from "./step-count-badge"
 import { setWorkspaceCookie } from "../lib/workspace-cookie"
 import { FormulaDag } from "./formula-dag"
 import { FormulaPourModal } from "./formula-pour-modal"
@@ -286,6 +288,8 @@ export function FormulasView() {
   const [activeMolId, setActiveMolId] = useState<string | null>(null)
   const [overlay, setOverlay] = useState<Record<string, StepOverlay> | null>(null)
   const [overlayLoading, setOverlayLoading] = useState(false)
+  // closed/total per formula step for the selected molecule (beadbox-ptca.4)
+  const [stepCounts, setStepCounts] = useState<Record<string, StepCount> | null>(null)
   const [showCompletedMols, setShowCompletedMols] = useState(false)
 
   // Load preferences on mount
@@ -426,6 +430,7 @@ export function FormulasView() {
     fetchMolecules()
     setActiveMolId(null)
     setOverlay(null)
+    setStepCounts(null)
   }, [fetchMolecules])
 
   // Fetch overlay when a molecule card is clicked
@@ -433,12 +438,16 @@ export function FormulasView() {
     async (molId: string) => {
       if (!detail || !databasePath) return
       setOverlayLoading(true)
-      const result = await rpc.formulas.loadMoleculeOverlay(molId, detail.steps, databasePath)
+      const [result, counts] = await Promise.all([
+        rpc.formulas.loadMoleculeOverlay(molId, detail.steps, databasePath),
+        rpc.formulas.loadMoleculeStepCounts(molId, detail.steps, databasePath),
+      ])
       if (result.success) {
         setOverlay(result.data)
       } else {
         setOverlay(null)
       }
+      setStepCounts(counts.success ? counts.data : null)
       setOverlayLoading(false)
     },
     [detail, databasePath],
@@ -449,6 +458,7 @@ export function FormulasView() {
       if (activeMolId === molId) {
         setActiveMolId(null)
         setOverlay(null)
+        setStepCounts(null)
       } else {
         setActiveMolId(molId)
         fetchOverlay(molId)
@@ -730,21 +740,23 @@ export function FormulasView() {
               </div>
               <div className="flex-1 flex flex-col min-h-0">
                 <div className="flex-1 flex min-h-0">
-                  {viewMode === "dag" ? (
-                    <FormulaDag
-                      steps={detail.steps}
-                      selectedStepId={selectedStepId}
-                      onStepClick={setSelectedStepId}
-                      overlay={overlay ?? undefined}
-                    />
-                  ) : (
-                    <FormulaTree
-                      steps={detail.steps}
-                      selectedStepId={selectedStepId}
-                      onStepClick={setSelectedStepId}
-                      overlay={overlay ?? undefined}
-                    />
-                  )}
+                  <StepCountsContext.Provider value={stepCounts}>
+                    {viewMode === "dag" ? (
+                      <FormulaDag
+                        steps={detail.steps}
+                        selectedStepId={selectedStepId}
+                        onStepClick={setSelectedStepId}
+                        overlay={overlay ?? undefined}
+                      />
+                    ) : (
+                      <FormulaTree
+                        steps={detail.steps}
+                        selectedStepId={selectedStepId}
+                        onStepClick={setSelectedStepId}
+                        overlay={overlay ?? undefined}
+                      />
+                    )}
+                  </StepCountsContext.Provider>
                   {selectedStepId && detail.steps.find((s) => s.id === selectedStepId) && (
                     <FormulaStepDetail
                       step={detail.steps.find((s) => s.id === selectedStepId)!}

@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import * as formulas from "../handlers/formulas"
+import type { FormulaStep } from "../lib/types"
 import { createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
 
 setDefaultTimeout(30_000)
@@ -90,6 +91,11 @@ describe("handlers/formulas", () => {
 
   test("loadMoleculeSteps returns failure for missing molecule", async () => {
     const r = await formulas.loadMoleculeSteps("bb-mol-missing", ws.dbPath)
+    expect(r.success).toBe(false)
+  })
+
+  test("loadMoleculeStepCounts returns failure for missing molecule", async () => {
+    const r = await formulas.loadMoleculeStepCounts("bb-mol-missing", [], ws.dbPath)
     expect(r.success).toBe(false)
   })
 
@@ -170,5 +176,92 @@ needs = ["a"]
     if (!r.success) return
     expect(r.data.map((c) => [c.id, c.status])).toEqual([[first!, "closed"]])
     expect([r.data[0]!.progress.completed, r.data[0]!.progress.total]).toEqual([2, 2])
+  })
+})
+
+// beadbox-ptca.4: closed/total per step on a real nested pour. Step 1's title
+// is a template, the molecule's step order is not the formula's, and Step 3
+// has no children.
+describe("loadMoleculeStepCounts on a real nested pour (beadbox-ptca.4)", () => {
+  const NESTED = `formula = "nest-flow"
+description = "synthetic nested"
+version = 1
+type = "workflow"
+
+[vars.who]
+default = "alice"
+
+[[steps]]
+id = "s1"
+title = "Step 1: {{who}} prepares"
+
+[[steps.children]]
+id = "c1a"
+title = "Child 1a"
+
+[[steps.children]]
+id = "c1b"
+title = "Child 1b"
+needs = ["c1a"]
+
+[[steps]]
+id = "s2"
+title = "Step 2: ship"
+
+[[steps.children]]
+id = "c2a"
+title = "Child 2a"
+needs = ["c1b"]
+
+[[steps]]
+id = "s3"
+title = "Step 3: empty"
+`
+  type Row = { id: string; title: string; status: string }
+  const bdJson = async <T>(args: string[]): Promise<T> =>
+    JSON.parse(await runBdInWorkspace([...args, "--json"], ws.root)) as T
+  let molId = ""
+  let steps: FormulaStep[] = []
+
+  // bd's own count: the step bead's children by `bd list --parent`.
+  const bdCount = async (stepTitle: string) => {
+    const mol = await bdJson<{ issues: Row[] }>(["mol", "show", molId])
+    const step = mol.issues.find((i) => i.title === stepTitle)!
+    const kids = await bdJson<Row[]>(["list", "--parent", step.id, "--status", "all"])
+    return { closed: kids.filter((k) => k.status === "closed").length, total: kids.length }
+  }
+
+  beforeAll(async () => {
+    const dir = join(ws.dbPath, "formulas")
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, "nest-flow.formula.toml"), NESTED)
+    await runBdInWorkspace(["mol", "pour", "nest-flow", "--var", "who=bob"], ws.root)
+    const mols = await bdJson<Row[]>(["list", "--type", "molecule", "--status", "all", "--limit", "0", "--flat"])
+    molId = mols.find((m) => m.title === "nest-flow")!.id
+    const detail = await formulas.loadFormulaDetail("nest-flow", ws.dbPath)
+    if (!detail.success) throw new Error(detail.error)
+    steps = detail.data.steps
+  })
+
+  test("each step's count equals bd list of its children; a zero-child step is 0/0", async () => {
+    const r = await formulas.loadMoleculeStepCounts(molId, steps, ws.dbPath)
+    expect(r.success).toBe(true)
+    if (!r.success) return
+    expect(r.data).toEqual({
+      s1: await bdCount("Step 1: bob prepares"),
+      s2: await bdCount("Step 2: ship"),
+      s3: { closed: 0, total: 0 },
+    })
+    expect(r.data.s1).toEqual({ closed: 0, total: 2 })
+  })
+
+  test("a bd close on a child moves its step's count", async () => {
+    const mol = await bdJson<{ issues: Row[] }>(["mol", "show", molId])
+    await runBdInWorkspace(["close", mol.issues.find((i) => i.title === "Child 1a")!.id], ws.root)
+    const r = await formulas.loadMoleculeStepCounts(molId, steps, ws.dbPath)
+    expect(r.success).toBe(true)
+    if (!r.success) return
+    expect(r.data.s1).toEqual({ closed: 1, total: 2 })
+    expect(r.data.s1).toEqual(await bdCount("Step 1: bob prepares"))
   })
 })
