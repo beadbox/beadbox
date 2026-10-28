@@ -86,6 +86,11 @@ describe("handlers/formulas", () => {
     expect(r.success).toBe(false)
   })
 
+  test("loadMoleculeSteps returns failure for missing molecule", async () => {
+    const r = await formulas.loadMoleculeSteps("bb-mol-missing", ws.dbPath)
+    expect(r.success).toBe(false)
+  })
+
   test("loadMoleculeOverlay topoSort handles empty input gracefully", async () => {
     // Empty formulaSteps + missing mol still hits the same Failure path
     // (getMoleculeStructureRaw throws), but the test ensures the empty-input

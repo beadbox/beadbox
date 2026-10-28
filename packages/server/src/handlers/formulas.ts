@@ -17,12 +17,14 @@ import {
   pourMolecule,
   showFormula,
 } from "../lib/bd"
+import { buildMoleculeSteps } from "../lib/molecule-steps"
 import type {
   CookedFormula,
   FormulaDetail,
   FormulaStep,
   FormulaSummary,
   MoleculeCard,
+  MoleculeStep,
   MolProgress,
   StepOverlay,
 } from "../lib/types"
@@ -190,6 +192,22 @@ export async function loadMoleculeOverlay(
     }
 
     return { success: true, data: overlay }
+  } catch (error: unknown) {
+    return { success: false, error: extractError(error) }
+  }
+}
+
+// beadbox-ptca.1: a poured molecule's steps, each with its children and
+// every node's needs and status, from the one `bd mol show` read. Data for
+// the Formulas tab graph; loadMoleculeOverlay is unchanged.
+export async function loadMoleculeSteps(
+  molId: string,
+  dbPath?: string,
+): Promise<Success<MoleculeStep[]> | Failure> {
+  const options: BdOptions = dbPath ? { db: dbPath } : {}
+  try {
+    const molData = await getMoleculeStructureRaw(molId, options)
+    return { success: true, data: buildMoleculeSteps(molData) }
   } catch (error: unknown) {
     return { success: false, error: extractError(error) }
   }

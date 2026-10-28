@@ -243,6 +243,23 @@ export interface MoleculeCard {
   updatedAt: string
 }
 
+// One bead of a poured molecule as the Formulas tab graph reads it
+// (beadbox-ptca.1). needs lists the beads inside the same molecule that this
+// one is blocked by; a need on a bead outside the molecule is dropped.
+export interface MoleculeStepNode {
+  id: string
+  title: string
+  type: string
+  status: string
+  needs: string[]
+}
+
+// A molecule step (a bead parented to the molecule root) with its children
+// (the beads parented to it). A flat formula's steps have no children.
+export interface MoleculeStep extends MoleculeStepNode {
+  children: MoleculeStepNode[]
+}
+
 // Step overlay data for coloring DAG nodes by molecule status
 export interface StepOverlay {
   status: "complete" | "in_progress" | "blocked" | "pending" | "failed"
