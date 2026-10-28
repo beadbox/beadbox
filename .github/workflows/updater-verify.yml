@@ -7,12 +7,14 @@ name: Updater verify
 # client and verifies each minisign signature; a throwaway key must be
 # refused. Nothing is installed and nothing is published.
 #
-# It runs on every change to the host crate, so a bump of rustls,
-# rustls-webpki, reqwest or the updater plugin that breaks download or
-# signature verification fails here instead of waiting for a person at the
-# QA Mac. On ubuntu the TLS roots come through the Linux path. Re-run by
-# dispatch after a network failure: the test retries transport errors three
-# times and names the stage and URL when it gives up.
+# It runs nightly (beadbox-mol-423: what it proves changes with the live
+# release and with time, not with a main commit), on every pull request that
+# touches the host crate, so a bump of rustls, rustls-webpki, reqwest or the
+# updater plugin that breaks download or signature verification fails there
+# instead of waiting for a person at the QA Mac, and on dispatch. On ubuntu
+# the TLS roots come through the Linux path. Re-run by dispatch after a
+# network failure: the test retries transport errors three times and names
+# the stage and URL when it gives up.
 #
 # Not part of quality-gates.yml's coverage job, so the coverage floor never
 # depends on github.com. One job, no `needs:`, so there is no upstream skip
@@ -27,16 +29,9 @@ name: Updater verify
 # before use.
 
 on:
-  push:
-    branches: [main]
-    # Keep the two lists identical.
-    paths:
-      - "src-tauri/Cargo.lock"
-      - "src-tauri/Cargo.toml"
-      - "src-tauri/src/**"
-      - "src-tauri/tests/**"
-      - "src-tauri/tauri.conf.json"
-      - ".github/workflows/updater-verify.yml"
+  schedule:
+    # 08:23 UTC nightly: off the hour, after the other nightly runs.
+    - cron: "23 8 * * *"
   pull_request:
     branches: [main]
     paths:
