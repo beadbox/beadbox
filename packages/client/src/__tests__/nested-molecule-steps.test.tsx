@@ -11,6 +11,7 @@ import { join } from "node:path"
 import { cleanup, render } from "@testing-library/react"
 
 import { EpicTree } from "../components/epic-tree"
+import { isStepFinished, stepCount, stepExpansionChanges } from "../lib/molecule-phases"
 import { isMoleculePresentation } from "../lib/molecule-presentation"
 import type { Bead, Epic } from "../lib/types"
 import { MOLECULE_FLAT_TREE_HTML } from "./__golden__/molecule-flat-tree"
@@ -170,5 +171,41 @@ describe("a flat molecule is unchanged (beadbox-e04o.1)", () => {
       )
     }
     expect(container.innerHTML).toBe(MOLECULE_FLAT_TREE_HTML)
+  })
+})
+
+// beadbox-e04o.2: counts per step, open unless finished, roots-only count.
+describe("step counts and the open-unless-finished rule (beadbox-e04o.2)", () => {
+  const stepWith = (id: string, statuses: string[]) =>
+    epic(id, { parentId: "t-mol-root", children: statuses.map((st, i) => task(`${id}-c${i}`, { status: st as Bead["status"] })) })
+
+  test("finished means children and every one closed; 0/0 is not finished", () => {
+    expect(isStepFinished(stepWith("a", ["closed", "closed"]))).toBe(true)
+    expect(isStepFinished(stepWith("b", ["closed", "open"]))).toBe(false)
+    expect(isStepFinished(stepWith("c", []))).toBe(false)
+    expect(stepCount(stepWith("d", ["closed", "blocked", "deferred"]))).toEqual({ closed: 1, total: 3 })
+  })
+
+  test("first sight opens an unfinished step, never a finished one", () => {
+    const r = stepExpansionChanges([stepWith("open-me", ["open"]), stepWith("done", ["closed"]), stepWith("empty", [])], {})
+    expect(r.open.sort()).toEqual(["empty", "open-me"])
+    expect(r.close).toEqual([])
+    expect(r.seen).toEqual({ "open-me": false, done: true, empty: false })
+  })
+
+  test("a step that turns finished collapses once; a user's toggle is left alone after", () => {
+    const seen = { s: false }
+    const turned = stepExpansionChanges([stepWith("s", ["closed"])], seen)
+    expect(turned).toEqual({ open: [], close: ["s"], seen: { s: true } })
+    // Seen finished already: nothing to change, whatever the user did since.
+    expect(stepExpansionChanges([stepWith("s", ["closed"])], turned.seen)).toEqual({ open: [], close: [], seen: { s: true } })
+    // Reopened (a child reopened): not forced open again.
+    expect(stepExpansionChanges([stepWith("s", ["open"])], turned.seen)).toEqual({ open: [], close: [], seen: { s: false } })
+  })
+
+  test("the molecules section counts roots only, even if a step reached the top-level list", () => {
+    const root = nestedRoot()
+    const topLevel = [root, ...(root.childEpics ?? [])]
+    expect(topLevel.filter((e) => isMoleculePresentation(e))).toHaveLength(1)
   })
 })

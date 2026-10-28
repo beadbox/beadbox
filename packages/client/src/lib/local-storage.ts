@@ -626,6 +626,31 @@ export function setExpandedEpics(ids: string[]): void {
   }
 }
 
+// beadbox-e04o.2: the molecule steps the tree has already seen, each with
+// whether it was finished then, so a step opens on first sight (unless
+// finished), collapses once when it finishes, and a user's own toggle sticks.
+const SEEN_STEPS_KEY = "beads-seen-steps"
+
+export function getSeenSteps(): Record<string, boolean> {
+  if (typeof window === "undefined") return {}
+  try {
+    const stored = sessionStorage.getItem(SEEN_STEPS_KEY)
+    if (stored) return JSON.parse(stored)
+  } catch {
+    // Invalid JSON or unavailable
+  }
+  return {}
+}
+
+export function setSeenSteps(seen: Record<string, boolean>): void {
+  if (typeof window === "undefined") return
+  try {
+    sessionStorage.setItem(SEEN_STEPS_KEY, JSON.stringify(seen))
+  } catch {
+    // sessionStorage might be full or disabled
+  }
+}
+
 export function getSelectedBead(): string | null {
   if (typeof window === "undefined") return null
 

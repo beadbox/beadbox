@@ -11,11 +11,14 @@ import {
   getAnalyticsEnabled,
   getExpandedBeads as getStoredExpandedBeads,
   getExpandedEpics as getStoredExpandedEpics,
+  getSeenSteps,
   getSelectedBead as getStoredSelectedBead,
   setExpandedBeads as setStoredExpandedBeads,
   setExpandedEpics as setStoredExpandedEpics,
+  setSeenSteps,
   setSelectedBead as setStoredSelectedBead,
 } from "@/lib/local-storage"
+import { stepExpansionChanges } from "@/lib/molecule-phases"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import { safeCapture } from "@/lib/posthog-safe"
 import { rpc } from "@/lib/rpc"
@@ -125,6 +128,32 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     setExpandedBeadsState(new Set(getStoredExpandedBeads()))
     setBeadIdParam(getStoredSelectedBead())
   }, [])
+
+  // beadbox-e04o.2: a molecule's steps open on first sight unless finished,
+  // and a step that finishes collapses once (like a phase). Through the same
+  // expandedEpics as everything else, so h/l and j/k are unchanged. A write
+  // that brings no new or newly finished step changes nothing here.
+  useEffect(() => {
+    const steps: Epic[] = []
+    const walk = (list: Epic[] | undefined) => {
+      for (const e of list ?? []) {
+        if (isMoleculePresentation(e)) steps.push(...(e.childEpics ?? []))
+        walk(e.childEpics)
+      }
+    }
+    walk(epics)
+    if (steps.length === 0) return
+    const { open, close, seen } = stepExpansionChanges(steps, getSeenSteps())
+    setSeenSteps(seen)
+    if (open.length === 0 && close.length === 0) return
+    setExpandedEpicsState((prev) => {
+      const next = new Set(prev)
+      for (const id of open) next.add(id)
+      for (const id of close) next.delete(id)
+      setStoredExpandedEpics(Array.from(next))
+      return next
+    })
+  }, [epics])
 
   const [selectedBead, setSelectedBead] = useState<Bead | null>(null)
   const [isLoadingBead, setIsLoadingBead] = useState(false)

@@ -22,7 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useViewport } from "@/hooks/use-viewport"
 import { getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
 import { getArchiveExpanded, setArchiveExpanded } from "@/lib/local-storage"
-import { computeStepGroups } from "@/lib/molecule-phases"
+import { computeStepGroups, isStepFinished, stepCount } from "@/lib/molecule-phases"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import type { Bead, Epic, ReadState } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -1719,12 +1719,15 @@ export function EpicRow({
           {stepsAsPhases &&
             computeStepGroups(epic.childEpics!).map(({ step, rows: stepRows }, index) => {
               const open = expandedEpics.has(step.id)
+              const count = stepCount(step)
+              const finished = isStepFinished(step)
               return (
                 <div key={step.id} data-step-section={step.id}>
                   <button
                     type="button"
                     data-step-header=""
                     data-item-id={step.id}
+                    aria-expanded={open}
                     onClick={() => onToggle(step.id)}
                     className={cn(
                       "w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors text-left",
@@ -1739,6 +1742,15 @@ export function EpicRow({
                       <ChevronRight className="h-3.5 w-3.5 shrink-0" />
                     )}
                     <span className="font-medium truncate">{step.title}</span>
+                    <span
+                      data-step-count=""
+                      className={cn(
+                        "ml-auto font-mono tabular-nums shrink-0",
+                        finished ? "text-emerald-400/60" : "text-muted-foreground/60",
+                      )}
+                    >
+                      {count.closed}/{count.total}
+                    </span>
                   </button>
                   {open && (step.childEpics?.length ?? 0) > 0 && (
                     <div className="py-3 pr-3 space-y-3 bg-black/20">

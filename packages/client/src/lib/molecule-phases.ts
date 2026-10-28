@@ -231,3 +231,37 @@ export function computeStepGroups(steps: Epic[]): StepGroup[] {
     return { step, rows }
   })
 }
+
+// beadbox-e04o.2: closed/total of a step's own children (its header count).
+// A step is finished when it has children and every one is closed; an empty
+// step (0/0) is not finished.
+export function stepCount(step: Epic): { closed: number; total: number } {
+  const children = step.children ?? []
+  return { closed: children.filter((c) => c.status === "closed").length, total: children.length }
+}
+
+export function isStepFinished(step: Epic): boolean {
+  const { closed, total } = stepCount(step)
+  return total > 0 && closed === total
+}
+
+// What to change in the tree's expanded set for the molecule steps in view:
+// a step seen for the first time opens unless finished; a step that turns
+// finished collapses once; anything else is left to the user. Pure, so the
+// rule is tested without the tree.
+export function stepExpansionChanges(
+  steps: Epic[],
+  seen: Record<string, boolean>,
+): { open: string[]; close: string[]; seen: Record<string, boolean> } {
+  const open: string[] = []
+  const close: string[] = []
+  const next = { ...seen }
+  for (const step of steps) {
+    const finished = isStepFinished(step)
+    const before = seen[step.id]
+    if (before === undefined && !finished) open.push(step.id)
+    if (before === false && finished) close.push(step.id)
+    next[step.id] = finished
+  }
+  return { open, close, seen: next }
+}

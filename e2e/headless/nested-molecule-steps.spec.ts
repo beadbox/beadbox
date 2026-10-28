@@ -67,10 +67,11 @@ test("a nested molecule shows a header per step with its children, and no step i
   const firstHeader = Math.min(...steps.map((s) => order.indexOf(s.id)))
   for (const b of loose) expect(order.indexOf(b.id)).toBeLessThan(firstHeader)
 
-  // Expanded, each header lists exactly bd's children of that step, and the
-  // step's children are not phased from "Phase 1" on their own.
+  // An unfinished step starts open (beadbox-e04o.2): each header lists exactly
+  // bd's children of that step, and they are not phased from "Phase 1" on
+  // their own.
   for (const step of steps) {
-    await header(page, step.id).click()
+    await expect(header(page, step.id)).toHaveAttribute("aria-expanded", "true")
     for (const c of childrenOf(ws, step.id)) await expect(page.locator(`[data-item-id="${c.id}"]`)).toBeVisible()
   }
   await expect(page.getByText(/^Phase \d+$/)).toHaveCount(1) // the loose task's phase only
@@ -92,7 +93,9 @@ test("j/k walk the root, its loose row, each header and its rows; h/l collapse a
     await expect.poll(() => focusedId(page)).toEqual([expected])
   }
 
-  await press("j", root)
+  // j down to the root (another spec in this worker may have added items above it).
+  for (let i = 0; i < 20 && (await focusedId(page))[0] !== root; i++) await page.keyboard.press("j")
+  await expect.poll(() => focusedId(page)).toEqual([root])
   await page.keyboard.press("l") // expand the root
   await expect(page.locator("[data-step-header]").first()).toBeVisible()
   await press("j", s3!.id) // loose row first
@@ -103,6 +106,9 @@ test("j/k walk the root, its loose row, each header and its rows; h/l collapse a
   const firstRows = childrenOf(ws, first)
   const secondRows = childrenOf(ws, second)
   await press("j", first) // then the first header, focusable with the step's id
+  await expect(page.locator(`[data-item-id="${firstRows[0]!.id}"]`)).toBeVisible() // open: unfinished
+  await page.keyboard.press("h") // h collapses it
+  await expect(page.locator(`[data-item-id="${firstRows[0]!.id}"]`)).toHaveCount(0)
   await page.keyboard.press("l") // l expands it
   await expect(page.locator(`[data-item-id="${firstRows[0]!.id}"]`)).toBeVisible()
 
@@ -119,10 +125,51 @@ test("j/k walk the root, its loose row, each header and its rows; h/l collapse a
   await expect(page.locator(`[data-item-id="${firstRows[0]!.id}"]`)).toHaveCount(0)
   await press("j", second)
 
-  // l on the second header, j into its first row, Enter opens the detail panel.
-  await page.keyboard.press("l")
+  // The second header is open (unfinished): j into its first row, Enter opens
+  // the detail panel.
   const secondDrawn = (await domOrder()).filter((id) => secondRows.some((r) => r.id === id))
   await press("j", secondDrawn[0]!)
   await page.keyboard.press("Enter")
   await expect(page.getByRole("button", { name: "Add label" })).toBeVisible()
+})
+
+const countOf = (ws: HarnessWorkspace, stepId: string) => {
+  const kids = childrenOf(ws, stepId)
+  return `${kids.filter((k) => k.status === "closed").length}/${kids.length}`
+}
+
+test("each header shows closed/total as bd counts it; a finished step collapses and l reopens it; one molecule counted", async ({
+  page,
+  moleculesWorkspace: ws,
+}) => {
+  const root = rootId(ws)
+  const steps = childrenOf(ws, root).filter((b) => b.issue_type === "epic")
+  await openMolecules(page, ws)
+
+  // The MOLECULES section counts roots only: bd's molecules, not their steps.
+  const molecules = ws.bdJson<Row[]>(["list", "--type", "molecule", "--status", "all", "--limit", "0", "--flat"])
+  const section = page.locator("button", { has: page.getByText("Molecules", { exact: true }) })
+  await expect(section).toContainText(`(${molecules.length})`)
+
+  await page.locator(`[data-item-id="${root}"]`).first().locator("button").first().click()
+  for (const step of steps) {
+    await expect(header(page, step.id).locator("[data-step-count]")).toHaveText(countOf(ws, step.id))
+  }
+
+  // Close every open child of the one-child step: its count fills and it collapses.
+  const small = steps.find((s) => childrenOf(ws, s.id).length === 1)!
+  for (const c of childrenOf(ws, small.id).filter((k) => k.status !== "closed")) ws.bd(["close", c.id])
+  const kid = childrenOf(ws, small.id)[0]!
+  await expect(header(page, small.id).locator("[data-step-count]")).toHaveText(countOf(ws, small.id), { timeout: 8_000 })
+  await expect(header(page, small.id)).toHaveAttribute("aria-expanded", "false")
+  await expect(page.locator(`[data-item-id="${kid.id}"]`)).toHaveCount(0)
+
+  // The keyboard still reaches the collapsed header, and l opens it.
+  for (let i = 0; i < 20; i++) {
+    if ((await focusedId(page))[0] === small.id) break
+    await page.keyboard.press("j")
+  }
+  await expect.poll(() => focusedId(page)).toEqual([small.id])
+  await page.keyboard.press("l")
+  await expect(page.locator(`[data-item-id="${kid.id}"]`)).toBeVisible()
 })

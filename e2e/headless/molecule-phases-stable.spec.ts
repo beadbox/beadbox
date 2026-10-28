@@ -17,7 +17,7 @@ import type { Page } from "@playwright/test"
 import { expect, test } from "../fixtures/harness"
 import type { HarnessWorkspace } from "../fixtures/harness"
 
-type Recording = { phaseStates: string[]; removedStepRows: number; frames: number }
+type Recording = { phaseStates: string[]; stepStates: string[]; removedStepRows: number; frames: number }
 
 /** Three steps under a root, step 2 blocked by step 1 and step 3 by step 2. */
 function chain(workspace: HarnessWorkspace, rootId: string, title: string): string[] {
@@ -35,7 +35,7 @@ function chain(workspace: HarnessWorkspace, rootId: string, title: string): stri
 async function startRecording(page: Page, stepIds: string[]): Promise<void> {
   await page.evaluate((ids) => {
     const steps = new Set(ids)
-    const rec = { phaseStates: [] as string[], removedStepRows: 0, frames: 0, stop: false }
+    const rec = { phaseStates: [] as string[], stepStates: [] as string[], removedStepRows: 0, frames: 0, stop: false }
     ;(window as unknown as { __kqiv: typeof rec }).__kqiv = rec
     const stepRowsIn = (nodes: NodeList) => {
       let n = 0
@@ -58,6 +58,11 @@ async function startRecording(page: Page, stepIds: string[]): Promise<void> {
         .filter((t) => /^Phase \d+$/.test(t))
         .join(",")
       if (rec.phaseStates[rec.phaseStates.length - 1] !== headers) rec.phaseStates.push(headers)
+      // beadbox-e04o.2: a nested molecule's step headers (id, title and count).
+      const steps = Array.from(document.querySelectorAll("[data-step-header]"))
+        .map((h) => `${h.getAttribute("data-item-id")}=${h.textContent}`)
+        .join("|")
+      if (rec.stepStates[rec.stepStates.length - 1] !== steps) rec.stepStates.push(steps)
       requestAnimationFrame(tick)
     }
     requestAnimationFrame(tick)
@@ -68,7 +73,7 @@ async function stopRecording(page: Page): Promise<Recording> {
   return page.evaluate(() => {
     const rec = (window as unknown as { __kqiv: Recording & { stop: boolean } }).__kqiv
     rec.stop = true
-    return { phaseStates: rec.phaseStates, removedStepRows: rec.removedStepRows, frames: rec.frames }
+    return { phaseStates: rec.phaseStates, stepStates: rec.stepStates, removedStepRows: rec.removedStepRows, frames: rec.frames }
   })
 }
 
@@ -118,4 +123,50 @@ test("a molecule's phases stay put through a write to it and a write elsewhere",
   expect(elsewhere.frames).toBeGreaterThan(10)
   expect(elsewhere.phaseStates).toEqual([allPhases])
   expect(elsewhere.removedStepRows).toBe(0)
+})
+
+// beadbox-e04o.2: the same proof for a nested molecule's step headers, on
+// e2e-molecules (one poured nested formula, steps open while unfinished).
+test("a nested molecule's step headers stay put through a write to a child and a write elsewhere", async ({
+  page,
+  moleculesWorkspace: ws,
+}) => {
+  type Row = { id: string; title: string; issue_type: string }
+  const list = (args: string[]) => ws.bdJson<Row[]>(["list", "--status", "all", "--limit", "0", "--flat", ...args])
+  const root = list(["--type", "molecule"])[0]!.id
+  const steps = list(["--parent", root]).filter((b) => b.issue_type === "epic")
+  const kids = steps.flatMap((s) => list(["--parent", s.id]))
+  // Something unrelated to write to: a plain epic with one task.
+  const other = ws.bdJson<{ id: string }>(["create", "Unrelated epic", "-t", "epic", "-p", "2"]).id
+  const otherTask = ws.bdJson<{ id: string }>(["create", "Unrelated task", "-t", "task", "-p", "2", "--parent", other]).id
+
+  try {
+    await page.goto("/")
+    // The app must be up on the standard workspace before the rail switch.
+    await expect(page.getByRole("button", { name: "Switch workspace" })).toContainText("e2e-standard")
+    await page.getByRole("button", { name: `Open ${ws.name}` }).click()
+    await expect(page.getByRole("button", { name: "Switch workspace" })).toContainText(ws.name)
+    await expand(page, root)
+    await expand(page, other)
+    const watched = [...steps.map((s) => s.id), ...kids.map((k) => k.id)]
+    const child = kids[0]!
+    await expect(page.locator(`[data-item-id="${child.id}"] .bead-row-priority`)).toBeVisible()
+    await expect(page.locator("[data-step-header]")).toHaveCount(steps.length)
+    const settled = await page.$$eval("[data-step-header]", (hs) =>
+      hs.map((h) => `${h.getAttribute("data-item-id")}=${h.textContent}`).join("|"),
+    )
+
+    const toChild = await recordWrite(page, ws, watched, child.id)
+    expect(toChild.frames).toBeGreaterThan(10) // the recorder ran
+    expect(toChild.stepStates).toEqual([settled])
+    expect(toChild.removedStepRows).toBe(0)
+
+    const elsewhere = await recordWrite(page, ws, watched, otherTask)
+    expect(elsewhere.frames).toBeGreaterThan(10)
+    expect(elsewhere.stepStates).toEqual([settled])
+    expect(elsewhere.removedStepRows).toBe(0)
+  } finally {
+    // Leave e2e-molecules as seeded for the other specs in this worker.
+    ws.bd(["delete", otherTask, other, "--force"])
+  }
 })

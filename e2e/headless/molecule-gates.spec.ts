@@ -66,8 +66,10 @@ async function expand(page: Page, id: string): Promise<void> {
   const row = page.locator(`[data-item-id="${id}"]`).first()
   await expect(row).toBeVisible()
   // A molecule's step is a header that is itself the toggle (beadbox-e04o.1).
-  if ((await row.getAttribute("data-step-header")) !== null) await row.click()
-  else await row.locator("button").first().click()
+  // An unfinished step already starts open (beadbox-e04o.2): click only a closed one.
+  if ((await row.getAttribute("data-step-header")) !== null) {
+    if ((await row.getAttribute("aria-expanded")) !== "true") await row.click()
+  } else await row.locator("button").first().click()
 }
 
 test("each gate under a molecule is a row in its step, with bd's kind and status", async ({
