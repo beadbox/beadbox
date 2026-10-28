@@ -211,7 +211,9 @@ const stepEpic = (id: string, over: Partial<Epic> = {}): Epic =>
   ({ ...bead(id, { type: "epic" }), children: [], childEpics: [], ...over }) as unknown as Epic
 
 describe("computeStepGroups (beadbox-e04o.1)", () => {
-  test("steps and their rows in pour order, with a gate row's badge as a flat phase gives it", () => {
+  // beadbox-e04o.3: with no edges, pour order; a row that needs a sibling (the
+  // held task needs its gate) now follows it, the plan's order.
+  test("steps and their rows in pour order when nothing orders them, with a gate row's badge as a flat phase gives it", () => {
     const gate = stepRow("t-mol-g", { type: "gate", title: "Gate: human", status: "open" })
     const held = stepRow("t-mol-h", { blockedBy: [{ id: "t-mol-g", title: "Gate: human" }] as Bead["blockedBy"] })
     const steps = [
@@ -222,8 +224,8 @@ describe("computeStepGroups (beadbox-e04o.1)", () => {
     expect(groups.map((g) => g.step.id)).toEqual(["t-mol-b", "t-mol-a"])
     expect(groups[0]!.rows.map((r) => r.id)).toEqual(["t-mol-b2", "t-mol-b1"])
     expect(groups[1]!.rows.map((r) => [r.id, r.gate?.type])).toEqual([
-      ["t-mol-h", "human"],
       ["t-mol-g", "human"],
+      ["t-mol-h", "human"],
     ])
   })
 })

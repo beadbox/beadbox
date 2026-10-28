@@ -1,3 +1,4 @@
+import { orderMoleculeSteps } from "./molecule-order"
 import type { Bead, Epic } from "./types"
 
 export interface GateInfo {
@@ -210,17 +211,17 @@ export function computeMoleculePhases(children: Bead[]): MoleculePhase[] {
 }
 
 // beadbox-e04o.1: a nested molecule's steps (the root's step epics), each with
-// its children as rows, in the order the tree delivers them (no phasing: a
-// step is a phase of the molecule, its children are not phased from Phase 1
-// on their own). Rows carry the same gate badge a flat phase row gets.
+// its children as rows (no phasing: a step is a phase of the molecule, its
+// children are not phased from Phase 1 on their own). Rows carry the same gate
+// badge a flat phase row gets. beadbox-e04o.3: steps and rows come in the
+// plan's order from orderMoleculeSteps, the same order the keyboard walks.
 export interface StepGroup {
   step: Epic
   rows: PhaseTask[]
 }
 
 export function computeStepGroups(steps: Epic[]): StepGroup[] {
-  return steps.map((step) => {
-    const children = step.children ?? []
+  return orderMoleculeSteps(steps).map(({ step, children }) => {
     const { gates, tasks, gateIds } = splitGatesAndTasks(children)
     const gateInfoByTask = buildGateInfoByTask(tasks, gates, gateIds)
     const rows = children.map((row) => ({

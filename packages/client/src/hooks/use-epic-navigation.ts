@@ -4,6 +4,7 @@ import type { Filters } from "@/components/filter-bar"
 import { useHasTrains } from "@/hooks/use-has-trains"
 import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { dispatchKeyDown, type KeyNavContext } from "@/lib/epic-navigation-keys"
+import { orderMoleculeSteps } from "@/lib/molecule-order"
 import { countAllBeads, findBeadById, findParentPath } from "@/lib/epic-tree-utils"
 import { type GroupedSection, groupedNavigationOrder } from "@/lib/grouped-layout"
 import {
@@ -276,17 +277,24 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     }
 
     function addEpic(epic: Epic) {
+      addEpicWithRows(epic, epic.children)
+    }
+
+    function addEpicWithRows(epic: Epic, children: Bead[] | undefined) {
       indexMap.set(epic.id, items.length)
       items.push({ id: epic.id, type: "epic", bead: epic })
       if (expandedEpics.has(epic.id)) {
         // beadbox-e04o.1: a molecule draws its loose rows' phases first, then a
         // header per step (its child epics); the walk follows what is drawn.
+        // beadbox-e04o.3: steps and their rows in the drawn (plan's) order.
         if (isMoleculePresentation(epic)) {
           epic.children?.forEach(addBead)
-          epic.childEpics?.forEach(addEpic)
+          for (const { step, children: rows } of orderMoleculeSteps(epic.childEpics ?? [])) {
+            addEpicWithRows(step, rows)
+          }
         } else {
           epic.childEpics?.forEach(addEpic)
-          epic.children?.forEach(addBead)
+          children?.forEach(addBead)
         }
       }
     }
