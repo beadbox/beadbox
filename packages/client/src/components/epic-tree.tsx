@@ -1559,7 +1559,7 @@ export function EpicRow({
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-3 shrink-0">
-                <div className="w-36 group">
+                <div className="w-24 group">
                   <div className="relative h-3 bg-slate-700/60 rounded-full overflow-hidden">
                     <div
                       className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-600/80 via-emerald-500/70 to-teal-500/70 rounded-full transition-all duration-500 ease-out group-hover:brightness-110 group-hover:shadow-[0_0_8px_rgba(34,197,94,0.3)]"
