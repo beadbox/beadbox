@@ -137,7 +137,7 @@ for n in "${names[@]}"; do
     args+=("${s_file[$i]}")
   done
   # Every line timestamped, for the per-file wall times below.
-  (cd "$pkg" && set -o pipefail && bun test "${args[@]}" 2>&1 |
+  (cd "$pkg" && set -o pipefail && bun test --timeout=30000 "${args[@]}" 2>&1 |
     perl -MTime::HiRes=time -ne '$| = 1; printf "%.3f %s", time, $_') >"$LOGDIR/$n.log" 2>&1 &
   pids+=($!)
   pkgs+=("$pkg")

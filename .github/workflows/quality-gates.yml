@@ -98,7 +98,7 @@ jobs:
       - name: Run server coverage
         run: |
           set -o pipefail
-          bun --cwd=packages/server test --coverage 2>&1 | tee coverage-server.txt
+          bun --cwd=packages/server test --timeout=30000 --coverage 2>&1 | tee coverage-server.txt
       - name: Enforce 60% line floor
         run: |
           # Bun's coverage table prints "All files | <funcs%> | <lines%> | ...";
@@ -135,7 +135,7 @@ jobs:
       - name: Run client coverage (includes QD.1 import sweep)
         run: |
           set -o pipefail
-          bun --cwd=packages/client test --coverage 2>&1 | tee coverage-client.txt
+          bun --cwd=packages/client test --timeout=30000 --coverage 2>&1 | tee coverage-client.txt
       - name: Enforce 20% line floor
         run: |
           PCT=$(awk -F'|' '/^[[:space:]]*All files/{gsub(/[[:space:]]/,"",$3); print $3}' coverage-client.txt)

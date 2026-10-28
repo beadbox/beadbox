@@ -1,9 +1,10 @@
 # Bun config for the @beadbox/server workspace package.
 #
-# The per-test default deadline (30 s) is set by the preload
-# _test-default-timeout.ts, not here: bun 1.3.14 does not apply a
-# `[test] timeout` key from this file, so the 30000 that used to sit here never
-# took effect and tests ran on bun's 5 s default (beadbox-mol-uua.1).
+# The per-test default deadline (30 s) is passed as `bun test --timeout=30000`
+# by the package's test script, scripts/prepush-tests.sh, scripts/ci-tests.sh
+# and the coverage jobs (test-timeout-flag.test.ts checks each one). bun 1.3.x
+# does not apply a `[test] timeout` key from this file, and a setDefaultTimeout
+# in a preload holds for the first file of a process only (beadbox-mol-uua.1).
 [test]
 # Keep test sidecars out of the user's real log (beadbox-9j1).
-preload = ["./src/__tests__/_test-log-isolation.ts", "./src/__tests__/_test-default-timeout.ts"]
+preload = ["./src/__tests__/_test-log-isolation.ts"]

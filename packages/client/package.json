@@ -17,7 +17,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "bun test",
+    "test": "bun test --timeout=30000",
     "typecheck": "tsr generate && tsc --noEmit"
   },
   "dependencies": {

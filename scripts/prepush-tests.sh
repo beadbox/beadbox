@@ -113,7 +113,10 @@ labels=()
 run() { # label, dir, bun test args...
   local label=$1 dir=$2
   shift 2
-  (cd "$dir" && bun test "$@") >"$LOGDIR/$label.log" 2>&1 &
+  # --timeout: the 30 s default deadline for every file (beadbox-mol-uua.1).
+  # bun ignores bunfig's [test] timeout, and a setDefaultTimeout in a preload
+  # holds for the first file of a process only, so it is passed here.
+  (cd "$dir" && bun test --timeout=30000 "$@") >"$LOGDIR/$label.log" 2>&1 &
   pids+=($!)
   labels+=("$label")
 }
