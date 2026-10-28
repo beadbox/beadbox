@@ -1009,5 +1009,10 @@ describe("Chart view — live updates keep one cached copy per query (beadbox-00
 })
 
 // Put the default rpc back after this file, so the mock installed above
-// cannot leak into a later test file (beadbox-r72.4).
-afterAll(() => _resetRpc())
+// cannot leak into a later test file (beadbox-r72.4). The same for the saved
+// filters afterEach writes: a later file reading the default selection would
+// get this file's five statuses instead (beadbox-zp8e).
+afterAll(() => {
+  _resetRpc()
+  localStorage.removeItem("beads-filters")
+})
