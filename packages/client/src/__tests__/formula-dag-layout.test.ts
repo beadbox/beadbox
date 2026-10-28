@@ -8,13 +8,14 @@
 
 import { describe, expect, test } from "bun:test"
 import { layoutFormulaSteps } from "../components/formula-dag"
-import { orderChildren } from "../lib/formula-nesting"
+import { orderChildren, stepEdges } from "../lib/formula-nesting"
 import type { FormulaStep } from "../lib/types"
 import golden from "./__golden__/formula-dag-flat.json"
 import {
   flatFormula,
   layoutShape,
   NESTED_CHILD_ORDER,
+  NESTED_STEP_EDGES,
   nestedFormula,
   parallelFormula,
 } from "./formula-fixtures"
@@ -117,5 +118,133 @@ describe("orderChildren", () => {
 
   test("no children gives an empty order", () => {
     expect(orderChildren([])).toEqual({ ordered: [], cyclic: [] })
+  })
+})
+
+// beadbox-ptca.3: an edge from step A to step B when a child of B needs a
+// child of A, once per pair.
+describe("stepEdges", () => {
+  const child = (id: string, needs?: string[]): FormulaStep => ({
+    id,
+    title: id,
+    type: "task",
+    needs,
+  })
+  const step = (id: string, children: FormulaStep[], needs?: string[]): FormulaStep => ({
+    id,
+    title: id,
+    type: "epic",
+    children,
+    needs,
+  })
+
+  test("the synthetic nested formula gives exactly its cross-step pairs", () => {
+    const r = stepEdges(nestedFormula())
+    expect([...r.edges].sort()).toEqual([...NESTED_STEP_EDGES].sort())
+    expect(r.cyclic).toEqual([])
+  })
+
+  test("many child needs between the same two steps draw one edge", () => {
+    const r = stepEdges([
+      step("A", [child("a1"), child("a2")]),
+      step("B", [child("b1", ["a1", "a2"]), child("b2", ["a1"]), child("b3", ["a2", "b1"])]),
+    ])
+    expect(r.edges).toEqual(["A->B"])
+  })
+
+  test("a need outside the formula draws no edge and does not throw", () => {
+    const r = stepEdges([
+      step("A", [child("a1", ["elsewhere"])]),
+      step("B", [child("b1", ["gone", "a1"])]),
+    ])
+    expect(r.edges).toEqual(["A->B"])
+  })
+
+  test("a need inside the same step draws no edge", () => {
+    expect(stepEdges([step("A", [child("a1"), child("a2", ["a1"])])]).edges).toEqual([])
+  })
+
+  test("a step-level need on another step, or on its child, draws that edge too", () => {
+    const r = stepEdges([
+      step("A", [child("a1")]),
+      step("B", [child("b1")], ["A"]),
+      step("C", [], ["b1"]),
+    ])
+    expect([...r.edges].sort()).toEqual(["A->B", "B->C"])
+  })
+
+  test("a cycle between steps is reported, not looped on", () => {
+    const r = stepEdges([
+      step("A", [child("a1", ["b1"])]),
+      step("B", [child("b1", ["a1"])]),
+      step("C", [child("c1", ["a1"])]),
+      step("D", [child("d1")]),
+    ])
+    expect([...r.edges].sort()).toEqual(["A->B", "A->C", "B->A"])
+    // C only follows the cycle; it is not on it.
+    expect(r.cyclic).toEqual(["A", "B"])
+  })
+})
+
+describe("stepEdges cycles", () => {
+  const child = (id: string, needs?: string[]): FormulaStep => ({
+    id,
+    title: id,
+    type: "task",
+    needs,
+  })
+  const step = (id: string, kids: FormulaStep[]): FormulaStep => ({
+    id,
+    title: id,
+    type: "epic",
+    children: kids,
+  })
+
+  test("a step between two cycles is not itself reported", () => {
+    const r = stepEdges([
+      step("A", [child("a1", ["b1"])]),
+      step("B", [child("b1", ["a1"])]),
+      step("X", [child("x1", ["b1"])]),
+      step("C", [child("c1", ["x1", "d1"])]),
+      step("D", [child("d1", ["c1"])]),
+    ])
+    expect(r.cyclic).toEqual(["A", "B", "C", "D"])
+  })
+})
+
+describe("layoutFormulaSteps edges on a nested formula", () => {
+  test("draws the step pairs, Start to steps nothing feeds, steps nothing needs to End", async () => {
+    const { edges } = await layoutFormulaSteps(nestedFormula())
+    expect(edges.map((e) => `${e.source}->${e.target}`).sort()).toEqual(
+      [
+        ...NESTED_STEP_EDGES,
+        "__start__->s1",
+        "__start__->s3",
+        "__start__->s5",
+        "s4->__end__",
+        "s6->__end__",
+      ].sort(),
+    )
+  })
+
+  test("a step in a cycle is marked in its node data", async () => {
+    const { nodes } = await layoutFormulaSteps([
+      {
+        id: "A",
+        title: "A",
+        type: "epic",
+        children: [{ id: "a1", title: "a1", type: "task", needs: ["b1"] }],
+      },
+      {
+        id: "B",
+        title: "B",
+        type: "epic",
+        children: [{ id: "b1", title: "b1", type: "task", needs: ["a1"] }],
+      },
+    ])
+    const cyclicSteps = nodes
+      .filter((n) => (n.data as { cyclicStep?: boolean }).cyclicStep)
+      .map((n) => n.id)
+    expect(cyclicSteps).toEqual(["A", "B"])
   })
 })

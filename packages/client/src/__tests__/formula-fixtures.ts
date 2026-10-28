@@ -71,6 +71,10 @@ export const NESTED_CHILD_ORDER: Record<string, string[]> = {
   s6: ["s6.a", "s6.b", "s6.c", "s6.d", "s6.e", "s6.f"],
 }
 
+// The step edges the nested formula's cross-step needs give (beadbox-ptca.3):
+// s2.a needs s1.b; s4.a needs s3.c and s2.h; s6.c needs s5.d.
+export const NESTED_STEP_EDGES = ["s1->s2", "s2->s4", "s3->s4", "s5->s6"]
+
 // A flat formula as today: step-level needs, a sequential chain, a gate.
 export function flatFormula(): FormulaStep[] {
   return [

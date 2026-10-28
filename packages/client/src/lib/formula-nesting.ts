@@ -40,3 +40,48 @@ export function orderChildren(children: FormulaStep[]): {
   const cyclic = children.filter((c) => pending.has(c.id))
   return { ordered: [...ordered, ...cyclic], cyclic: cyclic.map((c) => c.id) }
 }
+
+// Edges between the steps of a nested formula (beadbox-ptca.3): "A->B" when a
+// child of B (or B itself) needs a child of A (or A itself), once per pair,
+// in formula order. A need on nothing in the formula, or within the same
+// step, draws no edge. `cyclic` names the steps that sit on a cycle (a step
+// that only follows or sits between cycles is not named); finding them never
+// loops.
+export function stepEdges(steps: FormulaStep[]): { edges: string[]; cyclic: string[] } {
+  const stepOf = new Map<string, string>()
+  for (const s of steps) {
+    stepOf.set(s.id, s.id)
+    for (const c of s.children ?? []) stepOf.set(c.id, s.id)
+  }
+  const edges = new Set<string>()
+  for (const s of steps) {
+    for (const node of [s, ...(s.children ?? [])]) {
+      for (const need of node.needs ?? []) {
+        const from = stepOf.get(need)
+        if (from && from !== s.id) edges.add(`${from}->${s.id}`)
+      }
+    }
+  }
+  const pairs = [...edges].map((e) => e.split("->") as [string, string])
+  return { edges: [...edges], cyclic: stepsOnCycles(steps, pairs) }
+}
+
+// A step is on a cycle when it can reach itself. A visited set bounds each
+// walk, and formulas have tens of steps, so one walk per step is cheap.
+function stepsOnCycles(steps: FormulaStep[], pairs: [string, string][]): string[] {
+  const next = new Map<string, string[]>()
+  for (const [a, b] of pairs) next.set(a, [...(next.get(a) ?? []), b])
+  const reachesItself = (start: string) => {
+    const seen = new Set<string>()
+    const stack = [...(next.get(start) ?? [])]
+    while (stack.length > 0) {
+      const id = stack.pop() as string
+      if (id === start) return true
+      if (seen.has(id)) continue
+      seen.add(id)
+      stack.push(...(next.get(id) ?? []))
+    }
+    return false
+  }
+  return steps.filter((s) => reachesItself(s.id)).map((s) => s.id)
+}

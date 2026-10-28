@@ -17,7 +17,7 @@ import "@xyflow/react/dist/style.css"
 const getElk = () => import("elkjs/lib/elk.bundled.js").then((m) => new m.default())
 
 import { ArrowDownNarrowWide, CircleHelp, Columns2, FlaskConical, ShieldCheck } from "lucide-react"
-import { isNestedFormula, orderChildren } from "../lib/formula-nesting"
+import { isNestedFormula, orderChildren, stepEdges } from "../lib/formula-nesting"
 import type { FormulaStep, StepOverlay } from "../lib/types"
 import { cn } from "../lib/utils"
 import { StepCountBadge } from "./step-count-badge"
@@ -262,19 +262,15 @@ function nestedStepHeight(childCount: number): number {
 }
 
 async function layoutNestedSteps(steps: FormulaStep[]): Promise<{ nodes: Node[]; edges: Edge[] }> {
-  const stepIds = new Set(steps.map((s) => s.id))
-  const needsOf = new Map(
-    steps.map((s) => [s.id, (s.needs ?? []).filter((n) => stepIds.has(n) && n !== s.id)]),
-  )
-  const dependedOn = new Set([...needsOf.values()].flat())
-
-  const edgeIds: string[] = []
-  for (const s of steps) {
-    const needs = needsOf.get(s.id) ?? []
-    if (needs.length === 0) edgeIds.push(`__start__->${s.id}`)
-    for (const n of needs) edgeIds.push(`${n}->${s.id}`)
-    if (!dependedOn.has(s.id)) edgeIds.push(`${s.id}->__end__`)
-  }
+  // Step edges come from the children's cross-step needs (beadbox-ptca.3).
+  const { edges: between, cyclic: cyclicSteps } = stepEdges(steps)
+  const fed = new Set(between.map((e) => e.split("->")[1]))
+  const feeding = new Set(between.map((e) => e.split("->")[0]))
+  const edgeIds = [
+    ...steps.filter((s) => !fed.has(s.id)).map((s) => `__start__->${s.id}`),
+    ...between,
+    ...steps.filter((s) => !feeding.has(s.id)).map((s) => `${s.id}->__end__`),
+  ]
 
   const sizes = new Map(
     steps.map((s) => [
@@ -311,7 +307,14 @@ async function layoutNestedSteps(steps: FormulaStep[]): Promise<{ nodes: Node[];
           id: s.id,
           type: "nestedStep",
           position: at(s.id),
-          data: { step: s, stepIndex, children: ordered, cyclic, size: sizes.get(s.id)! },
+          data: {
+            step: s,
+            stepIndex,
+            children: ordered,
+            cyclic,
+            cyclicStep: cyclicSteps.includes(s.id),
+            size: sizes.get(s.id)!,
+          },
         }
       }),
       { id: "__end__", type: "terminal", position: at("__end__"), data: { label: "End" } },
@@ -1227,6 +1230,7 @@ interface NestedStepData {
   stepIndex: number
   children: FormulaStep[]
   cyclic: string[]
+  cyclicStep: boolean
   size: { width: number; height: number }
   selectedStepId?: string | null
   onClick?: (stepId: string) => void
@@ -1252,7 +1256,7 @@ function TitleWithVars({ title, varClassName }: { title: string; varClassName: s
 // dependency order (beadbox-ptca.2), with the step's closed/total when a
 // molecule is selected (beadbox-ptca.4).
 function NestedStepNodeComponent({ data }: { data: NestedStepData }) {
-  const { step, stepIndex, children, cyclic, selectedStepId, onClick } = data
+  const { step, stepIndex, children, cyclic, cyclicStep, selectedStepId, onClick } = data
   const accentColor = ACCENT_COLORS[stepIndex % ACCENT_COLORS.length]
 
   return (
@@ -1291,7 +1295,15 @@ function NestedStepNodeComponent({ data }: { data: NestedStepData }) {
           <span className="text-[10px] text-zinc-600 shrink-0">
             {children.length} {children.length === 1 ? "task" : "tasks"}
           </span>
-          <span className="ml-auto shrink-0">
+          <span className="ml-auto flex items-center gap-1 shrink-0">
+            {cyclicStep && (
+              <span
+                title="This step's tasks and another step's tasks need each other"
+                className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20"
+              >
+                cycle
+              </span>
+            )}
             <StepCountBadge stepId={step.id} />
           </span>
         </button>

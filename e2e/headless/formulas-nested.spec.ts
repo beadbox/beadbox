@@ -1,13 +1,18 @@
-// The Formulas tab on a nested formula (beadbox-ptca.2): one container per
-// step, its children inside in dependency order, where it used to draw the
-// steps as a single PARALLEL block with no children. bd is the judge of the
+// The Formulas tab on a nested formula (beadbox-ptca.2, .3): one container
+// per step, its children inside in dependency order, and an edge between
+// steps whose children need each other, where it used to draw the steps as a
+// single PARALLEL block with no children. bd is the judge of the
 // formula: the steps and children compared are the ones `bd formula show`
 // returns. The formula is synthetic (the unit test's fixture), written into
 // this worker's workspace; formulas are files, so no Dolt write is involved.
 
 import { mkdirSync, writeFileSync } from "fs"
 import { join } from "path"
-import { NESTED_CHILD_ORDER, nestedFormula } from "../../packages/client/src/__tests__/formula-fixtures"
+import {
+  NESTED_CHILD_ORDER,
+  NESTED_STEP_EDGES,
+  nestedFormula,
+} from "../../packages/client/src/__tests__/formula-fixtures"
 import { expect, test } from "../fixtures/harness"
 
 const NAME = "e2e-nested-steps"
@@ -53,6 +58,17 @@ test("a nested formula draws each step as a group holding its children in order"
   }
   // The old rendering: one PARALLEL block of the steps.
   await expect(page.getByText("Parallel", { exact: true })).toHaveCount(0)
+
+  // beadbox-ptca.3: one edge per step pair whose children need each other.
+  const stepPairs = () =>
+    page.$$eval('[data-testid^="rf__edge-"]', (els) =>
+      els
+        .map((e) => (e.getAttribute("data-testid") ?? "").replace("rf__edge-", ""))
+        .filter((id) => !id.includes("__start__") && !id.includes("__end__"))
+        .sort(),
+    )
+  await expect.poll(stepPairs).toEqual([...NESTED_STEP_EDGES].sort())
+  console.log(`[formulas-nested] step edges drawn: ${(await stepPairs()).join(", ")}`)
 
   // Keyboard as today: a child row is a focusable button.
   const firstChild = page.locator('[data-step-id="s1.a"]')
