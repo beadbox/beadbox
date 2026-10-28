@@ -4,12 +4,12 @@
 
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import * as gates from "../handlers/gates"
-import { createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
+import { BD_WORKSPACE_TIMEOUT_MS, createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
 
 // The beforeAll below runs bd init plus eight gate creates, which can take
 // well over 30 s on a busy machine. Hooks use this default (bun-types 1.1.37's
 // beforeAll takes no timeout argument), so it is set explicitly here.
-setDefaultTimeout(180_000)
+setDefaultTimeout(BD_WORKSPACE_TIMEOUT_MS)
 
 let ws: Workspace
 let humanGate: string

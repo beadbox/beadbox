@@ -23,12 +23,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
-import { _cleanEnvForTesting, createBdWorkspace, type Workspace } from "./fixtures/bd-workspace"
+import { BD_WORKSPACE_TIMEOUT_MS, _cleanEnvForTesting, createBdWorkspace, type Workspace } from "./fixtures/bd-workspace"
 
 // createBdWorkspace seeds 4 beads + reparents — multiple bd CLI calls in
 // sequence run ~3-5s on a warm machine, more on cold caches. Mirror the
 // 30s default the other fixture-using suites set.
-setDefaultTimeout(30_000)
+setDefaultTimeout(BD_WORKSPACE_TIMEOUT_MS)
 
 const run = promisify(execFile)
 

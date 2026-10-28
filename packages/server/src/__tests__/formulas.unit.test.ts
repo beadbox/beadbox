@@ -17,9 +17,9 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import * as formulas from "../handlers/formulas"
 import type { FormulaStep } from "../lib/types"
-import { createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
+import { BD_WORKSPACE_TIMEOUT_MS, createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
 
-setDefaultTimeout(30_000)
+setDefaultTimeout(BD_WORKSPACE_TIMEOUT_MS)
 
 let ws: Workspace
 

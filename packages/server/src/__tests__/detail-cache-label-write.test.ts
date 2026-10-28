@@ -16,9 +16,9 @@ import { chmod, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import * as epics from "../handlers/epics"
 import { __resetBdPathCache, getBdPath } from "../lib/bd"
-import { createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
+import { BD_WORKSPACE_TIMEOUT_MS, createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
 
-setDefaultTimeout(60_000)
+setDefaultTimeout(BD_WORKSPACE_TIMEOUT_MS)
 
 let ws: Workspace
 let log: string

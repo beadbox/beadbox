@@ -1,13 +1,9 @@
 # Bun config for the @beadbox/server workspace package.
 #
-# [test] timeout = 30000 — bd-fixture-driven tests spin up tmpdir bd
-# workspaces (mkdtemp + git init + bd init + ~5 bd creates). Under
-# concurrent execution across 10+ test files, each setup takes ~9s. The
-# default 5s timeout flakes on healthy hardware. 30s gives headroom
-# without slowing the happy path. Per-file `setDefaultTimeout(30_000)`
-# calls in some unit tests are now redundant; safe to leave during the
-# stabilization window.
+# The per-test default deadline (30 s) is set by the preload
+# _test-default-timeout.ts, not here: bun 1.3.14 does not apply a
+# `[test] timeout` key from this file, so the 30000 that used to sit here never
+# took effect and tests ran on bun's 5 s default (beadbox-mol-uua.1).
 [test]
-timeout = 30000
 # Keep test sidecars out of the user's real log (beadbox-9j1).
-preload = ["./src/__tests__/_test-log-isolation.ts"]
+preload = ["./src/__tests__/_test-log-isolation.ts", "./src/__tests__/_test-default-timeout.ts"]

@@ -3,9 +3,9 @@
 
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import * as epics from "../handlers/epics"
-import { createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
+import { BD_WORKSPACE_TIMEOUT_MS, createBdWorkspace, runBdInWorkspace, type Workspace } from "./fixtures/bd-workspace"
 
-setDefaultTimeout(30_000)
+setDefaultTimeout(BD_WORKSPACE_TIMEOUT_MS)
 
 let ws: Workspace
 

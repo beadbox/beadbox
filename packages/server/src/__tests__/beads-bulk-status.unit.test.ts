@@ -13,9 +13,9 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import * as beads from "../handlers/beads"
 import { showBead } from "../lib/bd"
-import { createBdWorkspace, type Workspace } from "./fixtures/bd-workspace"
+import { BD_WORKSPACE_TIMEOUT_MS, createBdWorkspace, type Workspace } from "./fixtures/bd-workspace"
 
-setDefaultTimeout(30_000)
+setDefaultTimeout(BD_WORKSPACE_TIMEOUT_MS)
 
 let ws: Workspace
 

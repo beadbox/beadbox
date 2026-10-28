@@ -11,6 +11,18 @@ import { promisify } from "node:util"
 
 const runBd = promisify(execFile)
 
+/**
+ * The deadline for a test or hook that builds or uses a workspace: a hang
+ * guard, not a measurement (beadbox-mol-uua.1). bd init, bd create and Dolt's
+ * commits are real processes; on a loaded Mac (several rigs running suites)
+ * one workspace took over 17 s to build and setups crossed the old 30 s
+ * deadline, failing pushes on the machine's load rather than the code. A
+ * healthy setup takes seconds and returns as soon as it is done; only a hang
+ * runs into this. Every file that uses this fixture sets it with
+ * setDefaultTimeout(BD_WORKSPACE_TIMEOUT_MS), which covers its hooks too.
+ */
+export const BD_WORKSPACE_TIMEOUT_MS = 180_000
+
 export interface Workspace {
   /** Path to the workspace root (tmpdir). */
   root: string
