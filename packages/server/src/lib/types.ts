@@ -194,6 +194,9 @@ export interface FormulaStep {
   needs?: string[] // dependency step IDs
   assignee?: string
   gate?: { type: string; timeout?: string } // e.g. { type: "human", timeout: "3d" }
+  // A nested formula's step holds its tasks here; their needs may name
+  // children of other steps (beadbox-ptca.2). Absent on a flat formula.
+  children?: FormulaStep[]
 }
 
 export interface FormulaDetail {

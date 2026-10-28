@@ -17,6 +17,7 @@ import "@xyflow/react/dist/style.css"
 const getElk = () => import("elkjs/lib/elk.bundled.js").then((m) => new m.default())
 
 import { ArrowDownNarrowWide, CircleHelp, Columns2, FlaskConical, ShieldCheck } from "lucide-react"
+import { isNestedFormula, orderChildren } from "../lib/formula-nesting"
 import type { FormulaStep, StepOverlay } from "../lib/types"
 import { cn } from "../lib/utils"
 import { StepCountBadge } from "./step-count-badge"
@@ -247,8 +248,94 @@ function groupNodeHeight(count: number): number {
   return GROUP_PADDING * 2 + headerHeight + count * GROUP_ITEM_HEIGHT + (count - 1) * 4
 }
 
-async function runElkLayout(steps: FormulaStep[]): Promise<{ nodes: Node[]; edges: Edge[] }> {
+// ---------------------------------------------------------------------------
+// Nested formulas (beadbox-ptca.2): every step is its own container with its
+// children inside in dependency order. The steps carry no needs of their own
+// (they sit on the children), so the flat grouping below would lump them all
+// into one PARALLEL block; nested formulas skip it.
+// ---------------------------------------------------------------------------
+
+function nestedStepHeight(childCount: number): number {
+  const headerHeight = 28 // step number, title and task count
+  const rows = Math.max(childCount, 1) // an empty step shows one "no tasks" line
+  return GROUP_PADDING * 2 + headerHeight + rows * GROUP_ITEM_HEIGHT + (rows - 1) * 4
+}
+
+async function layoutNestedSteps(steps: FormulaStep[]): Promise<{ nodes: Node[]; edges: Edge[] }> {
+  const stepIds = new Set(steps.map((s) => s.id))
+  const needsOf = new Map(
+    steps.map((s) => [s.id, (s.needs ?? []).filter((n) => stepIds.has(n) && n !== s.id)]),
+  )
+  const dependedOn = new Set([...needsOf.values()].flat())
+
+  const edgeIds: string[] = []
+  for (const s of steps) {
+    const needs = needsOf.get(s.id) ?? []
+    if (needs.length === 0) edgeIds.push(`__start__->${s.id}`)
+    for (const n of needs) edgeIds.push(`${n}->${s.id}`)
+    if (!dependedOn.has(s.id)) edgeIds.push(`${s.id}->__end__`)
+  }
+
+  const sizes = new Map(
+    steps.map((s) => [
+      s.id,
+      { width: NODE_WIDTH, height: nestedStepHeight(s.children?.length ?? 0) },
+    ]),
+  )
+  const elk = await getElkInstance()
+  const laid = await elk.layout({
+    id: "root",
+    layoutOptions: ELK_OPTIONS,
+    children: [
+      { id: "__start__", width: TERMINAL_SIZE, height: TERMINAL_SIZE },
+      ...steps.map((s) => ({ id: s.id, ...sizes.get(s.id)! })),
+      { id: "__end__", width: TERMINAL_SIZE, height: TERMINAL_SIZE },
+    ],
+    edges: edgeIds.map((id) => {
+      const [source, target] = id.split("->")
+      return { id, sources: [source], targets: [target] }
+    }),
+  })
+  const at = (id: string) => {
+    const n = laid.children?.find((c) => c.id === id)
+    return { x: n?.x ?? 0, y: n?.y ?? 0 }
+  }
+
+  const edgeColor = "#52525b80" // zinc-600 at 50% opacity
+  return {
+    nodes: [
+      { id: "__start__", type: "terminal", position: at("__start__"), data: { label: "Start" } },
+      ...steps.map((s, stepIndex) => {
+        const { ordered, cyclic } = orderChildren(s.children ?? [])
+        return {
+          id: s.id,
+          type: "nestedStep",
+          position: at(s.id),
+          data: { step: s, stepIndex, children: ordered, cyclic, size: sizes.get(s.id)! },
+        }
+      }),
+      { id: "__end__", type: "terminal", position: at("__end__"), data: { label: "End" } },
+    ],
+    edges: edgeIds.map((id) => {
+      const [source, target] = id.split("->")
+      return {
+        id,
+        source,
+        target,
+        type: "smoothstep",
+        animated: false,
+        markerEnd: { type: "arrowclosed" as const, color: edgeColor, width: 12, height: 12 },
+        style: { stroke: edgeColor, strokeWidth: 1.5 },
+      }
+    }),
+  }
+}
+
+export async function layoutFormulaSteps(
+  steps: FormulaStep[],
+): Promise<{ nodes: Node[]; edges: Edge[] }> {
   if (steps.length === 0) return { nodes: [], edges: [] }
+  if (isNestedFormula(steps)) return layoutNestedSteps(steps)
 
   const {
     groups,
@@ -1135,6 +1222,136 @@ function GateGroupNodeComponent({ data }: { data: GateGroupData }) {
   )
 }
 
+interface NestedStepData {
+  step: FormulaStep
+  stepIndex: number
+  children: FormulaStep[]
+  cyclic: string[]
+  size: { width: number; height: number }
+  selectedStepId?: string | null
+  onClick?: (stepId: string) => void
+}
+
+function TitleWithVars({ title, varClassName }: { title: string; varClassName: string }) {
+  return (
+    <>
+      {title.split(/(\{\{[^}]+\}\})/).map((part, i) =>
+        part.startsWith("{{") ? (
+          <span key={i} className={varClassName}>
+            {part.slice(2, -2)}
+          </span>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  )
+}
+
+// One step of a nested formula: a header for the step, then its children in
+// dependency order (beadbox-ptca.2), with the step's closed/total when a
+// molecule is selected (beadbox-ptca.4).
+function NestedStepNodeComponent({ data }: { data: NestedStepData }) {
+  const { step, stepIndex, children, cyclic, selectedStepId, onClick } = data
+  const accentColor = ACCENT_COLORS[stepIndex % ACCENT_COLORS.length]
+
+  return (
+    <>
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+      />
+      <div
+        data-testid="formula-step-group"
+        data-step-group-id={step.id}
+        className="rounded-xl border border-[#3f3f46] bg-[#1e1e21] shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+        style={{ width: NODE_WIDTH, padding: GROUP_PADDING }}
+      >
+        <button
+          data-step-id={step.id}
+          onClick={() => onClick?.(step.id)}
+          className={cn(
+            "w-full flex items-center gap-2 mb-2 px-1 rounded text-left",
+            selectedStepId === step.id && "ring-1 ring-primary/30",
+          )}
+        >
+          <span
+            className="text-[10px] font-mono font-bold shrink-0 w-5 h-5 rounded flex items-center justify-center"
+            style={{ backgroundColor: `${accentColor}20`, color: accentColor }}
+          >
+            {stepIndex + 1}
+          </span>
+          <span className="text-sm font-medium text-foreground truncate">
+            <TitleWithVars
+              title={step.title}
+              varClassName="text-[11.5px] font-mono px-1 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+            />
+          </span>
+          <span className="text-[10px] text-zinc-600 shrink-0">
+            {children.length} {children.length === 1 ? "task" : "tasks"}
+          </span>
+          <span className="ml-auto shrink-0">
+            <StepCountBadge stepId={step.id} />
+          </span>
+        </button>
+        <div className="space-y-1">
+          {children.length === 0 && (
+            <p className="text-[12px] text-zinc-600 px-1 py-1.5">No tasks in this step</p>
+          )}
+          {children.map((child, i) => (
+            <Tooltip key={child.id}>
+              <TooltipTrigger asChild>
+                <button
+                  data-testid="formula-step-child"
+                  data-step-id={child.id}
+                  onClick={() => onClick?.(child.id)}
+                  className={cn(
+                    "w-full rounded-md border text-left transition-all overflow-hidden bg-[#27272a] hover:bg-[#2e2e32]",
+                    selectedStepId === child.id
+                      ? "border-primary/50 ring-1 ring-primary/30"
+                      : "border-[#3f3f46]/50 hover:border-[#52525b]",
+                  )}
+                >
+                  <div className="flex items-center gap-2 min-w-0 px-2.5 py-1.5">
+                    <span className="text-[9px] font-mono text-zinc-500 shrink-0 w-4 text-right">
+                      {i + 1}
+                    </span>
+                    <span className="text-[13px] font-medium text-foreground truncate">
+                      <TitleWithVars
+                        title={child.title}
+                        varClassName="text-[10.5px] font-mono px-0.5 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+                      />
+                    </span>
+                    {cyclic.includes(child.id) && (
+                      <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20 shrink-0">
+                        cycle
+                      </span>
+                    )}
+                  </div>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs">
+                <p className="font-medium mb-1">{child.title}</p>
+                {child.description && (
+                  <p className="text-xs text-muted-foreground whitespace-pre-line line-clamp-6">
+                    {child.description.slice(0, 300)}
+                  </p>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+      </div>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+      />
+    </>
+  )
+}
+
 function TerminalNodeComponent({ data }: { data: { label: string } }) {
   const isStart = data.label === "Start"
   return (
@@ -1173,6 +1390,7 @@ const nodeTypes: NodeTypes = {
   stepGroup: StepGroupNodeComponent,
   seqGroup: SeqGroupNodeComponent,
   gateGroup: GateGroupNodeComponent,
+  nestedStep: NestedStepNodeComponent,
   terminal: TerminalNodeComponent,
 }
 
@@ -1215,7 +1433,7 @@ function FormulaDagInner({ steps, selectedStepId, onStepClick, overlay }: Formul
   // Run ELK layout when steps change, then position viewport at top-center
   useEffect(() => {
     let cancelled = false
-    runElkLayout(steps).then(({ nodes: n, edges: e }) => {
+    layoutFormulaSteps(steps).then(({ nodes: n, edges: e }) => {
       if (cancelled) return
       setNodes(n)
       setEdges(e)
@@ -1257,6 +1475,11 @@ function FormulaDagInner({ steps, selectedStepId, onStepClick, overlay }: Formul
               onClick: onStepClick,
             },
           }
+        }
+        if (n.type === "nestedStep") {
+          // closed/total reaches the header through StepCountsContext (ptca.4); the
+          // title-keyed overlay pairs top-level steps only, so it is not applied here.
+          return { ...n, data: { ...n.data, selectedStepId, onClick: onStepClick } }
         }
         if (n.type === "stepGroup" || n.type === "seqGroup" || n.type === "gateGroup") {
           return {

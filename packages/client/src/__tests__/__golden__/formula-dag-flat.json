@@ -1,0 +1,96 @@
+{
+  "flat": {
+    "nodes": [
+      {
+        "id": "__start__",
+        "type": "terminal",
+        "x": 452,
+        "y": 12,
+        "members": []
+      },
+      {
+        "id": "design",
+        "type": "step",
+        "x": 245,
+        "y": 72,
+        "members": ["design"]
+      },
+      {
+        "id": "__seq_1__",
+        "type": "seqGroup",
+        "x": 12,
+        "y": 232,
+        "members": ["build", "test"]
+      },
+      {
+        "id": "__seq_4__",
+        "type": "seqGroup",
+        "x": 479,
+        "y": 412,
+        "members": ["docs", "ship"]
+      },
+      {
+        "id": "__gate_3__",
+        "type": "gateGroup",
+        "x": 12,
+        "y": 436,
+        "members": ["approve"]
+      },
+      {
+        "id": "__end__",
+        "type": "terminal",
+        "x": 452,
+        "y": 684,
+        "members": []
+      }
+    ],
+    "edges": [
+      "__start__->design",
+      "design->__seq_1__",
+      "design->__seq_4__",
+      "__seq_1__->__gate_3__",
+      "__gate_3__->__end__",
+      "__seq_4__->__end__"
+    ]
+  },
+  "parallel": {
+    "nodes": [
+      {
+        "id": "__start__",
+        "type": "terminal",
+        "x": 219,
+        "y": 12,
+        "members": []
+      },
+      {
+        "id": "prep",
+        "type": "step",
+        "x": 12,
+        "y": 72,
+        "members": ["prep"]
+      },
+      {
+        "id": "merge",
+        "type": "step",
+        "x": 12,
+        "y": 368,
+        "members": ["merge"]
+      },
+      {
+        "id": "__group_1__",
+        "type": "stepGroup",
+        "x": 12,
+        "y": 140,
+        "members": ["lint", "unit", "e2e"]
+      },
+      {
+        "id": "__end__",
+        "type": "terminal",
+        "x": 219,
+        "y": 436,
+        "members": []
+      }
+    ],
+    "edges": ["__start__->prep", "__group_1__->merge", "prep->__group_1__", "merge->__end__"]
+  }
+}
