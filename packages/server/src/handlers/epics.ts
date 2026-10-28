@@ -20,6 +20,7 @@ import {
   getDataFingerprint,
   listBeads,
   listDependencies,
+  listGates,
   listDependents,
   mapPriority,
   mapType,
@@ -92,6 +93,31 @@ function convertBead(bdBead: BdBead, comments: Comment[] = []): Bead {
   }
 }
 
+// Legacy formula roots are epics with a molecule-shaped ID (the client's
+// isMoleculePresentation rule).
+const isMoleculeRoot = (b: BdBead) =>
+  b.issue_type === "molecule" || (b.issue_type === "epic" && b.id.includes("-mol-"))
+
+// The plain list hides gate issues, so a molecule's gates come from one
+// gates-only list (beadbox-wya0.1), run only when the list holds a molecule.
+// Only gates whose parent chain reaches a molecule are added: ordinary epics
+// and "Beads (No Epic)" stay as they are.
+async function withMoleculeGates(beads: BdBead[], options: BdOptions): Promise<BdBead[]> {
+  if (!beads.some(isMoleculeRoot)) return beads
+  const byId = new Map(beads.map((b) => [b.id, b]))
+  const underMolecule = (gate: BdBead) => {
+    const seen = new Set<string>()
+    for (let id = gate.parent; id && !seen.has(id); id = byId.get(id)?.parent) {
+      seen.add(id)
+      const parent = byId.get(id)
+      if (parent && isMoleculeRoot(parent)) return true
+    }
+    return false
+  }
+  const gates = (await listGates(options)).filter((g) => !byId.has(g.id) && underMolecule(g))
+  return gates.length > 0 ? [...beads, ...gates] : beads
+}
+
 // Build epic hierarchy from flat list of beads
 // Optimized: uses only 2 bd CLI calls instead of N+1
 async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
@@ -121,7 +147,8 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
         assertDependencyDataComplete(rows)
         return rows
       })
-  const allBeads = viaServe ? (viaServe.value as unknown as BdBead[]) : await listBeads(readOptions)
+  const listed = viaServe ? (viaServe.value as unknown as BdBead[]) : await listBeads(readOptions)
+  const allBeads = options.includeSystem ? listed : await withMoleculeGates(listed, readOptions)
 
   const hierarchicalTypes = new Set(["epic", "milestone", "convoy", "molecule"])
   const epicBeads = allBeads.filter((b) => hierarchicalTypes.has(b.issue_type))

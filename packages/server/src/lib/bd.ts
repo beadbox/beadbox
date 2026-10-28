@@ -956,15 +956,27 @@ const INCLUDE_SYSTEM_FLAGS = ["--include-gates", "--include-infra", "--include-t
 const UNKNOWN_INCLUDE_FLAG = /unknown flag:\s*[\x22\x27]?(--include-(?:gates|infra|templates))/i
 
 async function listBeadsIncludingSystem(args: string[], options: BdOptions): Promise<BdBead[]> {
+  return listNamingUnsupportedFlag([...args, ...INCLUDE_SYSTEM_FLAGS], options, "use All issues view")
+}
+
+// Gate issues only, closed ones included: the molecule view's gates
+// (beadbox-wya0.1). The plain list hides gates, and the tree's list is shared
+// by every view, so molecules read their gates here. The argv is fixed and
+// carries --include-gates only, never infra or templates.
+export async function listGates(options: BdOptions = {}): Promise<BdBead[]> {
+  const args = ["list", "--status", "all", "--limit", "0", "--flat", "--type=gate", "--include-gates"]
+  return (await listNamingUnsupportedFlag<BdBead[] | null>(args, options, "see gates in molecules")) ?? []
+}
+
+async function listNamingUnsupportedFlag<T>(args: string[], options: BdOptions, purpose: string): Promise<T> {
   try {
-    return await bdExec<BdBead[]>([...args, ...INCLUDE_SYSTEM_FLAGS], options, LIST_MAX_BUFFER)
+    return await bdExec<T>(args, options, LIST_MAX_BUFFER)
   } catch (error) {
     const unsupported = unsupportedIncludeFlag(error)
     if (!unsupported) throw error
-    throw new Error(
-      `The installed bd does not support ${unsupported}; upgrade bd to use All issues view`,
-      { cause: error },
-    )
+    throw new Error(`The installed bd does not support ${unsupported}; upgrade bd to ${purpose}`, {
+      cause: error,
+    })
   }
 }
 
