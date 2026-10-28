@@ -27,6 +27,8 @@ jobs:
     # environment to read them, and a fork PR's head ref matches neither, so a
     # fork-triggered run cannot reach these secrets even if it reaches this job.
     environment: release
+    # mac-runner guard (beadbox-449.4): accident prevention only; a fork's PR runs its own copy, so forks are stopped by the approval rule, not this.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: [beadbox-macos-release]
     timeout-minutes: 45
 
@@ -188,6 +190,8 @@ jobs:
 
   create-dmg:
     needs: [build]
+    # mac-runner guard (beadbox-449.4): accident prevention only; a fork's PR runs its own copy, so forks are stopped by the approval rule, not this.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: [beadbox-macos-release]
     timeout-minutes: 15
 

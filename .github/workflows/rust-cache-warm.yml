@@ -44,6 +44,8 @@ permissions:
 
 jobs:
   warm-macos-arm64:
+    # mac-runner guard (beadbox-449.4): accident prevention only; a fork's PR runs its own copy, so forks are stopped by the approval rule, not this.
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: [beadbox-macos-release]
     timeout-minutes: 30
     steps:

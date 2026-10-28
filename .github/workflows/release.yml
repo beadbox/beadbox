@@ -534,6 +534,62 @@ jobs:
 
   # ── Platform builds (each builds frontend inline, uploads to draft release) ──
 
+  # beadbox-449.4: which runs may use the fleet's self-hosted Mac. ACCIDENT
+  # PREVENTION ONLY: it keeps this repository's own runs from routing an
+  # unintended job to the Mac. It is no control against a fork's pull request,
+  # which runs its own copy of every workflow; the barrier there is the
+  # external-contributor approval rule, and a fork run that touches .github/
+  # is never approved (Nelson, 2026-10-28). Admitted:
+  #   - a push of a release tag vX.Y.Z or vX.Y.Z-rc.N;
+  #   - a Build from build-main.yml (workflow_call), scheduled or dispatched,
+  #     on main;
+  #   - a dispatch from release/vX.Y.Z whose head's parent is on main
+  #     (shipper's guard: the branch is main plus the version bump only).
+  # Everything else (a dispatch from main or another branch included) is
+  # refused here, before any macOS job is queued.
+  mac-admission:
+    name: "macOS runner admission"
+    if: >-
+      !cancelled()
+      && needs.validate-tag.result == 'success'
+      && (github.event_name == 'push' || inputs.mode == 'build' || inputs.build_macos_arm64)
+    needs: [validate-tag]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Admit only the runs the Mac is for
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          TAG_RE='^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
+          RELEASE_RE='^refs/heads/release/v[0-9]+\.[0-9]+\.[0-9]+$'
+          if [ "$EVENT" = push ] && [[ "$REF" =~ $TAG_RE ]]; then
+            echo "admitted: release tag push ($REF)"
+          elif [ "$MODE" = build ] && [ "$REF" = refs/heads/main ] \
+            && { [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; }; then
+            echo "admitted: Build of main ($EVENT)"
+          elif [ "$EVENT" = workflow_dispatch ] && [ -z "$MODE" ] && [[ "$REF" =~ $RELEASE_RE ]]; then
+            git fetch --no-tags origin main
+            if git merge-base --is-ancestor "${GITHUB_SHA}^" origin/main; then
+              echo "admitted: dispatch from $REF, whose head's parent is on main"
+            else
+              echo "::error::refused: $REF's head parent is not on main (a release branch must be main plus the version bump)"
+              exit 1
+            fi
+          else
+            echo "::error::refused: event '$EVENT' on '$REF' (mode '${MODE:-none}') may not use the macOS runner"
+            exit 1
+          fi
+
   build-macos-arm64:
     # beadbox-l5i.6.1: signing secrets are scoped to the `release` environment,
     # whose ref policy allows only v* tags and main. A job must declare the
@@ -545,8 +601,10 @@ jobs:
       && needs.validate-tag.result == 'success'
       && needs.build-frontend.result == 'success'
       && (needs.create-draft.result == 'success' || (inputs.mode == 'build' && needs.create-draft.result == 'skipped'))
+      && needs.mac-admission.result == 'success'
       && (github.event_name == 'push' || inputs.mode == 'build' || inputs.build_macos_arm64)
-    needs: [validate-tag, build-frontend, create-draft]
+    needs: [validate-tag, build-frontend, create-draft, mac-admission]
+    # mac-runner guard (beadbox-449.4): accident prevention only; a fork's PR runs its own copy, so forks are stopped by the approval rule, not this. The admission itself is the mac-admission job.
     # beadbox-449: the fleet's self-hosted Mac at .207, never GitHub's hosted
     # macOS (no fallback: with the runner offline the job waits in the queue).
     runs-on: [beadbox-macos-release]
@@ -785,8 +843,10 @@ jobs:
       !cancelled()
       && needs.validate-tag.result == 'success'
       && needs.build-macos-arm64.result == 'success'
+      && needs.mac-admission.result == 'success'
       && (github.event_name == 'push' || inputs.mode == 'build' || inputs.build_macos_arm64)
-    needs: [validate-tag, build-macos-arm64]
+    needs: [validate-tag, build-macos-arm64, mac-admission]
+    # mac-runner guard (beadbox-449.4): accident prevention only; a fork's PR runs its own copy, so forks are stopped by the approval rule, not this. The admission itself is the mac-admission job.
     runs-on: [beadbox-macos-release]
     timeout-minutes: 15
     permissions:

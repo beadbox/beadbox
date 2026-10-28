@@ -34,6 +34,14 @@ permissions:
 jobs:
   smoke:
     name: Packaged app smoke (macOS arm64, ${{ matrix.tag }})
+    # mac-runner guard (beadbox-449.4): accident prevention only; a fork's PR runs its own copy, so forks are stopped by the approval rule, not this.
+    # Direct dispatch on main or a release branch, or called by release.yml on a
+    # release tag push or a release-branch dispatch (its mac-admission job has
+    # already checked that branch).
+    if: >-
+      (github.event_name == 'workflow_dispatch'
+        && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/v')))
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: [beadbox-macos-release]
     timeout-minutes: 15
     strategy:

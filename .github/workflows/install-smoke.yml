@@ -138,7 +138,13 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────
   smoke-macos-arm64:
     needs: resolve-tag
-    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.smoke_macos_arm64 == 'true' }}
+    # mac-runner guard (beadbox-449.4): accident prevention only; a fork's PR runs its own copy, so forks are stopped by the approval rule, not this.
+    # After a Release (workflow_run, which always runs main's copy of this file)
+    # or a dispatch on main, and only when the dispatch did not opt macOS out.
+    if: >-
+      ${{ github.ref == 'refs/heads/main'
+      && (github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch')
+      && (github.event_name != 'workflow_dispatch' || github.event.inputs.smoke_macos_arm64 == 'true') }}
     runs-on: [beadbox-macos-release]
     timeout-minutes: 20
     permissions:

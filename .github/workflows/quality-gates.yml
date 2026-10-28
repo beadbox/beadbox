@@ -317,6 +317,53 @@ jobs:
           [ "$bad" -eq 0 ]
           echo "OK: hosted Linux/Windows runners, and $mac macOS jobs on $MAC_LABEL only"
 
+      - name: Every macOS job carries its guard
+        # beadbox-449.4: each job that can reach the fleet's Mac carries a
+        # job-level guard admitting only the runs that Mac is for. ACCIDENT
+        # PREVENTION ONLY: a fork's pull request runs its own copy of these
+        # files; forks are stopped by the external-contributor approval rule.
+        # Rules: the job holds the guard marker and its own `if:`; in
+        # release.yml that `if:` requires the mac-admission job; a matrix
+        # that lists the Mac label excludes it off main.
+        run: |
+          set -euo pipefail
+          MARK='mac-runner guard (beadbox-449.4)'
+          bad=0
+          found=0
+          # One file per job block: from "  <id>:" to the next job or the file end.
+          rm -rf "$RUNNER_TEMP/jobs"; mkdir -p "$RUNNER_TEMP/jobs"
+          for f in .github/workflows/*.yml; do
+            d="$RUNNER_TEMP/jobs/$(basename "$f")"; mkdir -p "$d"
+            awk -v out="$d" '
+              /^jobs:/ { injobs = 1; next }
+              injobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { n++; id = $1; sub(":", "", id) }
+              injobs && n { print > (out "/" sprintf("%03d", n) "-" id) }
+            ' "$f"
+            for job in "$d"/*; do
+              [ -f "$job" ] || continue
+              name="$f:$(basename "$job" | cut -d- -f2-)"
+              # Real YAML keys only (anchored): a job-level runs-on, or a matrix os list.
+              grep -qE '^    runs-on:[[:space:]]*\[beadbox-macos-release\]|^[[:space:]]+os:[[:space:]]*\[[^]]*beadbox-macos-release' "$job" || continue
+              found=$((found + 1))
+              if ! grep -qF "$MARK" "$job"; then echo "::error file=$f::$name names the Mac runner without the guard marker"; bad=1; fi
+              if grep -qE '^[[:space:]]+os:[[:space:]]*\[[^]]*beadbox-macos-release' "$job"; then
+                if ! grep -qF "github.ref != 'refs/heads/main'" "$job" || ! grep -qE "^[[:space:]]+exclude:" "$job"; then
+                  echo "::error file=$f::$name lists the Mac runner in its matrix without excluding it off main"; bad=1
+                fi
+              elif ! grep -qE '^    if:' "$job"; then
+                echo "::error file=$f::$name runs on the Mac runner without a job-level if: guard"; bad=1
+              elif [ "$f" = .github/workflows/release.yml ] && ! grep -qF "needs.mac-admission.result == 'success'" "$job"; then
+                echo "::error file=$f::$name runs on the Mac runner without requiring the mac-admission job"; bad=1
+              fi
+            done
+          done
+          if [ "$found" -ne 8 ]; then
+            echo "::error::expected 8 macOS jobs to check, found $found"
+            bad=1
+          fi
+          [ "$bad" -eq 0 ]
+          echo "OK: all $found macOS jobs carry their guard (accident prevention only)"
+
       - name: Runner hook and picker tests
         run: bash scripts/ci-runner/test-hooks.sh
 
