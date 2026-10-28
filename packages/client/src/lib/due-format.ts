@@ -38,3 +38,35 @@ export function formatDueAt(dueAt: Date | string, timeZone?: string): string {
   const time = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone })
   return `${day}, ${time.replace(NARROW_SPACES, " ")}`
 }
+
+const MINUTE_MS = 60_000
+const HINT_WINDOW_MINUTES = 24 * 60
+
+export interface DueDisplay {
+  text: string
+  overdue: boolean
+}
+
+// beadbox-816g.2: the due text with its hint, and whether it is overdue, so
+// every surface's red styling follows the same test. From the due instant
+// on, "overdue"; within 24 h before it, "in N h" (under an hour, "in M min");
+// further out, no hint. The hint is a difference of two instants, so a DST
+// change in between does not shift it. It is rounded to the minute before
+// taking whole hours, so "+3h" read a few seconds after bd stored it still
+// says "in 3 h". now defaults to the clock at render; nothing ticks.
+export function describeDueAt(
+  dueAt: Date | string,
+  { now = new Date(), timeZone }: { now?: Date; timeZone?: string } = {},
+): DueDisplay {
+  const text = formatDueAt(dueAt, timeZone)
+  if (!text) return { text: "", overdue: false }
+
+  const remaining = new Date(dueAt).getTime() - now.getTime()
+  if (remaining <= 0) return { text: `${text} · overdue`, overdue: true }
+
+  const minutes = Math.max(1, Math.round(remaining / MINUTE_MS))
+  if (minutes >= HINT_WINDOW_MINUTES) return { text, overdue: false }
+
+  const hint = minutes >= 60 ? `in ${Math.floor(minutes / 60)} h` : `in ${minutes} min`
+  return { text: `${text} · ${hint}`, overdue: false }
+}

@@ -32,7 +32,7 @@ import { CopyableId } from "@/components/copyable-id"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useViewport } from "@/hooks/use-viewport"
-import { formatDueAt } from "@/lib/due-format"
+import { describeDueAt } from "@/lib/due-format"
 import { type BadgeConfig, getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
 import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
@@ -198,6 +198,7 @@ function BeadRow({
   const isExpanded = expandedBeads?.has(bead.id) ?? false
   const borderColor = depthBorderColors[Math.min(depth, depthBorderColors.length - 1)]
   const indentPadding = depth > 0 ? `${depth * 16}px` : undefined
+  const due = bead.dueAt ? describeDueAt(bead.dueAt) : null
 
   return (
     <>
@@ -293,17 +294,17 @@ function BeadRow({
             <TooltipContent>{bead.specId}</TooltipContent>
           </Tooltip>
         )}
-        {bead.dueAt && (
+        {due && (
           <Tooltip>
             <TooltipTrigger asChild>
               <CalendarClock
                 className={cn(
                   "h-3.5 w-3.5 shrink-0",
-                  new Date(bead.dueAt) < new Date() ? "text-red-400" : "text-muted-foreground/50",
+                  due.overdue ? "text-red-400" : "text-muted-foreground/50",
                 )}
               />
             </TooltipTrigger>
-            <TooltipContent>Due: {formatDueAt(bead.dueAt)}</TooltipContent>
+            <TooltipContent>Due: {due.text}</TooltipContent>
           </Tooltip>
         )}
         {bead.estimatedMinutes && (

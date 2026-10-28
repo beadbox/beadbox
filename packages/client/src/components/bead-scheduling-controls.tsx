@@ -5,7 +5,7 @@ import { useCallback, useState } from "react"
 import type { FieldState } from "@/components/bead-detail-helpers"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { formatDueAt } from "@/lib/due-format"
+import { describeDueAt } from "@/lib/due-format"
 import { cn } from "@/lib/utils"
 
 interface SchedulingControlsProps {
@@ -40,6 +40,8 @@ export function SchedulingControls({
   const [editDeferValue, setEditDeferValue] = useState("")
   const [isEditingEstimate, setIsEditingEstimate] = useState(false)
   const [editEstimateValue, setEditEstimateValue] = useState("")
+
+  const due = dueAt ? describeDueAt(dueAt) : null
 
   const handleDueSave = useCallback(() => {
     setIsEditingDue(false)
@@ -79,7 +81,7 @@ export function SchedulingControls({
             className="w-full md:w-48 bg-transparent border-b border-border text-foreground text-sm outline-none"
           />
         </div>
-      ) : dueAt ? (
+      ) : due ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -89,18 +91,16 @@ export function SchedulingControls({
               }}
               className={cn(
                 "inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium transition-colors",
-                new Date(dueAt) < new Date()
+                due.overdue
                   ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
                   : "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30",
               )}
             >
               <CalendarClock className="h-3 w-3" />
-              <span className="text-xs">Due: {formatDueAt(dueAt)}</span>
+              <span className="text-xs">Due: {due.text}</span>
             </button>
           </TooltipTrigger>
-          <TooltipContent>
-            {new Date(dueAt) < new Date() ? "Overdue! " : ""}Click to edit
-          </TooltipContent>
+          <TooltipContent>{due.overdue ? "Overdue! " : ""}Click to edit</TooltipContent>
         </Tooltip>
       ) : (
         <button

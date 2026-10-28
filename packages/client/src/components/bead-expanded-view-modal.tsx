@@ -23,7 +23,7 @@ import { CopyableId } from "@/components/copyable-id"
 import { SimpleMarkdown } from "@/components/simple-markdown"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { formatDueAt } from "@/lib/due-format"
+import { describeDueAt } from "@/lib/due-format"
 import type { CommentSortOrder } from "@/lib/local-storage"
 import type { Bead, Comment } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -78,6 +78,8 @@ export function BeadExpandedViewModal({
   onBeadNavigate,
   onRemoveDependency,
 }: BeadExpandedViewModalProps) {
+  const due = dueAt ? describeDueAt(dueAt) : null
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="!w-[95vw] md:!w-[85vw] !max-w-[95vw] md:!max-w-[85vw] max-h-[95vh] md:max-h-[90vh] h-[95vh] md:h-[90vh] flex flex-col p-0">
@@ -179,15 +181,15 @@ export function BeadExpandedViewModal({
           </div>
           {(dueAt || deferUntil || estimatedMinutes) && (
             <div className="flex items-center gap-3 mt-1 text-[13px] text-muted-foreground">
-              {dueAt && (
+              {due && (
                 <span
                   className={cn(
                     "inline-flex items-center gap-1",
-                    new Date(dueAt) < new Date() ? "text-red-400" : "text-blue-400",
+                    due.overdue ? "text-red-400" : "text-blue-400",
                   )}
                 >
                   <CalendarClock className="h-3 w-3" />
-                  Due: {formatDueAt(dueAt)}
+                  Due: {due.text}
                 </span>
               )}
               {deferUntil && (
