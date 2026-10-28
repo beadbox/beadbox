@@ -176,10 +176,11 @@ jobs:
             "https://github.com/gastownhall/beads/releases/download/v${BD_VERSION}/beads_${BD_VERSION}_darwin_arm64.tar.gz"
           echo "$BD_SHA256  $RUNNER_TEMP/beads.tgz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/beads.tgz" -C "$RUNNER_TEMP/bin" ./bd
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          # bd stays in $RUNNER_TEMP/bin and is called by path (no $GITHUB_PATH write: zizmor github-env on a workflow_run workflow).
           "$RUNNER_TEMP/bin/bd" version
 
       - name: Download release DMG and extract the .app
+        id: fetch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -210,10 +211,12 @@ jobs:
           mkdir -p "$SMOKE/install"
           cp -R "$MOUNT/Beadbox.app" "$SMOKE/install/"
           hdiutil detach "$MOUNT"
-          echo "SMOKE_APP=$SMOKE/install/Beadbox.app" >> "$GITHUB_ENV"
+          echo "app=$SMOKE/install/Beadbox.app" >> "$GITHUB_OUTPUT"
           ls -la "$SMOKE/install/Beadbox.app/Contents/MacOS"
 
       - name: Verify the app before anything runs it
+        env:
+          SMOKE_APP: ${{ steps.fetch.outputs.app }}
         # beadbox-449.5: the bundle is a downloaded artifact about to run on a
         # shared Mac. It must be intact, accepted by Gatekeeper (signed and
         # notarized), and signed by our team; anything else stops here.
@@ -229,6 +232,9 @@ jobs:
           echo "OK: signature intact, Gatekeeper accepts it, team $TEAM"
 
       - name: Launch app
+        id: launch
+        env:
+          SMOKE_APP: ${{ steps.fetch.outputs.app }}
         run: |
           set -euo pipefail
           # Gate 1 counts errors from THIS launch only. The log dir is the
@@ -250,7 +256,7 @@ jobs:
             sleep 1
           done
           [ -n "$APP_PID" ] || { echo "::error::Beadbox process not running after launch"; exit 1; }
-          echo "APP_PID=$APP_PID" >> "$GITHUB_ENV"
+          echo "pid=$APP_PID" >> "$GITHUB_OUTPUT"
           # Allow Tauri/sidecar to boot + write initial log lines.
           sleep 6
           kill -0 "$APP_PID" || { echo "::error::Beadbox ($APP_PID) exited after launch"; exit 1; }
@@ -293,6 +299,9 @@ jobs:
           bash src-tauri/scripts/install-smoke-helpers/burst-bd-create.sh
 
       - name: "Gate 4 — clean process exit within 500ms"
+        env:
+          SMOKE_APP: ${{ steps.fetch.outputs.app }}
+          APP_PID: ${{ steps.launch.outputs.pid }}
         run: |
           set -euo pipefail
           # beadbox-449.5: only this launch's processes. The app pid recorded at
