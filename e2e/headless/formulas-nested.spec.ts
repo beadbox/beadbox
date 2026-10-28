@@ -26,7 +26,16 @@ test("a nested formula draws each step as a group holding its children in order"
 
   await page.goto("/")
   await page.getByRole("button", { name: "Formulas", exact: true }).click()
-  await page.getByRole("button", { name: new RegExp(`^${NAME}`) }).click()
+  // The view selects a formula by itself once the list loads (the first one
+  // here, the only formula in this workspace), and clicking the selected
+  // formula deselects it. So wait for a selection, and click ours only when
+  // another formula is the one selected.
+  const formulaButton = page.getByRole("button", { name: new RegExp(`^${NAME}`) })
+  const selected = page.getByRole("heading", { name: NAME, exact: true })
+  await expect(formulaButton).toBeVisible()
+  await expect(page.getByText("Step Graph", { exact: true })).toBeVisible()
+  if (!(await selected.isVisible())) await formulaButton.click()
+  await expect(selected).toBeVisible()
   await page.getByTitle("Graph view").click()
 
   const groups = page.getByTestId("formula-step-group")
