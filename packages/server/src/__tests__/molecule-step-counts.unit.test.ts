@@ -106,6 +106,29 @@ describe("buildStepCounts (beadbox-ptca.4)", () => {
     expect(counts).toEqual({ t: { closed: 0, total: 1 }, e: { closed: 1, total: 1 } })
   })
 
+  test("many placeholders against a long non-matching title stay linear (no regex backtracking)", () => {
+    const template = `${Array.from({ length: 24 }, (_, i) => `{{v${i}}}x`).join("")}END`
+    const title = "x".repeat(20_000)
+    const t0 = performance.now()
+    const counts = buildStepCounts(
+      [fstep("s1", template)],
+      [mstep("m-1", title, [child("a", "closed")])],
+    )
+    expect(counts).toEqual({})
+    expect(performance.now() - t0).toBeLessThan(200)
+  })
+
+  test("placeholders match empty or long text, and the last literal is a suffix", () => {
+    const counts = buildStepCounts(
+      [fstep("a", "{{x}}Deploy {{env}} now"), fstep("b", "Tag {{v}}")],
+      [
+        mstep("m-a", "Deploy prod now", [child("c1", "closed")]),
+        mstep("m-b", "Tag v1 now Tag v2", [child("c2", "open")]),
+      ],
+    )
+    expect(counts).toEqual({ a: { closed: 1, total: 1 }, b: { closed: 0, total: 1 } })
+  })
+
   test("a formula step with no matching bead has no count", () => {
     expect(
       buildStepCounts([fstep("s1", "Gone")], [mstep("m-1", "Other", [child("a", "closed")])]),
