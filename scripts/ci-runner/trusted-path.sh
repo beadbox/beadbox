@@ -1,11 +1,12 @@
 # shellcheck shell=bash
-# Trust checks for what the self-hosted release runner executes (beadbox-5p1).
-# Other accounts on the runner's machine must not be able to change any program
-# the signing job runs: every PATH directory and the Rust toolchain must be
-# owned by root, have no group or other write bit, and not be a symlink, and
-# the same holds for every ancestor directory (whoever can write a parent can
-# swap the child). Sourced by check-runner-path.sh and by test-hooks.sh, which
-# pass their own owner set so the same code can be tested without root.
+# Trust checks for what the self-hosted Mac's signing job executes
+# (beadbox-5p1, beadbox-449.4). Other accounts on the runner's machine must not
+# be able to change any program the signing job runs: every PATH directory and
+# the Rust toolchain must be owned by one of the given owners, have no group
+# or other write bit, and not be a symlink, and the same holds for every
+# ancestor directory (whoever can write a parent can swap the child). Sourced
+# by check-runner-path.sh and by test-runner-path.sh, which pass their own
+# owner set so the same code can be tested without root.
 
 # untrusted_dir <dir> <owner>...: prints why <dir> or one of its ancestors is
 # not trusted; prints nothing when it is.

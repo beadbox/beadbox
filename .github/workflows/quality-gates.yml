@@ -364,8 +364,11 @@ jobs:
           [ "$bad" -eq 0 ]
           echo "OK: all $found macOS jobs carry their guard (accident prevention only)"
 
-      - name: Runner hook and picker tests
-        run: bash scripts/ci-runner/test-hooks.sh
+      - name: Self-hosted Mac PATH and toolchain trust tests
+        # beadbox-449.4: the root-hook design (job-started hook, picker,
+        # supervisor) is retired; what remains is the PATH and toolchain trust
+        # check the signing job runs, and release.yml's per-job toolchain.
+        run: bash scripts/ci-runner/test-runner-path.sh
 
       - name: No fork-triggered workflows with secret access
         run: |
