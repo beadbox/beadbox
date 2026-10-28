@@ -48,7 +48,7 @@ const LIST = [
  * fingerprint query prints the contents of head.txt (so a test can simulate
  * a write), anything else prints []. Every call is appended to calls.log.
  */
-async function workspace(): Promise<{ db: string; lists: () => Promise<number>; write: () => Promise<void> }> {
+async function workspace(list: unknown[] = LIST): Promise<{ db: string; lists: () => Promise<number>; write: () => Promise<void> }> {
   const root = await mkdtemp(join(tmpdir(), "beadbox-w74-"))
   roots.push(root)
   const db = join(root, ".beads")
@@ -63,7 +63,7 @@ async function workspace(): Promise<{ db: string; lists: () => Promise<number>; 
     `#!/bin/sh
 echo "$*" >> "${log}"
 case " $* " in
-  *" list "*) printf '%s\\n' '${JSON.stringify(LIST)}' ;;
+  *" list "*) printf '%s\\n' '${JSON.stringify(list)}' ;;
   *" sql "*) printf '[{"h":"%s","i":"2026-09-25","c":"0"}]\\n' "$(cat "${head}")" ;;
   *) echo '[]' ;;
 esac
@@ -105,4 +105,52 @@ test("blocked-by for another workspace never comes from this one's tree", async 
   const blocks = await getBlocksDependencies(second.db)
   expect(blocks.blockedBy["t-a"]).toEqual(["t-b", "t-c"])
   expect(await second.lists()).toBe(1) // its own list, since it has no tree loaded
+})
+
+// beadbox-kqiv: the tree carries blocked-by itself. It used to arrive without
+// it and get it patched in by the client from a second request, so for a few
+// frames after every change a molecule's steps all sat in Phase 1.
+test("tree beads carry blocked-by, with titles, from the same single list", async () => {
+  const ws = await workspace()
+  const tree = await getEpics(ws.db)
+  if (!tree.success) throw new Error("tree load failed")
+  const a = tree.epics.find((e) => e.id === "t-e")?.children.find((c) => c.id === "t-a")
+  expect(a?.id).toBe("t-a")
+  expect(a?.blockedBy).toEqual([
+    { id: "t-b", title: "B" },
+    { id: "t-c", title: "C" },
+  ])
+  const b = tree.epics.find((e) => e.id === "_standalone")?.children.find((c) => c.id === "t-b")
+  expect(b?.id).toBe("t-b")
+  expect(b?.blockedBy).toBeUndefined() // unblocked beads carry none
+  expect(await ws.lists()).toBe(1)
+})
+
+test("a blocker missing from the list shows by its id", async () => {
+  const ws = await workspace([
+    ...LIST,
+    {
+      id: "t-d", title: "D", status: "open", priority: 2, issue_type: "task", labels: [],
+      created_at: "2026-09-25T00:00:00Z", updated_at: "2026-09-25T00:00:00Z",
+      dependencies: [{ issue_id: "t-d", depends_on_id: "t-gone", type: "blocks" }],
+    },
+  ])
+  const tree = await getEpics(ws.db)
+  if (!tree.success) throw new Error("tree load failed")
+  const d = tree.epics.find((e) => e.id === "_standalone")?.children.find((c) => c.id === "t-d")
+  expect(d?.id).toBe("t-d")
+  expect(d?.blockedBy).toEqual([{ id: "t-gone", title: "t-gone" }])
+})
+
+test("a blocked epic carries blocked-by too", async () => {
+  const ws = await workspace([
+    ...LIST.map((b) =>
+      b.id === "t-e" ? { ...b, dependencies: [{ issue_id: "t-e", depends_on_id: "t-b", type: "blocks" }] } : b,
+    ),
+  ])
+  const tree = await getEpics(ws.db)
+  if (!tree.success) throw new Error("tree load failed")
+  const e = tree.epics.find((x) => x.id === "t-e")
+  expect(e?.id).toBe("t-e")
+  expect(e?.blockedBy).toEqual([{ id: "t-b", title: "B" }])
 })

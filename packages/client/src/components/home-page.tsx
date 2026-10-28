@@ -607,16 +607,18 @@ function BeadsEpicsViewer() {
   // consumer nor a useSubscriptionChangeSignal consumer, so external bd writes
   // never triggered loadEpics. Mirror the workspaces-page.tsx / activity-page.tsx
   // pattern: read the signal, refetch on bump. The bump also drives epicEpoch
-  // forward so the deferred blocks-patching useEffect below re-runs and the
-  // refreshed tree gets its blockedBy data re-resolved.
+  // forward so the blocked-by health check below re-runs for the new tree.
   const subscriptionSignal = useSubscriptionChangeSignal()
 
-  // Deferred blocks loading: after the initial tree renders, fetch blockedBy
-  // data and patch it into the existing epics. This shaves ~53ms off the
-  // perceived initial load since the tree appears before blocks resolve.
-  // epicEpoch increments on each subscription refresh so blocks are re-fetched
-  // after the tree is replaced (the fresh tree from incrementalRefresh lacks
-  // blockedBy).
+  // Blocked-by health: the tree arrives with its blockedBy (the sidecar builds
+  // both from one bd list). This effect no longer patches the tree: doing that
+  // one request after every load re-committed the tree with new objects and,
+  // in between, showed it with no blockers, so a molecule's phases collapsed
+  // into Phase 1 and re-formed on each change (beadbox-kqiv). It still asks
+  // the sidecar after each load, only to learn whether blocked-by could be
+  // computed, for the banner below. While the data is unchanged the sidecar
+  // answers from the tree's own list. epicEpoch increments on each
+  // subscription refresh so the check runs for every new tree.
   const blocksLoadIdRef = useRef(0)
   // Set when the server could not compute blocked-by for this workspace, so the
   // tree says so instead of reading as "nothing is blocked" (beadbox-01f.5).
@@ -636,7 +638,7 @@ function BeadsEpicsViewer() {
     const loadId = ++blocksLoadIdRef.current
     const dbPath = currentWorkspace.databasePath
 
-    getBlocksDependencies(dbPath).then(({ blockedBy: blocksMap, degraded }) => {
+    getBlocksDependencies(dbPath).then(({ degraded }) => {
       if (blocksLoadIdRef.current !== loadId) return // stale
       // The server says when blockedBy could not be computed instead of
       // returning an empty map that reads as "nothing is blocked" (beadbox-01f.6).
@@ -646,65 +648,13 @@ function BeadsEpicsViewer() {
         return
       }
       setBlocksDegraded(null)
-      if (Object.keys(blocksMap).length === 0) return
-
-      setEpics((prev) => {
-        // Build title lookup from the already-loaded tree
-        const titleById = new Map<string, string>()
-        function indexBead(b: Bead) {
-          titleById.set(b.id, b.title)
-          b.children?.forEach(indexBead)
-        }
-        function indexEpic(e: Epic) {
-          indexBead(e)
-          e.children.forEach(indexBead)
-          e.childEpics?.forEach(indexEpic)
-        }
-        prev.forEach(indexEpic)
-
-        function patchBead(bead: Bead): Bead {
-          const blockerIds = blocksMap[bead.id]
-          const patched = blockerIds
-            ? {
-                ...bead,
-                blockedBy: blockerIds.map((id) => ({ id, title: titleById.get(id) || id })),
-              }
-            : bead
-          if (patched.children) {
-            const patchedChildren = patched.children.map(patchBead)
-            if (patchedChildren.some((c, i) => c !== patched.children![i])) {
-              return { ...patched, children: patchedChildren }
-            }
-          }
-          return patched
-        }
-
-        function patchEpic(epic: Epic): Epic {
-          const base = patchBead(epic) as Epic
-          const patchedChildren = base.children.map(patchBead)
-          const patchedChildEpics = base.childEpics?.map(patchEpic)
-          const childrenChanged = patchedChildren.some((c, i) => c !== base.children[i])
-          const childEpicsChanged = patchedChildEpics?.some((c, i) => c !== base.childEpics![i])
-          if (childrenChanged || childEpicsChanged) {
-            return {
-              ...base,
-              children: patchedChildren,
-              childEpics: patchedChildEpics ?? base.childEpics,
-            }
-          }
-          return base
-        }
-
-        const patched = prev.map(patchEpic)
-        return patched.some((e, i) => e !== prev[i]) ? patched : prev
-      })
     }).catch((error: unknown) => {
       if (blocksLoadIdRef.current !== loadId) return // stale
       const message = error instanceof Error ? error.message : String(error)
       console.warn(`[blocks] blocked-by unavailable: ${message}`)
       setBlocksDegraded({ dbPath, message })
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- setEpics is a stable setState, epics.length tracks structural changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- epics.length tracks structural changes; the tree's contents are not read here
   }, [isLoading, currentWorkspace?.databasePath, epics.length, epicEpoch, blocksRetry])
 
   // bb-pgb0.1: deleted ~130 lines of dead WebSocket-shim plumbing

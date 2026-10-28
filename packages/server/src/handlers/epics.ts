@@ -328,6 +328,19 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
   }
   topLevelEpics.forEach((epic) => normalizeNestedEpics(epic))
 
+  // Blocked-by rides on the tree, from the list in hand. The client used to
+  // patch it in from a second request after every load, so for a few frames
+  // each change showed a tree with no blockers: a molecule's steps, phased by
+  // blocked-by, all fell into Phase 1 and re-formed (beadbox-kqiv).
+  const blocksMap = blocksMapFromIssues(allBeads)
+  function attachBlockedBy(bead: Bead) {
+    const blockerIds = blocksMap.get(bead.id)
+    if (blockerIds) bead.blockedBy = blockerIds.map((id) => ({ id, title: beadById.get(id)?.title || id }))
+    bead.children?.forEach(attachBlockedBy)
+    if ("childEpics" in bead) (bead as Epic).childEpics?.forEach(attachBlockedBy)
+  }
+  topLevelEpics.forEach(attachBlockedBy)
+
   // Attach rigName from routes.jsonl (Gastown multi-rig workspaces)
   const dbPath = options.db || process.cwd()
   const beadsDir = basename(resolve(dbPath)) === ".beads" ? dbPath : dirname(dbPath)
@@ -344,7 +357,7 @@ async function buildEpicHierarchy(options: BdOptions = {}): Promise<Epic[]> {
   if (currentFingerprint) {
     // The same list yields blocked-by, so the tree's blocked-by load does
     // not have to run a second full bd list (beadbox-w74).
-    setCachedEpics(currentFingerprint, dbKey, topLevelEpics, options.includeSystem, blocksMapFromIssues(allBeads))
+    setCachedEpics(currentFingerprint, dbKey, topLevelEpics, options.includeSystem, blocksMap)
   }
 
   return topLevelEpics
