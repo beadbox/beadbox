@@ -1691,16 +1691,35 @@ export async function getMoleculeProgress(
   }
 }
 
-// List molecules for a given formula by querying epics with bb-mol- prefix
+// Which molecules belong to a formula (spec §4.8.4, beadbox-ptca.5). bd exposes
+// no formula field, so the root's title is the only link: a bd 1.3 pour is a
+// root of type molecule titled exactly with the formula name, under any id
+// prefix. Older pours are epics with -mol- in the id whose title starts with
+// the formula name. A nested molecule's step epics also carry -mol- ids but
+// have a parent, so they are never cards.
+function isFormulaMolecule(b: BdBead, formulaName: string): boolean {
+  if (b.issue_type === "molecule") return b.title === formulaName
+  return (
+    b.issue_type === "epic" &&
+    b.id.includes("-mol-") &&
+    !b.parent &&
+    b.title.startsWith(formulaName)
+  )
+}
+
 export async function listMoleculesForFormula(
   formulaName: string,
   options: BdOptions = {},
 ): Promise<MoleculeCard[]> {
-  const args = ["list", "--type", "epic", "--status", "all", "--limit", "0"]
-  args.push("--flat")
-  const epics = await bdExec<BdBead[]>(args, options, LIST_MAX_BUFFER)
-  return epics
-    .filter((b) => b.id.startsWith("bb-mol-") && b.title.startsWith(formulaName))
+  const listOfType = (type: string) =>
+    bdExec<BdBead[]>(
+      ["list", "--status", "all", "--limit", "0", "--flat", flagArg("--type", type)],
+      options,
+      LIST_MAX_BUFFER,
+    )
+  const [molecules, epics] = await Promise.all([listOfType("molecule"), listOfType("epic")])
+  return [...molecules, ...epics]
+    .filter((b) => isFormulaMolecule(b, formulaName))
     .map((b) => ({
       id: b.id,
       title: b.title,
