@@ -16,7 +16,9 @@ name: Build (nightly)
 
 on:
   schedule:
-    # 07:41 UTC, nightly: off the hour, and clear of rust-cache-warm (06:17).
+    # 07:41 UTC, nightly: off the hour, inside the .207 Mac's macOS window
+    # (02:00-06:00 ET, 07:00-10:00 UTC in both EDT and EST; beadbox-449), and
+    # ahead of rust-cache-warm (08:47).
     - cron: "41 7 * * *"
   # No ref input: a dispatch builds the head of the branch it runs on, and the
   # `release` environment admits main and v* tags only, so its secrets (signing,

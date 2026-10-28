@@ -17,7 +17,8 @@ on:
   workflow_dispatch:
   schedule:
     # A release can remove the asset the script resolves without touching the
-    # script, so time is the trigger that catches that. Weekly, Mondays 09:00 UTC.
+    # script, so time is the trigger that catches that. Weekly, Mondays 09:00 UTC,
+    # inside the .207 Mac's macOS window (02:00-06:00 ET; beadbox-449).
     - cron: "0 9 * * 1"
 
 concurrency:

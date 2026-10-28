@@ -3,7 +3,7 @@ name: Rust cache warm (macOS)
 # beadbox-5p1: release builds run on tags, and a tag-triggered run can only
 # restore caches saved by its own tag or by the default branch. Every release
 # therefore compiled the whole Rust dependency tree cold (2.5-3.5 min on
-# macos-14). This workflow builds the same release profile on main and saves
+# GitHub's hosted macOS). This workflow builds the same release profile on main and saves
 # the cache under the exact key the release job's macOS build restores
 # (shared-key macos-arm64, same pinned actions, same toolchain, same env), so a
 # tag compiles only the app crate.
@@ -23,7 +23,10 @@ on:
   schedule:
     # Daily: picks up a new stable toolchain (part of the key) before the next
     # tag, and keeps the entry clear of the 7-day unused-cache eviction.
-    - cron: "17 6 * * *"
+    # beadbox-449: 08:47 UTC is inside the .207 Mac's macOS window, 02:00-06:00
+    # ET in both EDT and EST (07:00-10:00 UTC), and after the nightly Build's
+    # macOS job (07:41), so the runner serves one beadbox job at a time.
+    - cron: "47 8 * * *"
   workflow_dispatch:
 
 concurrency:
