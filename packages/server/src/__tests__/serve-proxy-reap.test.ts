@@ -12,7 +12,7 @@
 //   7. the wrapper's R2: a record whose start time no longer matches is not signalled.
 // (A reused pid for the in-process reap is covered by the pure decision tests.)
 
-import { afterEach, beforeEach, expect, test } from "bun:test"
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test"
 import { type ChildProcess, execFileSync, spawn } from "node:child_process"
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -20,6 +20,15 @@ import { join } from "node:path"
 import { ServeManager, sweepStaleServeProxies } from "../lib/serve-manager"
 import { processTable } from "../lib/serve-proxy"
 import { killOwned } from "./fixtures/kill-owned"
+
+// The deadlines in this file are the file's own (beadbox-mol-uua.1). A case
+// chains several hang guards (until(), below) and a survives() window, and on a
+// loaded Mac the waits for real processes stretch; the shared per-test default
+// (bun's 5 s in the hook's runs) then fired mid-case, afterEach killed the
+// processes, and case 4 read a survivor as dead. The test timeout sits above the
+// sum of a case's guards, and the guards return as soon as their condition holds.
+const HANG_GUARD_MS = 20_000
+setDefaultTimeout(4 * HANG_GUARD_MS)
 
 const FAKE_SERVE = join(import.meta.dir, "fixtures", "fake-bd-serve.py")
 const HOST = join(import.meta.dir, "fixtures", "serve-host.ts")
@@ -65,13 +74,23 @@ function workspace(name: string): string {
 }
 const proxiesFor = (ws: string) =>
   processTable().filter((r) => r.command.includes(bd) && r.command.includes("db-proxy-child") && r.command.includes(`${ws}/.beads/dolt`))
-/** Alive and not a zombie: a killed child of this test can linger as Z in ps until it is reaped. */
+/**
+ * Alive and not a zombie: a killed child of this test can linger as Z in ps
+ * until it is reaped. Existence comes from kill(pid, 0), which needs no fork; ps
+ * is asked only whether the process is a zombie, and a ps that fails to run (a
+ * fork refused on a loaded machine) does not count as the process being gone.
+ */
 function alive(pid: number): boolean {
   try {
-    const stat = execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf-8" }).trim()
-    return stat !== "" && !stat.startsWith("Z")
+    process.kill(pid, 0)
   } catch {
     return false
+  }
+  try {
+    const stat = execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf-8" }).trim()
+    return stat === "" ? false : !stat.startsWith("Z")
+  } catch {
+    return true
   }
 }
 /** "Survives" means it stays alive for the whole window, not at a single instant. */
@@ -83,7 +102,8 @@ async function survives(pid: number, ms = 1000): Promise<boolean> {
   }
   return alive(pid)
 }
-async function until(check: () => boolean, ms = 4000): Promise<boolean> {
+/** A hang guard, not a measurement: it returns as soon as the condition holds. */
+async function until(check: () => boolean, ms = HANG_GUARD_MS): Promise<boolean> {
   const end = Date.now() + ms
   while (Date.now() < end && !check()) await Bun.sleep(50)
   return check()
