@@ -50,8 +50,13 @@ on:
     branches: [main, v0.25]
   workflow_dispatch:
 
+# beadbox-3fp4: every push to main gets its own complete run, so a later push
+# never cancels an earlier commit's proof; the group is keyed per commit there.
+# PRs, other branches and manual runs keep one group per ref, where a newer
+# run still supersedes the in-flight one. github.sha, like github.ref, is
+# GitHub-controlled.
 concurrency:
-  group: quality-gates-${{ github.ref }}
+  group: quality-gates-${{ github.ref }}${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }}
   cancel-in-progress: true
 
 # beadbox-l5i.1: read-only default for GITHUB_TOKEN. No job in this workflow
