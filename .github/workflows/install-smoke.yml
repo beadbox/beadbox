@@ -346,7 +346,7 @@ jobs:
             { echo "$APP_PID"
               pgrep -P "$APP_PID" || true
               pgrep -U "$(id -u)" -f "$SMOKE_APP/" || true
-            } | sort -u | while read -r p; do kill -0 "$p" 2>/dev/null && echo "$p"; done
+            } | sort -u | while read -r p; do if kill -0 "$p" 2>/dev/null; then echo "$p"; fi; done
           }
           CHILDREN=$(pgrep -P "$APP_PID" || true)
           # Quit by SIGTERM to this launch's processes only. No AppleScript:
@@ -357,7 +357,9 @@ jobs:
           # 500ms grace.
           sleep 0.5
           # Same pipefail defect as Gate 1: count lines, never pgrep's exit code.
-          LEFT=$(ours; for p in $CHILDREN; do kill -0 "$p" 2>/dev/null && echo "$p"; done)
+          # `if`, not `&&`: under set -e, a last `kill -0 ... && echo` on a process that
+          # has exited (the clean case) would fail the substitution and the step.
+          LEFT=$(ours; for p in $CHILDREN; do if kill -0 "$p" 2>/dev/null; then echo "$p"; fi; done)
           STRAGGLERS=$(printf '%s\n' "$LEFT" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
           if [ "$STRAGGLERS" != "0" ]; then
             echo "::error::Gate 4 failed — $STRAGGLERS of this launch's process(es) still running after 500ms"
