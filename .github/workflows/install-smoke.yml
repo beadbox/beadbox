@@ -152,6 +152,21 @@ jobs:
     env:
       TAG: ${{ needs.resolve-tag.outputs.tag }}
     steps:
+      - name: Start from an empty workspace (self-hosted Mac)
+        # beadbox-449.6: the long-lived fleet Mac reuses the job's workspace;
+        # a hosted runner starts each job fresh, and so must this one, or a
+        # previous job's files survive a checkout (Build 40791169447).
+        if: runner.environment != 'github-hosted'
+        run: |
+          set -euo pipefail
+          case "$GITHUB_WORKSPACE" in
+            "$HOME"/actions-runner/_work/?*) ;;
+            *) echo "::error::refusing to empty unexpected workspace '$GITHUB_WORKSPACE'"; exit 1 ;;
+          esac
+          if [ -d "$GITHUB_WORKSPACE" ]; then find "$GITHUB_WORKSPACE" -mindepth 1 -delete; fi
+          left=$(ls -A "$GITHUB_WORKSPACE" 2>/dev/null || true)
+          [ -z "$left" ] || { echo "::error::workspace could not be emptied"; exit 1; }
+          echo "OK: workspace emptied: $GITHUB_WORKSPACE"
       - name: Sparse checkout (helpers + reference screenshot only)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
