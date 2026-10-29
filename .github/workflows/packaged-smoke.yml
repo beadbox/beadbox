@@ -56,16 +56,25 @@ jobs:
         # a hosted runner starts each job fresh, and so must this one, or a
         # previous job's files survive a checkout (Build 40791169447).
         if: runner.environment != 'github-hosted'
+        # As strict as the threat: an unset or empty value, a path outside the
+        # runner's own _work, _work itself, or a symlink resolving elsewhere is
+        # refused; paths are compared after realpath, with no globs.
         run: |
           set -euo pipefail
-          case "$GITHUB_WORKSPACE" in
-            "$HOME"/actions-runner/_work/?*) ;;
-            *) echo "::error::refusing to empty unexpected workspace '$GITHUB_WORKSPACE'"; exit 1 ;;
-          esac
-          if [ -d "$GITHUB_WORKSPACE" ]; then find "$GITHUB_WORKSPACE" -mindepth 1 -delete; fi
-          left=$(ls -A "$GITHUB_WORKSPACE" 2>/dev/null || true)
-          [ -z "$left" ] || { echo "::error::workspace could not be emptied"; exit 1; }
-          echo "OK: workspace emptied: $GITHUB_WORKSPACE"
+          ws=${GITHUB_WORKSPACE:-}
+          if [ -z "$ws" ]; then echo "::error::GITHUB_WORKSPACE is unset or empty; refusing"; exit 1; fi
+          work=$(cd "$HOME/actions-runner/_work" && pwd -P)
+          if [ ! -e "$ws" ] && [ ! -L "$ws" ]; then echo "OK: no workspace yet at $ws"; exit 0; fi
+          real=$(realpath "$ws")
+          rest=${real#"$work"/}
+          if [ "$rest" = "$real" ] || [ -z "$rest" ] || [ "$real" = "$work" ]; then
+            echo "::error::refusing to empty '$ws' (resolves to '$real', not strictly under '$work')"
+            exit 1
+          fi
+          find "$real" -mindepth 1 -delete
+          left=$(ls -A "$real")
+          if [ -n "$left" ]; then echo "::error::workspace could not be emptied"; exit 1; fi
+          echo "OK: workspace emptied: $real"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
