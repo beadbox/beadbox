@@ -15,7 +15,8 @@
 # Tier 2 (this workflow):
 #   - unit-server-fast: the server's push tier (scripts/ci-tests.sh fast
 #     --package server: every server test file not in scripts/slow-tests.txt,
-#     plus every security test), in parallel shards (beadbox-mol-pyc).
+#     plus every security test), in five parallel shards (beadbox-mol-pyc,
+#     beadbox-mol-a4z).
 #   - unit-client-fast: the client's push tier (scripts/ci-tests.sh fast
 #     --package client: every client test file not in scripts/slow-tests.txt),
 #     in two parallel shards (beadbox-mol-gey).
@@ -79,7 +80,7 @@ jobs:
   # scripts/slow-tests.txt names the files left out; they run nightly in
   # nightly.yml's coverage-server, with the 60% floor.
   unit-server-fast:
-    name: Unit — packages/server (fast tier, 4 shards)
+    name: Unit — packages/server (fast tier, 5 shards)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -106,6 +107,11 @@ jobs:
           "$HOME/.local/bin/bd" version
       - run: bun install --frozen-lockfile
       - name: Run the server fast tier
+        # Five shards plus the security shard (beadbox-mol-a4z): with four, the
+        # job reached 34 s on one push, over the 30-second-per-job rule. The
+        # pre-push hook keeps its own count (BEADBOX_PREPUSH_SHARDS).
+        env:
+          BEADBOX_CI_SERVER_SHARDS: "5"
         run: bash scripts/ci-tests.sh fast --package server
 
   # beadbox-mol-gey: the client's fast tier (scripts/slow-tests.txt names what
