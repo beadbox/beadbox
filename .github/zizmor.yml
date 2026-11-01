@@ -5,7 +5,7 @@
 # finding we have looked at and accepted, with the reason written down. A new
 # high finding that is not listed here fails the build — that is the point.
 #
-# Re-audit with:  zizmor --min-severity=high .github/workflows/
+# Re-audit with:  zizmor --min-severity=high .github/workflows/ .github/actions/
 rules:
   cache-poisoning:
     # Ten findings: Swatinem/rust-cache + oven-sh/setup-bun in jobs that

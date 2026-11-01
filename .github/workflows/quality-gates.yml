@@ -213,7 +213,9 @@ jobs:
   #   3. every `uses:` pinned to a 40-hex commit SHA (tags are mutable)
   #   4. actionlint clean
   #   5. zizmor clean — Actions-specific static analysis (template
-  #      injection, artifact poisoning, excessive permissions)
+  #      injection, artifact poisoning, excessive permissions) over the
+  #      workflows AND the local actions (beadbox-449.7), and every local
+  #      action is one zizmor actually audited
   #
   # NOTE for future editors: the banned tokens are assembled at runtime
   # from fragments rather than written out literally, because these checks
@@ -224,6 +226,11 @@ jobs:
     name: "Workflow hygiene (runners, SHA pins, actionlint, zizmor)"
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      # beadbox-449.7: the paths zizmor scans. Local composite actions run in
+      # the macOS jobs beside the signing keys, so they are scanned like the
+      # workflows; the step after zizmor refuses any local action it skipped.
+      ZIZMOR_PATHS: ".github/workflows/ .github/actions/"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -432,5 +439,54 @@ jobs:
           # compromised (template injection, dangerous triggers, artifact and
           # cache poisoning). Every high finding we have accepted is listed
           # with its reasoning in .github/zizmor.yml; an unlisted one fails.
+          # Its log (stderr, one "completed <file>" line per audited file) is
+          # kept for the next step and echoed here.
+          rc=0
+          # shellcheck disable=SC2086 # ZIZMOR_PATHS is a word list on purpose
           zizmor --min-severity=high --config .github/zizmor.yml \
-            --format=plain .github/workflows/
+            --format=plain $ZIZMOR_PATHS 2> "$RUNNER_TEMP/zizmor.log" || rc=$?
+          cat "$RUNNER_TEMP/zizmor.log" >&2
+          exit "$rc"
+
+      - name: Every local action is in zizmor's scan
+        # beadbox-449.7: zizmor skips, without a warning, a directory under
+        # .github/actions/ that holds no action file, and any action outside
+        # the paths it is given. Every local action directory (each dir under
+        # .github/actions/, each tracked action.yml/action.yaml, each local
+        # `uses: ./<dir>` target) must hold an action file that zizmor's log
+        # says it audited. A missing log or an unrecognised log format fails.
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/zizmor.log"
+          if [ ! -s "$log" ]; then
+            echo "::error::no zizmor log at $log (the zizmor step did not run)"
+            exit 1
+          fi
+          sed -E 's/\x1b\[[0-9;]*m//g' "$log" | sed -nE 's/.* completed (.+)$/\1/p' | sort -u > "$RUNNER_TEMP/zizmor-audited.txt"
+          {
+            if [ -d .github/actions ]; then find .github/actions -mindepth 1 -maxdepth 1 -type d; fi
+            git ls-files -- ':(glob)**/action.yml' ':(glob)**/action.yaml' | while IFS= read -r f; do dirname "$f"; done
+            grep -rhoE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*\./[^[:space:]@]+' .github/ \
+              | sed -E 's/^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*\.\///' \
+              | grep -vE '\.ya?ml$' || true
+          } | sed -E 's#/+$##' | sort -u > "$RUNNER_TEMP/action-dirs.txt"
+          bad=0
+          n=0
+          while IFS= read -r d; do
+            [ -n "$d" ] || continue
+            n=$((n + 1))
+            f=""
+            for c in "$d/action.yml" "$d/action.yaml"; do
+              if [ -f "$c" ]; then f="$c"; break; fi
+            done
+            if [ -z "$f" ]; then
+              echo "::error::$d is an action directory with no action.yml or action.yaml, so zizmor ($ZIZMOR_PATHS) does not scan it"
+              bad=1
+            elif ! grep -qxF "$f" "$RUNNER_TEMP/zizmor-audited.txt"; then
+              echo "::error file=$f::$f is a local action zizmor did not scan (it scans $ZIZMOR_PATHS)"
+              bad=1
+            fi
+          done < "$RUNNER_TEMP/action-dirs.txt"
+          [ "$bad" -eq 0 ]
+          echo "OK: all $n local action(s) are in zizmor's scan: $(tr '\n' ' ' < "$RUNNER_TEMP/action-dirs.txt")"
