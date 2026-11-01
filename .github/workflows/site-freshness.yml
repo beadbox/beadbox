@@ -1,0 +1,37 @@
+name: Site serves the latest final
+
+# beadbox-2p8: red when beadbox.app offers an older version than the latest
+# final release, past the deploy window. The site lives in another repository
+# and deploys itself from an hourly schedule; this check reads only public
+# pages (the site, and the public latest-release API) and needs no secret.
+# Called by the scheduled nightly; dispatchable alone, with pretend_latest to
+# show the red against the real site without changing anything.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      pretend_latest:
+        description: "Compare against this version (e.g. 0.31.0) instead of the latest final, to show the red"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: "beadbox.app serves the latest final"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: Compare the served version with the latest final
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRETEND_LATEST: ${{ inputs.pretend_latest }}
+        run: python3 -I scripts/site-serves-latest.py

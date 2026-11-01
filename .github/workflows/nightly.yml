@@ -337,6 +337,13 @@ jobs:
           path: coverage-client.txt
           retention-days: 14
 
+  # beadbox-2p8: red when beadbox.app lags the latest final past its deploy
+  # window. The scheduled run on main only, and not in the verdict's needs, so a
+  # nightly that proves a release branch is never gated on the site.
+  site-freshness:
+    if: github.event_name == 'schedule'
+    uses: ./.github/workflows/site-freshness.yml
+
   # Runs last and decides the night. Fails closed: a needed job that failed,
   # was cancelled or was skipped makes the night red and is named in an
   # annotation.

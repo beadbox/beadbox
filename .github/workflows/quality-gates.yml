@@ -390,6 +390,12 @@ jobs:
         # text. Accident prevention only; forks are stopped by the approval rule.
         run: python3 -I scripts/ci-runner/test-mac-admission.py
 
+      - name: Site freshness table
+        # beadbox-2p8: the check that goes red when beadbox.app offers an older
+        # version than the latest final past its deploy window, with reds
+        # against the real script.
+        run: python3 -I scripts/test-site-serves-latest.py
+
       - name: No fork-triggered workflows with secret access
         run: |
           set -euo pipefail
