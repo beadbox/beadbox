@@ -5,6 +5,7 @@
 // shows a bead of another status.
 import { BeadTable } from "@/components/bead-table"
 import { EpicRow, type EpicRowProps } from "@/components/epic-tree"
+import { StatusDot } from "@/components/status-dot"
 import type { GroupedSection } from "@/lib/grouped-layout"
 
 export type GroupedStatusViewProps = Omit<
@@ -21,7 +22,8 @@ export function GroupedStatusView({ sections, expandedEpics, onToggleEpic, ...ca
     <>
       {sections.map((section) => (
         <div key={section.status} data-group-status={section.status} className="space-y-1">
-          <div className="px-3 pt-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="flex items-center gap-1.5 px-3 pt-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <StatusDot status={section.status} />
             {section.label} <span className="font-normal">({section.count})</span>
           </div>
           {section.cards.length > 0 && (

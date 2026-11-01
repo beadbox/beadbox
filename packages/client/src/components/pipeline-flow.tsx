@@ -139,6 +139,8 @@ export function PipelineFlow({
                   </div>
                 )}
                 <div
+                  data-status={name}
+                  data-status-role="stage"
                   className={cn(
                     "flex-1 min-w-[140px] rounded-lg border px-4 py-3 flex flex-col items-center justify-center",
                     STAGE_COLORS[name] ?? "bg-blue-500/20 border-blue-500/40",
@@ -146,6 +148,8 @@ export function PipelineFlow({
                   )}
                 >
                   <span
+                    data-status={name}
+                    data-status-role="text"
                     className={cn(
                       "text-xs font-medium uppercase tracking-wide mb-3",
                       STAGE_TEXT_COLORS[name] ?? "text-blue-400",
@@ -181,9 +185,13 @@ export function PipelineFlow({
                     )}
                     aria-pressed={selected}
                     data-stage={stage.name}
+                    data-status={stage.name}
+                    data-status-role="stage"
                   >
                     <div className="flex items-baseline justify-between mb-1.5">
                       <span
+                        data-status={stage.name}
+                        data-status-role="text"
                         className={cn(
                           "text-xs font-medium uppercase tracking-wide",
                           STAGE_TEXT_COLORS[stage.name] ?? "text-blue-400",
@@ -194,6 +202,8 @@ export function PipelineFlow({
                     </div>
 
                     <div
+                      data-status={stage.name}
+                      data-status-role="text"
                       className={cn(
                         "text-2xl font-bold tabular-nums",
                         STAGE_TEXT_COLORS[stage.name] ?? "text-blue-400",

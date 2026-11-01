@@ -22,6 +22,9 @@ export interface RegistryEntry {
   id: string // UUID, assigned at creation, immutable
   name: string // display name (user-editable)
   icon?: string // user-chosen emoji shown on the workspace tab; absent = default glyph
+  // beadbox-o3h: user-chosen status colors, status name -> "#rrggbb". Beadbox's
+  // own setting: never written to bd. Absent = every status at its default.
+  statusColors?: Record<string, string>
   addedAt: string // ISO 8601
   local: { path: string } | null // null for server-only
   server: ServerConnection | null // null for local-only
@@ -753,6 +756,24 @@ export async function updateWorkspaceLabel(
     else if (label.icon !== undefined) entry.icon = label.icon
     console.log(`[beadbox-registry] relabeled workspace ${workspaceId}: ${entry.name}`)
     return entry
+  })
+}
+
+/**
+ * Replace a workspace's chosen status colors (beadbox-o3h). null or an empty
+ * map removes the field (Reset). Returns the stored map, or null when the
+ * workspace id is unknown. The caller validates the map.
+ */
+export async function updateWorkspaceStatusColors(
+  workspaceId: string,
+  colors: Record<string, string> | null,
+): Promise<Record<string, string> | null> {
+  return mutateRegistry((registry) => {
+    const entry = registry.workspaces.find((w) => w.id === workspaceId)
+    if (!entry) return null
+    if (!colors || Object.keys(colors).length === 0) delete entry.statusColors
+    else entry.statusColors = { ...colors }
+    return entry.statusColors ?? {}
   })
 }
 

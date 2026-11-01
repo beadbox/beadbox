@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 import { DevBadge } from "../components/dev-badge"
 import { LiveUpdatesPausedBanner } from "../components/live-updates-paused"
 import { StartupGate, useWorkspaceGate } from "../components/startup-gate"
+import { StatusColorsMount } from "../components/status-colors-mount"
 import { Toaster } from "../components/ui/sonner"
 import { WorkspaceRailPanel } from "../components/workspace-rail-panel"
 import { PostHogProvider } from "../lib/posthog-provider"
@@ -62,6 +63,7 @@ function RootLayout() {
         <div className="min-w-0 flex-1">
           <StartupGate>
             <ChangeSubscriptionMount />
+            <StatusColorsMount />
             {/* beadbox-01f.2: visible when the change stream stalls. */}
             <LiveUpdatesPausedBanner />
             <Outlet />

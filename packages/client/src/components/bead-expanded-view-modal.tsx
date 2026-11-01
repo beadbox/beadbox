@@ -135,7 +135,11 @@ export function BeadExpandedViewModal({
             )}
           </div>
           <div className="flex items-center gap-3 mt-2 text-[13px] text-muted-foreground">
-            <span className={getStatusDisplayConfig(status).colorClass}>
+            <span
+              data-status={status}
+              data-status-role="text"
+              className={getStatusDisplayConfig(status).colorClass}
+            >
               {getStatusDisplayConfig(status).label}
             </span>
             <span className="text-border">|</span>

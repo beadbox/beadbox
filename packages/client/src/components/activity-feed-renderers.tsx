@@ -54,6 +54,8 @@ export function getActionSummary(
           moved <span className={idClass}>{beadId}</span>
           {oldConfig && (
             <span
+              data-status={event.old_status}
+              data-status-role="badge"
               className={cn(
                 "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium border",
                 oldConfig.className,
@@ -65,6 +67,8 @@ export function getActionSummary(
           <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
           {newConfig && (
             <span
+              data-status={event.new_status}
+              data-status-role="badge"
               className={cn(
                 "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium border",
                 newConfig.className,
@@ -110,6 +114,8 @@ export function getCompactAction(event: ActivityEvent): React.ReactNode {
           {"moved to "}
           {newConfig && (
             <span
+              data-status={event.new_status}
+              data-status-role="badge"
               className={cn(
                 "inline-flex items-center gap-1 px-1 py-0 rounded text-[10px] font-medium border",
                 newConfig.className,

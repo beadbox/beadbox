@@ -104,6 +104,8 @@ export function MetadataControls({
           <div>
             <Select value={status} onValueChange={(value: BeadStatus) => onStatusChange(value)}>
               <SelectTrigger
+                data-status={status}
+                data-status-role="text"
                 disabled={fieldStates.status.isSaving}
                 className={cn(
                   "h-auto min-h-[44px] md:min-h-0 p-0 border-0 bg-transparent dark:bg-transparent dark:hover:bg-transparent shadow-none rounded-none w-auto gap-1 text-[13px]",
@@ -119,7 +121,11 @@ export function MetadataControls({
                   return (
                     <SelectItem key={s} value={s}>
                       <span className="flex items-center gap-1.5">
-                        <span className={cn("w-1.5 h-1.5 rounded-full", config.dotClass)} />
+                        <span
+                          data-status={s}
+                          data-status-role="dot"
+                          className={cn("w-1.5 h-1.5 rounded-full", config.dotClass)}
+                        />
                         {config.label}
                       </span>
                     </SelectItem>

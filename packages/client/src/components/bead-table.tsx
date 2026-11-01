@@ -462,7 +462,7 @@ function BeadRow({
           )}
         </div>
         <div className="bead-row-status shrink-0">
-          <PillBadge config={getStatusConfig(bead.status)} />
+          <PillBadge config={getStatusConfig(bead.status)} status={bead.status} />
         </div>
         <div className="bead-row-priority shrink-0">
           <PillBadge config={priorityConfig[bead.priority]} />

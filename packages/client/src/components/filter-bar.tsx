@@ -11,6 +11,7 @@ import {
   Waves,
 } from "lucide-react"
 import { useMemo, useState } from "react"
+import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -216,7 +217,11 @@ export function FilterBar({
         allLabel="All Status"
         allState={allSelected ? true : statusSelection.length === 0 ? false : "indeterminate"}
         onToggleAll={toggleAllStatuses}
-        options={allStatuses.map((s) => ({ value: s as BeadStatus, label: statusLabel(s) }))}
+        options={allStatuses.map((s) => ({
+          value: s as BeadStatus,
+          label: statusLabel(s),
+          leading: <StatusDot status={s} />,
+        }))}
         selected={statusSelection}
         onToggle={toggleStatus}
         footer={

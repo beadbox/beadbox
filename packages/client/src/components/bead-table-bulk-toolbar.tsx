@@ -80,7 +80,11 @@ export function BeadTableBulkToolbar({
                   void onBulkStatus(s)
                 }}
               >
-                <span className={cn("w-1.5 h-1.5 rounded-full", config.dotClass)} />
+                <span
+                  data-status={s}
+                  data-status-role="dot"
+                  className={cn("w-1.5 h-1.5 rounded-full", config.dotClass)}
+                />
                 {config.label}
               </DropdownMenuItem>
             )

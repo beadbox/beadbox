@@ -12,8 +12,10 @@ import type React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
+import { StatusColorsSection } from "@/components/status-colors-section"
 import { Button } from "@/components/ui/button"
 import { settleAction } from "@/lib/capture-action-failed"
+import { queryClient } from "@/lib/query-client"
 import { rpc } from "@/lib/rpc"
 import { validateStatusName } from "@/lib/status-validation"
 import { cn } from "@/lib/utils"
@@ -99,6 +101,10 @@ export function CustomStatusesManager({
       if (result.success) {
         setOriginal(current)
         toast.success("Custom statuses saved")
+        // beadbox-o3h: the status list behind Status colors (and the
+        // injected stylesheet) refetches, so a new status gets its default
+        // color and a removed one loses its chosen color.
+        void queryClient.invalidateQueries({ queryKey: ["status-colors-statuses"] })
         onStatusesChanged?.()
       } else {
         toast.error("Failed to save", { description: result.error })
@@ -262,6 +268,8 @@ export function CustomStatusesManager({
         </Button>
         {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
       </div>
+
+      <StatusColorsSection customStatuses={original} />
     </div>
   )
 }

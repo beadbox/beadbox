@@ -18,6 +18,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover"
 export interface MultiSelectOption<T extends string> {
   value: T
   label: string
+  /** Shown before the label (the Status filter's status dot, beadbox-o3h). */
+  leading?: ReactNode
 }
 
 interface MultiSelectFilterProps<T extends string> {
@@ -61,15 +63,18 @@ export function MultiSelectRow({
   checked,
   onClick,
   emphasis = false,
+  leading,
 }: {
   label: string
   checked: boolean | "indeterminate"
   onClick: () => void
   emphasis?: boolean
+  leading?: ReactNode
 }) {
   return (
     <button type="button" data-multi-select-row="" onClick={onClick} className={ROW_CLASS}>
       <Checkbox checked={checked} className="pointer-events-none" aria-label={label} />
+      {leading}
       <span className={emphasis ? "font-medium" : undefined}>{label}</span>
     </button>
   )
@@ -103,6 +108,7 @@ export function MultiSelectFilter<T extends string>({
             <MultiSelectRow
               key={option.value}
               label={option.label}
+              leading={option.leading}
               checked={selected.includes(option.value)}
               onClick={() => onToggle(option.value)}
             />

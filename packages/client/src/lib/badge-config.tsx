@@ -96,10 +96,20 @@ const fallbackConfig: BadgeConfig = {
   icon: <Circle className="h-3 w-3" />,
 }
 
-export function PillBadge({ config }: { config: BadgeConfig | undefined }) {
+// beadbox-o3h: pass `status` for a status badge; it tags the element so a
+// chosen status color (the injected stylesheet) recolors it.
+export function PillBadge({
+  config,
+  status,
+}: {
+  config: BadgeConfig | undefined
+  status?: string
+}) {
   const c = config || fallbackConfig
   return (
     <span
+      data-status={status}
+      data-status-role={status === undefined ? undefined : "badge"}
       className={cn(
         "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap",
         c.className,

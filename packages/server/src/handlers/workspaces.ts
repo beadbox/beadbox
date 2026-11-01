@@ -50,6 +50,7 @@ import {
   serverPasswordKey,
   updateWorkspaceLabel,
   updateWorkspaceLocal,
+  updateWorkspaceStatusColors,
   updateWorkspaceServer,
 } from "../lib/workspace-registry"
 
@@ -1356,4 +1357,62 @@ export async function updateServerConnection(
       databasePath: resolved.databasePath,
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// Status colors (beadbox-o3h)
+// ---------------------------------------------------------------------------
+// The color of each bead status is Beadbox's own per-workspace setting, kept
+// in the registry beside the tab emoji and never written to bd. The map
+// crosses the rpc boundary from the WebView, so it is validated here: an
+// object of at most MAX_STATUS_COLORS entries, each key a status name and each
+// value "#rrggbb". A failure comes back as a result, never a throw.
+
+const MAX_STATUS_COLORS = 256
+// Permissive enough for a status a user made with the bd CLI, strict enough
+// that nothing but a name reaches the registry (the client CSS-escapes it too).
+const STATUS_COLOR_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
+const STATUS_COLOR_VALUE = /^#[0-9a-fA-F]{6}$/
+
+type StatusColorsResult =
+  | { success: true; colors: Record<string, string> }
+  | { success: false; error: string }
+
+function validateStatusColors(
+  value: unknown,
+): { colors: Record<string, string> | null } | { success: false; error: string } {
+  if (value === null) return { colors: null }
+  if (typeof value !== "object" || Array.isArray(value))
+    return { success: false, error: "Colors must be a map of status to color." }
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > MAX_STATUS_COLORS)
+    return { success: false, error: `At most ${MAX_STATUS_COLORS} status colors.` }
+  const colors: Record<string, string> = {}
+  for (const [key, color] of entries) {
+    if (!STATUS_COLOR_KEY.test(key)) return { success: false, error: "Invalid status name." }
+    if (typeof color !== "string" || !STATUS_COLOR_VALUE.test(color)) {
+      return { success: false, error: "A color must be #rrggbb." }
+    }
+    colors[key] = color.toLowerCase()
+  }
+  return { colors }
+}
+
+export async function getStatusColors(workspaceId: string): Promise<StatusColorsResult> {
+  const entry = findWorkspace(await readRegistry(), workspaceId)
+  if (!entry) return { success: false, error: "Workspace not found." }
+  const validated = validateStatusColors(entry.statusColors ?? {})
+  // A hand-edited registry with a bad map reads as no colors, not an error.
+  return { success: true, colors: "colors" in validated ? (validated.colors ?? {}) : {} }
+}
+
+export async function setStatusColors(
+  workspaceId: string,
+  colors: Record<string, string> | null,
+): Promise<StatusColorsResult> {
+  const validated = validateStatusColors(colors)
+  if (!("colors" in validated)) return validated
+  const stored = await updateWorkspaceStatusColors(workspaceId, validated.colors)
+  if (stored === null) return { success: false, error: "Workspace not found." }
+  return { success: true, colors: stored }
 }

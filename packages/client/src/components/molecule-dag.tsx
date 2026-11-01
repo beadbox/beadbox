@@ -11,6 +11,7 @@ import ForceGraph3D from "react-force-graph-3d"
 import * as THREE from "three"
 import { getNodeLabel } from "../lib/molecule-node-label"
 import { rpc } from "../lib/rpc"
+import { useStatusColors } from "../lib/status-colors-store"
 import type { MoleculeGraph, MoleculeNode } from "../lib/types"
 import { Spinner } from "./ui/spinner"
 
@@ -28,10 +29,18 @@ const gateColors = {
   resolved: 0x22c55e,
 }
 
-function getNodeColor(node: MoleculeNode): number {
+// beadbox-o3h: a status with a chosen color (or a custom status's generated
+// default) takes it from the status-color store; otherwise today's palette.
+// Gates keep their pending/resolved colors: those are gate states.
+export function getNodeColor(
+  node: Pick<MoleculeNode, "type" | "status">,
+  css: Record<string, string> = {},
+): number {
   if (node.type === "gate") {
     return node.status === "closed" ? gateColors.resolved : gateColors.pending
   }
+  const chosen = css[node.status]
+  if (chosen) return Number.parseInt(chosen.slice(1), 16)
   return statusColors[node.status] ?? statusColors.open
 }
 
@@ -55,6 +64,7 @@ export function MoleculeDag({ beadId, dbPath, onBeadNavigate }: MoleculeDagProps
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 400, height: 400 })
+  const { css: statusCss } = useStatusColors()
 
   useEffect(() => {
     let cancelled = false
@@ -169,7 +179,15 @@ export function MoleculeDag({ beadId, dbPath, onBeadNavigate }: MoleculeDagProps
           return n ? getNodeLabel(n) : ""
         }}
         nodeColor={(node: Record<string, unknown>) =>
-          `#${((node.color as number) ?? 0xffffff).toString(16).padStart(6, "0")}`
+          `#${getNodeColor(
+            {
+              type: node.type as MoleculeNode["type"],
+              status: node.status as MoleculeNode["status"],
+            },
+            statusCss,
+          )
+            .toString(16)
+            .padStart(6, "0")}`
         }
         nodeVal={(node: Record<string, unknown>) => (node.val as number) ?? 5}
         nodeThreeObject={(node: Record<string, unknown>) => {
