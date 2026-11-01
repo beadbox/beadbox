@@ -13,10 +13,14 @@
 # within its time budget. Neither carried signal.
 #
 # Tier 2 (this workflow):
-#   - coverage-server / coverage-client: enforce coverage floors: server
-#     60 / client 20 lines. The src-tauri Rust floor (65 lines) runs nightly
-#     in nightly.yml's coverage-rust (beadbox-mol-0zm).
-#     THIS FILE IS THE SOURCE OF TRUTH for those numbers. The failure
+#   - unit-server-fast: the server's push tier (scripts/ci-tests.sh fast
+#     --package server: every server test file not in scripts/slow-tests.txt,
+#     plus every security test), in parallel shards (beadbox-mol-pyc).
+#   - coverage-client: enforces the client coverage floor, 20 lines. The
+#     server floor (60 lines, nightly.yml's coverage-server, beadbox-mol-pyc)
+#     and the src-tauri Rust floor (65 lines, nightly.yml's coverage-rust,
+#     beadbox-mol-0zm) run nightly.
+#     The job that enforces a floor is THE SOURCE OF TRUTH for its number. The failure
 #     messages used to cite a "spec §2 Q1" that does not exist — a fossil of
 #     the pruned private quality-discipline doc, not pm/spec.md. pm ruled
 #     (beadbox-l5i.6.4) to drop the citations rather than create a floors
@@ -66,24 +70,27 @@ permissions:
   contents: read
 
 jobs:
-  coverage-server:
-    name: Coverage — packages/server (floor 60% lines)
+  # The server's push tier (beadbox-mol-pyc, systemdesign §7.1): every server
+  # test file that spawns no bd + Dolt workspace and makes no long wait, in
+  # parallel shards inside this one job, as the pre-push hook shards them.
+  # scripts/slow-tests.txt names the files left out; they run nightly in
+  # nightly.yml's coverage-server, with the 60% floor.
+  unit-server-fast:
+    name: Unit — packages/server (fast tier, 4 shards)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
       - name: Install bd (beads CLI)
-        # beadbox-l5i.1 / qa1: the retired homelab runner had bd installed;
-        # hosted runners do not, so ~10 server tests died on
-        # 'Executable not found in $PATH: "bd"' and the coverage floor was
-        # never reached. Installed rather than mocked on purpose: the failing
-        # suites (bd-argv / bd-callsites security tests, bd-workspace fixture,
-        # subscribe leak gate) exist to assert behaviour against a REAL cobra
-        # CLI — mocking bd would delete the property beadbox-l5i.3 added.
-        # Version pinned; bump BD_VERSION to move it.
+        # The bd-argv / bd-callsites security tests assert behaviour against a
+        # REAL cobra CLI (beadbox-l5i.3), so bd is installed, not mocked. No
+        # Dolt: the fast tier has no workspace fixtures. Version pinned; keep
+        # in step with nightly.yml's BD_VERSION.
         env:
           BD_VERSION: "1.3.1"
         run: |
@@ -95,32 +102,8 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/bd" version
       - run: bun install --frozen-lockfile
-      - name: Run server coverage
-        run: |
-          set -o pipefail
-          bun --cwd=packages/server test --timeout=30000 --coverage 2>&1 | tee coverage-server.txt
-      - name: Enforce 60% line floor
-        run: |
-          # Bun's coverage table prints "All files | <funcs%> | <lines%> | ...";
-          # extract the line% column (3rd pipe-delimited field of the All-files row).
-          PCT=$(awk -F'|' '/^[[:space:]]*All files/{gsub(/[[:space:]]/,"",$3); print $3}' coverage-server.txt)
-          if [ -z "$PCT" ]; then
-            echo "::error::Could not parse server coverage from coverage-server.txt"
-            exit 1
-          fi
-          echo "packages/server line coverage: $PCT%"
-          AWK_PASS=$(awk -v p="$PCT" 'BEGIN{print (p+0 >= 60.0) ? "1" : "0"}')
-          if [ "$AWK_PASS" != "1" ]; then
-            echo "::error::packages/server coverage $PCT% below floor 60.0%"
-            echo "::error::See artifact 'coverage-server' for per-file breakdown."
-            exit 1
-          fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
-        with:
-          name: coverage-server
-          path: coverage-server.txt
-          retention-days: 14
+      - name: Run the server fast tier
+        run: bash scripts/ci-tests.sh fast --package server
 
   coverage-client:
     name: Coverage — packages/client (floor 20% lines)
