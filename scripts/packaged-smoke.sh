@@ -36,6 +36,11 @@ SCRATCH="${RUNNER_TEMP:-$(mktemp -d)}/packaged-smoke"
 LOG="$SCRATCH/beadbox-sidecar.log"
 REGISTRY="$SCRATCH/registry.json"
 WS="$SCRATCH/smoke-workspace"
+# The app resolves bd as BD_PATH, then a Homebrew or /usr/local copy, then
+# PATH. On a shared Mac that Homebrew bd can be another version than the one
+# this smoke seeds the workspace with, and a schema skew fails every read
+# (beadbox-449.5, run 41317038004), so the app is handed this script's own bd.
+BD=$(command -v bd) || { echo "FAIL  setup: no bd on PATH"; exit 1; }
 
 mkdir -p "$OUT"
 failures=0
@@ -107,7 +112,7 @@ else
   exit 1
 fi
 
-open -n --env "BEADBOX_LOG_PATH=$LOG" --env "BEADBOX_REGISTRY_PATH=$REGISTRY" "$APP" \
+open -n --env "BEADBOX_LOG_PATH=$LOG" --env "BEADBOX_REGISTRY_PATH=$REGISTRY" --env "BD_PATH=$BD" "$APP" \
   || { fail "launch: open failed"; exit 1; }
 APP_PID=""
 for ((i = 0; i < 30; i++)); do
