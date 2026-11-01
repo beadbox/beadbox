@@ -28,6 +28,7 @@ import {
   type ThemeVariant,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
+import { applyThemeClass } from "../lib/theme"
 import { rpc } from "../lib/rpc"
 import { composePipelineChain } from "../lib/status-chain"
 import { useSubscriptionChangeSignal } from "../lib/subscribe"
@@ -189,10 +190,7 @@ function ActivityViewer() {
   // Apply theme classes to <html>
   useEffect(() => {
     const el = document.documentElement
-    el.classList.add("dark")
-    el.classList.remove("theme-gray", "theme-green")
-    if (theme === "gray") el.classList.add("theme-gray")
-    if (theme === "green") el.classList.add("theme-green")
+    applyThemeClass(el, theme)
   }, [theme])
 
   // Apply zoom level to document (Tauri only)

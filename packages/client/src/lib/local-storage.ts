@@ -120,6 +120,20 @@ export function setFiltersPreference(filters: Filters): void {
 
 const VALID_THEMES: ThemeVariant[] = ["blue", "gray", "green"]
 
+// beadbox-knr: the themes Beadbox can actually render. index.css's @theme
+// block declares the color tokens as gray literals (the v0.25 WKWebView fix),
+// in every runtime, so Blue and Green change nothing on screen. Until
+// beadbox-o37 restores switching, only Gray is offered.
+export const AVAILABLE_THEMES: readonly ThemeVariant[] = ["gray"]
+
+/**
+ * The theme to render for a stored preference. A stored Blue or Green is kept
+ * as the user set it (o37 will honor it) and renders as Gray meanwhile.
+ */
+export function effectiveTheme(stored: ThemeVariant): ThemeVariant {
+  return AVAILABLE_THEMES.includes(stored) ? stored : "gray"
+}
+
 export function getThemePreference(): ThemeVariant {
   if (typeof window === "undefined") return "gray"
 

@@ -52,6 +52,7 @@ import {
   type ThemeVariant,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
+import { applyThemeClass } from "../lib/theme"
 import { rpc } from "../lib/rpc"
 import type {
   FormulaDetail,
@@ -320,10 +321,7 @@ export function FormulasView() {
   // Apply theme
   useEffect(() => {
     const el = document.documentElement
-    el.classList.add("dark")
-    el.classList.remove("theme-gray", "theme-green")
-    if (theme === "gray") el.classList.add("theme-gray")
-    if (theme === "green") el.classList.add("theme-green")
+    applyThemeClass(el, theme)
   }, [theme])
 
   // Apply zoom (Tauri only)

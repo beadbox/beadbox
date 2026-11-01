@@ -4,7 +4,12 @@ import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { safeCapture } from "../lib/posthog-safe"
-import type { ThemeVariant, UpdateCheckFrequency } from "../lib/local-storage"
+import {
+  AVAILABLE_THEMES,
+  effectiveTheme,
+  type ThemeVariant,
+  type UpdateCheckFrequency,
+} from "../lib/local-storage"
 import { clearCache, getAnalyticsEnabled, setAnalyticsEnabled } from "../lib/local-storage"
 // P3.1 source-divergence:
 //   - actions/system { openInFileManager, getLogDirectory } → rpc.system.*
@@ -93,6 +98,10 @@ const THEME_OPTIONS: {
     },
   },
 ]
+
+// beadbox-knr: only themes that render are offered (Gray, until beadbox-o37
+// brings Blue and Green back); their definitions above stay for o37.
+const VISIBLE_THEME_OPTIONS = THEME_OPTIONS.filter((t) => AVAILABLE_THEMES.includes(t.id))
 
 const FREQUENCY_OPTIONS: { value: UpdateCheckFrequency; label: string }[] = [
   { value: 1800000, label: "Every 30 minutes" },
@@ -219,14 +228,14 @@ export function SettingsDialog({
   // Sync focused index to current theme when dialog opens
   useEffect(() => {
     if (open) {
-      const idx = THEME_OPTIONS.findIndex((t) => t.id === theme)
+      const idx = VISIBLE_THEME_OPTIONS.findIndex((t) => t.id === effectiveTheme(theme))
       setFocusedThemeIndex(idx >= 0 ? idx : 0)
     }
   }, [open, theme])
 
   const handleThemeKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const len = THEME_OPTIONS.length
+      const len = VISIBLE_THEME_OPTIONS.length
       let nextIndex = focusedThemeIndex
 
       switch (e.key) {
@@ -247,10 +256,10 @@ export function SettingsDialog({
             safeCapture("app_setting_changed", {
               setting: "theme",
               old_value: theme,
-              new_value: THEME_OPTIONS[focusedThemeIndex].id,
+              new_value: VISIBLE_THEME_OPTIONS[focusedThemeIndex].id,
             })
           }
-          onThemeChange(THEME_OPTIONS[focusedThemeIndex].id)
+          onThemeChange(VISIBLE_THEME_OPTIONS[focusedThemeIndex].id)
           return
         default:
           return
@@ -355,8 +364,8 @@ export function SettingsDialog({
                     className="grid grid-cols-3 gap-3 max-w-lg"
                     onKeyDown={handleThemeKeyDown}
                   >
-                    {THEME_OPTIONS.map((opt, i) => {
-                      const selected = theme === opt.id
+                    {VISIBLE_THEME_OPTIONS.map((opt, i) => {
+                      const selected = effectiveTheme(theme) === opt.id
                       return (
                         <button
                           key={opt.id}
