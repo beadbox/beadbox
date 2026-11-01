@@ -4,7 +4,7 @@
 // without the flag every later file ran on bun's 5 s, and on a loaded Mac
 // tests that wait for real processes failed pushes on load, not code.
 import { expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..")
@@ -23,13 +23,24 @@ test("the package test scripts pass --timeout=30000", () => {
   }
 })
 
+// Where the suites run: the pre-push hook, the shard runner (push's tests in
+// Quality Gates) and the nightly's coverage jobs (beadbox-mol-pyc,
+// beadbox-mol-gey). Each must show at least one invocation, so the check
+// sees what it guards.
+const RUNNERS = ["scripts/prepush-tests.sh", "scripts/ci-tests.sh", ".github/workflows/nightly.yml"]
+// Every workflow, so a bun test call added to any of them (Quality Gates
+// included, which today runs its tests through ci-tests.sh) is held to it too.
+const WORKFLOWS = readdirSync(join(ROOT, ".github", "workflows"))
+  .filter((f) => /\.ya?ml$/.test(f))
+  .map((f) => `.github/workflows/${f}`)
+
 test("the hook, the shard runner and the coverage jobs pass it on every invocation", () => {
-  // The coverage jobs run nightly (beadbox-mol-pyc, beadbox-mol-gey); push runs
-  // its tests through scripts/ci-tests.sh.
-  const files = ["scripts/prepush-tests.sh", "scripts/ci-tests.sh", ".github/workflows/nightly.yml"]
-  for (const file of files) {
-    const runs = invocations(read(file))
-    expect(runs.length).toBeGreaterThan(0) // the check sees the invocation it guards
-    for (const run of runs) expect({ file, run }).toEqual({ file, run: expect.stringContaining("--timeout=30000") })
+  for (const file of RUNNERS) {
+    expect({ file, runs: invocations(read(file)).length > 0 }).toEqual({ file, runs: true }) // the check sees the invocation it guards
+  }
+  for (const file of [...new Set([...RUNNERS, ...WORKFLOWS])]) {
+    for (const run of invocations(read(file))) {
+      expect({ file, run }).toEqual({ file, run: expect.stringContaining("--timeout=30000") })
+    }
   }
 })
