@@ -27,6 +27,13 @@ on:
         description: "Workflow artifact holding a draft's Beadbox_aarch64.app.tar.gz and latest.json"
         type: string
         default: ""
+      admission:
+        # beadbox-449.4: set only by release.yml's call, whose mac-admission
+        # job has checked a release branch's parent is on main. A
+        # workflow_call input: a direct dispatch cannot set it.
+        description: "The caller that admitted this run to the Mac (release.yml)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -35,13 +42,16 @@ jobs:
   smoke:
     name: Packaged app smoke (macOS arm64, ${{ matrix.tag }})
     # mac-runner guard (beadbox-449.4): accident prevention only; a fork's PR runs its own copy, so forks are stopped by the approval rule, not this.
-    # Direct dispatch on main or a release branch, or called by release.yml on a
-    # release tag push or a release-branch dispatch (its mac-admission job has
-    # already checked that branch).
+    # A direct dispatch on main, or called by release.yml on a release tag push
+    # or a release-branch dispatch. A release branch is admitted only through
+    # release.yml, whose call requires its mac-admission job (the parent-on-main
+    # check); a direct dispatch from a release branch is refused (449.4 AC3).
+    # Cases and reds: scripts/ci-runner/test-mac-admission.py.
     if: >-
-      (github.event_name == 'workflow_dispatch'
-        && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/v')))
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
       || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+      || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/release/v')
+        && inputs.admission == 'release.yml')
     runs-on: [beadbox-macos-release]
     timeout-minutes: 15
     strategy:

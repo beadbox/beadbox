@@ -2191,17 +2191,22 @@ jobs:
     # success() inherits any designed skip upstream (build-windows is skipped
     # by default), which skipped this job on a release that had a macOS app
     # and let promote publish unchecked.
+    # beadbox-449.4: the smoke runs on the fleet's Mac, so this call needs the
+    # mac-admission job too (on a release branch, the parent-on-main check);
+    # `admission` tells packaged-smoke the run came through it.
     if: >-
       always() && !cancelled()
       && needs.stage-packaged-smoke.result == 'success'
       && needs.stage-packaged-smoke.outputs.has_mac == 'true'
-    needs: [stage-packaged-smoke]
+      && needs.mac-admission.result == 'success'
+    needs: [stage-packaged-smoke, mac-admission]
     permissions:
       contents: read
     uses: ./.github/workflows/packaged-smoke.yml
     with:
       tag: ${{ github.event.inputs.tag || github.ref_name }}
       artifact: packaged-smoke-inputs
+      admission: release.yml
 
   promote:
     # Fail closed on the packaged smoke: a skipped job is not a failed one, so

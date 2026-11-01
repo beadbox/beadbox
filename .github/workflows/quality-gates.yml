@@ -369,6 +369,14 @@ jobs:
         # check the signing job runs, and release.yml's per-job toolchain.
         run: bash scripts/ci-runner/test-runner-path.sh
 
+      - name: macOS runner admission table
+        # beadbox-449.4: every admitted and refused case for the five Mac jobs,
+        # read from the literal guard text (each if:, install-script's matrix
+        # exclude, mac-admission's run block against a synthetic git origin),
+        # plus reds: a stand-in that never refuses, and mutations of the real
+        # text. Accident prevention only; forks are stopped by the approval rule.
+        run: python3 -I scripts/ci-runner/test-mac-admission.py
+
       - name: No fork-triggered workflows with secret access
         run: |
           set -euo pipefail
