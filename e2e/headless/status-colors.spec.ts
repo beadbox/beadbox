@@ -319,4 +319,47 @@ test.describe("status colors (beadbox-o3h)", () => {
     await expectDefault(preview)
     await expect.poll(() => registryColors(ws)).toBeUndefined()
   })
+
+  // QA bounce (qam 2026-11-01): focusing a color control chose a color. The
+  // hex field committed its value on blur even when nothing was typed.
+  test("AC3 + AC6: tabbing through every row, or clicking into a field and away, chooses nothing", async ({
+    page,
+    workspace: ws,
+  }) => {
+    const beads = await openTree(page, ws)
+    const badges = ["open", "in_progress", "closed"].map((s) => badgeOf(page, firstWithStatus(beads, s).id))
+    for (const b of badges) await expectDefault(b)
+    await openWorkflow(page)
+
+    // Keyboard walk: from the Workflow tab, Tab past the last row's hex field.
+    const lastHexLabel = await page
+      .locator("[data-status-color-row]")
+      .last()
+      .locator('input[type="text"]')
+      .getAttribute("aria-label")
+    const focusedLabel = () => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? "")
+    await page.getByRole("tab", { name: "Workflow" }).focus()
+    const visited: string[] = []
+    for (let i = 0; i < 80 && (await focusedLabel()) !== lastHexLabel; i++) {
+      await page.keyboard.press("Tab")
+      visited.push(await focusedLabel())
+    }
+    expect(await focusedLabel()).toBe(lastHexLabel)
+    await page.keyboard.press("Tab")
+    // Every row's hex field had focus and lost it.
+    expect(visited.filter((l) => l.endsWith(" color hex")).length).toBe(
+      await page.locator("[data-status-color-row]").count(),
+    )
+
+    // Mouse: click into Open's hex field, then away.
+    await colorRow(page, "open").locator('input[type="text"]').click()
+    await page.getByRole("heading", { name: "Status colors" }).click()
+
+    // Past the persist debounce, nothing was saved and nothing looks different.
+    await page.waitForTimeout(1000)
+    expect(registryColors(ws)).toBeUndefined()
+    await expect(page.getByRole("button", { name: "Reset status colors" })).toBeDisabled()
+    await page.keyboard.press("Escape")
+    for (const b of badges) await expectDefault(b)
+  })
 })

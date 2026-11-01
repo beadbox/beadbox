@@ -24,8 +24,13 @@ import { statusColorStore, useStatusColors } from "@/lib/status-colors-store"
 const PERSIST_DELAY_MS = 300
 
 /**
- * Write a workspace's chosen colors: to the store at once, to the registry
- * via rpc. On failure the previous colors come back and the user is told.
+ * Write a workspace's chosen colors to the registry via rpc.
+ *
+ * The query cache (which StatusColorsMount feeds back into the store) gets
+ * the store's colors as they are when the reply lands, not the reply's own
+ * map: replies can arrive out of order, and an older reply written back would
+ * roll a newer change out of the store and out of the next save (QA bounce,
+ * 2026-11-01).
  */
 export async function persistStatusColors(
   workspaceId: string,
@@ -36,7 +41,11 @@ export async function persistStatusColors(
     Object.keys(next).length ? next : null,
   )
   if (result.success) {
-    queryClient.setQueryData(statusColorsQueryKey(workspaceId), result.colors)
+    const current = statusColorStore.get()
+    queryClient.setQueryData(
+      statusColorsQueryKey(workspaceId),
+      current.workspaceId === workspaceId ? current.overrides : result.colors,
+    )
     return true
   }
   return false
@@ -110,7 +119,7 @@ export function StatusColorsSection({
   // in, so a removed-then-re-added status starts from a fresh default.
   useEffect(() => {
     if (!workspaceId || !customStatuses || statuses.length === 0) return
-    const pruned = pruneStatusColors(overrides, customStatuses, statuses)
+    const pruned = pruneStatusColors(statusColorStore.get().overrides, customStatuses, statuses)
     if (Object.keys(pruned).length !== Object.keys(overrides).length) apply(pruned, true)
   }, [workspaceId, customStatuses, statuses, overrides, apply])
 
@@ -133,7 +142,9 @@ export function StatusColorsSection({
             status={s}
             color={display[s] ?? "#3b82f6"}
             chosen={s in overrides}
-            onChange={(hex, immediate) => apply({ ...overrides, [s]: hex }, immediate)}
+            onChange={(hex, immediate) =>
+              apply({ ...statusColorStore.get().overrides, [s]: hex }, immediate)
+            }
           />
         ))}
       </ul>
@@ -171,7 +182,9 @@ function StatusColorRow({
     setInvalid(false)
   }, [color])
 
-  const commitDraft = () => {
+  // Enter is an explicit choice: it commits a valid value, even one equal to
+  // the default (pinning it), and flags an invalid one.
+  const commitOnEnter = () => {
     const hex = normalizeHex(draft)
     if (!hex) {
       setInvalid(true)
@@ -179,6 +192,16 @@ function StatusColorRow({
     }
     setInvalid(false)
     if (hex !== color || !chosen) onChange(hex, true)
+  }
+
+  // Leaving the field is not a choice (QA bounce, 2026-11-01: tabbing through
+  // the rows used to save every default). Blur commits only a value the user
+  // changed; an unchanged or invalid draft goes back to the current color.
+  const commitOnBlur = () => {
+    const hex = normalizeHex(draft)
+    setInvalid(false)
+    if (hex && hex !== color) onChange(hex, true)
+    else setDraft(color)
   }
 
   return (
@@ -204,10 +227,10 @@ function StatusColorRow({
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault()
-            commitDraft()
+            commitOnEnter()
           }
         }}
-        onBlur={commitDraft}
+        onBlur={commitOnBlur}
         spellCheck={false}
         maxLength={7}
         aria-label={`${label} color hex`}
