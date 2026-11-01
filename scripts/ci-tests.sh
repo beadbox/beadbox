@@ -3,7 +3,11 @@
 #
 #   scripts/ci-tests.sh fast|full                  run every shard of the tier
 #   scripts/ci-tests.sh fast|full --list           print "<shard>\t<package>\t<file>"
-#   scripts/ci-tests.sh fast|full --shard <name>   run one shard (one CI job)
+#   scripts/ci-tests.sh fast|full --shard <name>   run one shard
+#   scripts/ci-tests.sh fast|full --package <pkg>  run every shard of one
+#                                                  package in parallel (one CI
+#                                                  job per package: server or
+#                                                  client)
 #
 # fast: every test file bun would discover in packages/server and
 # packages/client, minus the files in scripts/slow-tests.txt; every
@@ -24,7 +28,7 @@ CLIENT_SHARDS=${BEADBOX_CI_CLIENT_SHARDS:-2}
 SLOW_LIST=${BEADBOX_CI_SLOW_LIST:-scripts/slow-tests.txt}
 
 usage() {
-  echo "usage: scripts/ci-tests.sh fast|full [--list | --shard <name>]" >&2
+  echo "usage: scripts/ci-tests.sh fast|full [--list | --shard <name> | --package <server|client>]" >&2
   exit 2
 }
 
@@ -32,12 +36,16 @@ tier=${1:-}
 case "$tier" in fast | full) ;; *) usage ;; esac
 action=run
 only=""
+package=""
 case "${2:-}" in
   "") ;;
   --list) action=list ;;
   --shard)
     [ -n "${3:-}" ] || usage
     only=$3
+    ;;
+  --package)
+    case "${3:-}" in server | client) package=$3 ;; *) usage ;; esac
     ;;
   *) usage ;;
 esac
@@ -123,6 +131,14 @@ if [ -n "$only" ]; then
     ;;
   esac
   names=("$only")
+fi
+if [ -n "$package" ]; then
+  # Shard names are "<package>-<n>" and "<package>-security".
+  kept=()
+  for n in "${names[@]}"; do
+    case "$n" in "$package"-*) kept+=("$n") ;; esac
+  done
+  names=("${kept[@]}")
 fi
 
 LOGDIR=$(mktemp -d "${TMPDIR:-/tmp}/beadbox-ci-tests.XXXXXX")
