@@ -24,7 +24,9 @@ test("the package test scripts pass --timeout=30000", () => {
 })
 
 test("the hook, the shard runner and the coverage jobs pass it on every invocation", () => {
-  const files = ["scripts/prepush-tests.sh", "scripts/ci-tests.sh", ".github/workflows/quality-gates.yml"]
+  // The coverage jobs run nightly (beadbox-mol-pyc, beadbox-mol-gey); push runs
+  // its tests through scripts/ci-tests.sh.
+  const files = ["scripts/prepush-tests.sh", "scripts/ci-tests.sh", ".github/workflows/nightly.yml"]
   for (const file of files) {
     const runs = invocations(read(file))
     expect(runs.length).toBeGreaterThan(0) // the check sees the invocation it guards
