@@ -16,9 +16,11 @@ name: Build (nightly)
 
 on:
   schedule:
-    # 07:41 UTC, nightly: off the hour, inside the .207 Mac's macOS window
-    # (02:00-06:00 ET, 07:00-10:00 UTC in both EDT and EST; beadbox-449).
-    - cron: "41 7 * * *"
+    # 07:23 UTC nightly (02:23 EST, 03:23 EDT), inside the shared Mac's macOS
+    # window (02:00-06:00 ET, 07:00-10:00 UTC in both EDT and EST; beadbox-449),
+    # on an odd minute in a quiet UTC hour: GitHub started the earlier 07:41
+    # cron about 7 h late (beadbox-449.8).
+    - cron: "23 7 * * *"
   # No ref input: a dispatch builds the head of the branch it runs on, and the
   # `release` environment admits main and v* tags only, so its secrets (signing,
   # notarization) never build a commit outside them. A free-form SHA would let a
