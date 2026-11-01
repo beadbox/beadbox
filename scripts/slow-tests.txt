@@ -39,6 +39,13 @@ packages/server/src/__tests__/serve-proxy-reap.test.ts               spawn      
 packages/server/src/__tests__/subscribe.leak.test.ts                 timeout>=10s       6.6
 packages/server/src/__tests__/workspace-presence.test.ts             spawn              10.1
 packages/server/src/__tests__/parent-death-watcher.test.ts           spawn              6.0
+# activity.unit runs `bd init` for a real workspace with execFileSync (its own
+# fixture, not bd-workspace): 10.6 s on CI (qam, 2026-11-01). Review of mol-pyc.
+packages/server/src/__tests__/activity.unit.test.ts                  spawn              10.6
+# poll-child-lifetime waits up to 5 s of wall clock for real bun/sh/sleep spawns
+# to appear; no test clock can stand in for a process start, and it failed the
+# pre-push hook at load 16 (2026-11-01, 6.6 s). Review of mol-pyc.
+packages/server/src/__tests__/poll-child-lifetime.test.ts            spawn              3.6
 
 # --- client: compute-bound (each declares its own long timeout) ---
 packages/client/src/__tests__/activity-feed-cap.test.tsx             timeout>=10s       16.5
@@ -64,11 +71,11 @@ packages/client/src/__tests__/chart-view.test.tsx                    timeout>=10
 # fast: packages/server/src/__tests__/log-file-capture.test.ts               spawn           4.2     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/log-file-upgrade.test.ts               spawn           0.3     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/mode-oracle.test.ts                  deadline        0.4   (local, at load 25) a 20 s hang guard on one change event that arrives in milliseconds (debounce 50 ms); under the 5 s line
-# fast: packages/server/src/__tests__/poll-child-lifetime.test.ts            spawn           3.6     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/prepush-cargo-check.test.ts            spawn           0.3   spawns git and the hook script for a moment (CI run 40776150388); under the 5 s line
 # fast: packages/server/src/__tests__/prepush-deletion-skip.test.ts          spawn           0.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/serve-lifetime.test.ts                 spawn           1.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/serve-manager.unit.test.ts             spawn           1.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
+# fast: packages/server/src/__tests__/serve-parity.test.ts                 spawn           0.0   skips unless BEADBOX_TEST_BD_SERVE names a bd >= 1.3.0, which CI never sets; with it set it starts a real bd server
 # fast: packages/server/src/__tests__/session-attached.test.ts               spawn           0.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/subscribe.parity.test.ts               spawn           0.0     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/server/src/__tests__/workspace-removal-stops-poll.test.ts   spawn           0.1     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line

@@ -89,6 +89,19 @@ function calleeName(expr: ts.Expression): string | undefined {
   return undefined
 }
 
+// Process spawns, by call name: child_process's spawn and exec families, Bun's
+// spawn, and the promisified forms the server code names *Async. A bare
+// exec() is handled at the call site (a RegExp also has .exec).
+const SPAWNERS = new Set([
+  "spawn",
+  "spawnSync",
+  "execFile",
+  "execFileSync",
+  "execSync",
+  "execFileAsync",
+  "execAsync",
+])
+
 const TEST_CALLS = new Set([
   "test",
   "it",
@@ -125,7 +138,8 @@ function readsWallClock(node: ts.Node): boolean {
     ts.isPropertyAccessExpression(node.expression) &&
     node.expression.name.text === "now" &&
     ts.isIdentifier(node.expression.expression) &&
-    (node.expression.expression.text === "Date" || node.expression.expression.text === "performance")
+    (node.expression.expression.text === "Date" ||
+      node.expression.expression.text === "performance")
   ) {
     return true
   }
@@ -178,7 +192,9 @@ export function scanSource(text: string, fileName = "x.ts"): Scan {
       ) {
         moduleRef(first.text)
       }
-      if (name === "spawn" || name === "spawnSync") causes.add("spawn")
+      if (SPAWNERS.has(name ?? "")) causes.add("spawn")
+      // A bare exec(...) is child_process's; re.exec(...) is a RegExp's.
+      if (ts.isIdentifier(node.expression) && node.expression.text === "exec") causes.add("spawn")
       if (name === "sleep" && (numberOf(first, consts) ?? 0) >= 1000) causes.add("sleep>=1s")
       if (name === "setTimeout" && (numberOf(node.arguments[1], consts) ?? 0) >= 1000)
         causes.add("setTimeout>=1s")
@@ -379,6 +395,18 @@ describe("census detector (beadbox-mol-dph)", () => {
     expect(causesIn(`const s = "spawn(sh)" // spawn(x)`)).toEqual([])
   })
 
+  test("the exec family spawns too; a RegExp's .exec does not", () => {
+    // activity.unit built a real bd workspace with execFileSync and no
+    // census cause at all (beadbox-mol-pyc review).
+    expect(causesIn(`execFileSync("bd", ["init"])`)).toEqual(["spawn"])
+    expect(causesIn(`await execFileAsync("bd", ["list"])`)).toEqual(["spawn"])
+    expect(causesIn(`execSync("git init")`)).toEqual(["spawn"])
+    expect(causesIn(`cp.execFile("sh", [])`)).toEqual(["spawn"])
+    expect(causesIn(`exec("ls", cb)`)).toEqual(["spawn"])
+    expect(causesIn(`const m = re.exec(src)`)).toEqual([])
+    expect(causesIn(`/x/.exec(s)`)).toEqual([])
+  })
+
   test("waits count from 1 s, constants and separators included", () => {
     expect(causesIn(`await Bun.sleep(1_000)`)).toEqual(["sleep>=1s"])
     expect(causesIn(`await Bun.sleep(999)`)).toEqual([])
@@ -397,13 +425,17 @@ describe("census detector (beadbox-mol-dph)", () => {
   })
 
   test("a wall-clock deadline is a loop that reads the clock, not date arithmetic (beadbox-mol-uua.1)", () => {
-    expect(causesIn(`const end = Date.now() + 4000; while (Date.now() < end && !done()) await poll()`)).toEqual([
+    expect(
+      causesIn(`const end = Date.now() + 4000; while (Date.now() < end && !done()) await poll()`),
+    ).toEqual(["deadline"])
+    expect(causesIn(`do { await poll() } while (performance.now() - t0 < 2000)`)).toEqual([
       "deadline",
     ])
-    expect(causesIn(`do { await poll() } while (performance.now() - t0 < 2000)`)).toEqual(["deadline"])
     expect(causesIn(`for (let t = Date.now(); Date.now() - t < ms; ) step()`)).toEqual(["deadline"])
     expect(causesIn(`const due = new Date(Date.now() + 86_400_000)`)).toEqual([])
-    expect(causesIn(`const elapsed = performance.now() - t0; expect(elapsed).toBeGreaterThan(0)`)).toEqual([])
+    expect(
+      causesIn(`const elapsed = performance.now() - t0; expect(elapsed).toBeGreaterThan(0)`),
+    ).toEqual([])
     expect(causesIn(`while (queue.length) drain()`)).toEqual([])
   })
 
@@ -479,7 +511,13 @@ describe("census contract (beadbox-mol-dph)", () => {
     expect(census(files, good, withDeadline)).toEqual([
       expect.stringContaining("c.test.ts has deadline and is in neither section"),
     ])
-    expect(census(files, `${good}\n# fast: c.test.ts deadline 0.2 a hang guard on a quick poll`, withDeadline)).toEqual([])
+    expect(
+      census(
+        files,
+        `${good}\n# fast: c.test.ts deadline 0.2 a hang guard on a quick poll`,
+        withDeadline,
+      ),
+    ).toEqual([])
   })
 
   test("a weak-cause file in neither section fails", () => {
