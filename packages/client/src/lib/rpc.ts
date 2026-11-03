@@ -175,6 +175,8 @@ interface SidecarManagerOptions {
    * getting a healthy process restarted.
    */
   callDeadlineMs?: number
+  /** A deadline timer firing this much later than its time means the page was frozen. */
+  frozenSlackMs?: number
   /** Consecutive deadline misses that trigger a restart. */
   maxConsecutiveMisses?: number
   /**
@@ -216,6 +218,7 @@ export function createSidecarManager(
     onAttach,
     onConnectTimeoutMs = 5_000,
     callDeadlineMs = 45_000,
+    frozenSlackMs = 5_000,
     maxConsecutiveMisses = 1,
     maxDeadlineRestarts = 3,
     restartWindowMs = 10 * 60_000,
@@ -380,8 +383,26 @@ export function createSidecarManager(
     }
     const missed = Symbol("deadline")
     let timer: ReturnType<typeof setTimeout> | undefined
+    // A timer firing well after its time means this page was frozen (WebKit
+    // suspends an inactive page; a Mac can sleep), not that the sidecar stayed
+    // silent: its reply may be queued right behind this timer. Counting that as
+    // a miss can restart a sidecar that is answering, and spends the restart
+    // budget (beadbox-0b6). So a late fire starts a fresh deadline, and only one
+    // that fires on time counts.
     const deadline = new Promise<typeof missed>((resolve) => {
-      timer = setTimeout(() => resolve(missed), callDeadlineMs)
+      const arm = () => {
+        const armedAt = now()
+        timer = setTimeout(() => {
+          const frozenMs = now() - armedAt - callDeadlineMs
+          if (frozenMs <= frozenSlackMs) {
+            resolve(missed)
+            return
+          }
+          console.warn(`[rpc] ${method}: page was frozen for about ${frozenMs}ms; the deadline starts again`)
+          arm()
+        }, callDeadlineMs)
+      }
+      arm()
     })
     try {
       const answer = getRemoteApi().then((api) =>
