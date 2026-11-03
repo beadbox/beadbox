@@ -582,6 +582,19 @@ interface ExecError {
   code?: string
 }
 
+// beadbox-0b6: what a failed bd call says about itself, for the log. Two nights'
+// failures logged only their elapsed time (45.03 s against a 30 s timeout, no
+// stderr), which could not tell a killed bd from one that failed on its own.
+export function describeExecFailure(err: {
+  code?: unknown
+  killed?: unknown
+  signal?: unknown
+  stderr?: unknown
+}): string {
+  const stderrBytes = typeof err.stderr === "string" ? err.stderr.length : 0
+  return `killed=${err.killed === true} signal=${err.signal ?? "none"} code=${err.code ?? "none"} stderr_bytes=${stderrBytes}`
+}
+
 function isContextCanceled(err: ExecError): boolean {
   return Boolean(
     err.message?.includes("context canceled") || err.stderr?.includes("context canceled"),
@@ -633,6 +646,7 @@ function handleBdError(
   }
   if (opts.rethrowOnContextCanceled && isContextCanceled(execError)) throw error
   const cleanedStderr = execError.stderr ? stripBdWarnings(execError.stderr) : null
+  console.error(`[bd] ${subcmd} failure detail at ${new Date().toISOString()}: ${describeExecFailure(execError)}`)
   if (opts.logExecArgs) {
     console.error(`[bd] ${subcmd} failed in ${elapsed}ms: bd ${opts.logExecArgs.join(" ")}`)
     console.error("Error:", execError.message)

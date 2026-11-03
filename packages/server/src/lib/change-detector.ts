@@ -678,6 +678,15 @@ LAST=""
 ERRS=0
 HB=0
 while true; do
+  # beadbox-0b6: a pass of this loop takes at most about 16s, so a far longer gap
+  # means this shell itself could not run. Two nights' logs show the whole
+  # sidecar tree going silent for up to 49 min with nothing to say why, or when:
+  # log lines carry no time. Log only, never the wire.
+  LOOPNOW=$(date +%s)
+  if [ -n "$LOG" ] && [ -n "\${LOOPAT:-}" ] && [ $((LOOPNOW - LOOPAT)) -gt 60 ]; then
+    printf '[poll] loop was stalled for %ss, resumed at %s\\n' "$((LOOPNOW - LOOPAT))" "$(date -u +%FT%TZ)" >> "$LOG" 2>/dev/null
+  fi
+  LOOPAT=$LOOPNOW
   # beadbox-fdk: never run bd on a vanished workspace (it would litter an
   # embeddeddolt/ there). Same presence rule as lib/workspace-presence.ts; a
   # missing workspace takes the ordinary poll-error path below.

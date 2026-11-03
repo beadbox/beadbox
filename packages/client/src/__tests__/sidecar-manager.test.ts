@@ -418,3 +418,103 @@ test("the deadline error and its warning name the RPC that missed it", async () 
   }
   expect(warnings.some((w) => w.includes("beads.list") && w.includes("restarting"))).toBe(true)
 })
+
+// ── A frozen page is not a silent sidecar (beadbox-0b6) ─────────────────────
+//
+// WebKit suspends an inactive page and a Mac can sleep. Either way the page's
+// timers stop, and on waking every pending deadline fires at once, however
+// recently the sidecar could have answered. Seen on v0.32.0: page suspended for
+// 49 min, resumed, and the sidecar restarted 153 ms later. Why the stream had
+// gone silent then is not known; this covers only what the page does on waking.
+
+test("a deadline that fires long after its time restarts nothing and the reply is still taken", async () => {
+  const sidecar = aliveRuntime()
+  let clock = 0
+  let resubscribes = 0
+  const manager = createSidecarManager(sidecar.runtime, () => resubscribes++, {
+    callDeadlineMs: 20,
+    now: () => clock,
+  })
+  await manager.call(ping)
+  const reply = manager.call(
+    () =>
+      new Promise<string>((resolve) => {
+        clock += 49 * 60_000 // frozen while the call was out
+        setTimeout(() => resolve("the reply queued during the freeze"), 30)
+      }),
+    "epics.getEpics",
+  )
+  expect(await reply).toBe("the reply queued during the freeze")
+  expect(sidecar.counts()).toEqual({ spawns: 1, kills: 0, destroyed: 0 })
+  expect(resubscribes).toBe(0)
+})
+
+test("a call still unanswered after the fresh deadline counts as a miss", async () => {
+  const sidecar = aliveRuntime()
+  let clock = 0
+  const manager = createSidecarManager(sidecar.runtime, () => {}, { callDeadlineMs: 20, now: () => clock })
+  await manager.call(ping)
+  sidecar.mode = "wedged"
+  const missed = manager.call((api) => {
+    clock += 49 * 60_000
+    return ping(api)
+  })
+  await expect(missed).rejects.toBeInstanceOf(RpcDeadlineError)
+  expect(sidecar.counts().kills).toBe(1)
+})
+
+test("a page waking with many calls out spends none of the restart budget", async () => {
+  const sidecar = aliveRuntime()
+  let clock = 0
+  const manager = createSidecarManager(sidecar.runtime, () => {}, { callDeadlineMs: 20, now: () => clock })
+  await manager.call(ping)
+  const calls = Array.from({ length: 6 }, () =>
+    manager.call(() => new Promise<string>((resolve) => setTimeout(() => resolve("answered"), 30))),
+  )
+  clock += 49 * 60_000
+  expect(await Promise.all(calls)).toEqual(Array(6).fill("answered"))
+  expect(sidecar.counts().kills).toBe(0)
+})
+
+test("a deadline that fires only slightly late is still a miss", async () => {
+  const sidecar = aliveRuntime()
+  let clock = 0
+  const manager = createSidecarManager(sidecar.runtime, () => {}, { callDeadlineMs: 20, now: () => clock })
+  await manager.call(ping)
+  sidecar.mode = "wedged"
+  const missed = manager.call((api) => {
+    clock += 2_000 // ordinary timer slop under load, inside the slack
+    return ping(api)
+  })
+  await expect(missed).rejects.toBeInstanceOf(RpcDeadlineError)
+  expect(sidecar.counts().kills).toBe(1)
+})
+
+// AC8: whatever spends the budget, the app comes back without a relaunch.
+test("after the restart budget runs out, a sidecar that answers again serves calls with no relaunch", async () => {
+  const sidecar = aliveRuntime()
+  let clock = 0
+  const manager = createSidecarManager(sidecar.runtime, () => {}, { callDeadlineMs: 20, now: () => clock })
+  sidecar.mode = "wedged"
+  for (let i = 0; i < 5; i++) await expect(manager.call(ping)).rejects.toBeInstanceOf(RpcDeadlineError)
+  expect(sidecar.counts().kills).toBe(3)
+  const spawned = sidecar.counts().spawns
+  sidecar.mode = "answer"
+  expect(await manager.call(ping)).toBe(`pong from sidecar ${spawned}`)
+  expect(sidecar.counts().kills).toBe(3)
+})
+
+test("after the restart budget runs out, a sidecar still wedged is restarted once the window passes", async () => {
+  const sidecar = aliveRuntime()
+  let clock = 0
+  let resubscribes = 0
+  const manager = createSidecarManager(sidecar.runtime, () => resubscribes++, { callDeadlineMs: 20, now: () => clock })
+  sidecar.mode = "wedged"
+  for (let i = 0; i < 5; i++) await expect(manager.call(ping)).rejects.toBeInstanceOf(RpcDeadlineError)
+  const before = resubscribes
+  clock += 10 * 60_000 + 1
+  await expect(manager.call(ping)).rejects.toBeInstanceOf(RpcDeadlineError)
+  sidecar.mode = "answer"
+  expect(await manager.call(ping)).toBe(`pong from sidecar ${sidecar.counts().spawns}`)
+  expect(resubscribes).toBeGreaterThan(before)
+})

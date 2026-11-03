@@ -504,7 +504,12 @@ describe("useChangeSubscription", () => {
 // on import, against a subscribe.ts that predates them.
 describe("live-updates liveness (beadbox-01f.2)", () => {
   type LivenessSeams = {
-    _setLivenessTiming?: (t: { pauseAfterMs: number; tickMs: number }) => void
+    _setLivenessTiming?: (t: {
+      pauseAfterMs: number
+      tickMs: number
+      wakeAfterMs?: number
+      resubscribeEveryMs?: number
+    }) => void
     _resetLivenessTiming?: () => void
     _getLiveUpdatesPaused?: () => boolean
     _resetLiveUpdatesPaused?: () => void
@@ -566,6 +571,78 @@ describe("live-updates liveness (beadbox-01f.2)", () => {
     })
     expect(paused()).toBe(true)
     expect(rpcMocks.start).toHaveBeenCalledTimes(2)
+  })
+
+  // beadbox-0b6: a frozen page (WebKit suspension, Mac sleep) stops the page's
+  // own timers. The silence it then measures is its own, not the detector's.
+  const freezePage = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+
+  test("a page that was frozen wakes unpaused and refreshes the view", async () => {
+    seams._setLivenessTiming?.({ pauseAfterMs: 300, tickMs: 25, wakeAfterMs: 150 })
+    await mount()
+    await act(async () => listenMocks.fire(line({ type: "heartbeat" })))
+    const before = subscribeModule._getSubscriptionChangeCount()
+    freezePage(500)
+    await act(async () => {
+      await sleep(80)
+    })
+    expect(paused()).toBe(false)
+    expect(rpcMocks.start).toHaveBeenCalledTimes(1)
+    expect(subscribeModule._getSubscriptionChangeCount()).toBeGreaterThan(before)
+  })
+
+  test("still silent after the wake: the pause comes, one full window later", async () => {
+    seams._setLivenessTiming?.({ pauseAfterMs: 300, tickMs: 25, wakeAfterMs: 150 })
+    await mount()
+    await act(async () => listenMocks.fire(line({ type: "heartbeat" })))
+    freezePage(500)
+    await act(async () => {
+      await sleep(450)
+    })
+    expect(paused()).toBe(true)
+  })
+
+  test("a subscribe.start that fails is retried until live updates come back", async () => {
+    rpcMocks.start.mockImplementationOnce(() => Promise.reject(new Error("deadline")))
+    rpcMocks.start.mockImplementationOnce(() => Promise.reject(new Error("deadline")))
+    await mount()
+    await act(async () => {
+      await sleep(120)
+    })
+    expect(rpcMocks.start.mock.calls.length).toBeGreaterThanOrEqual(3)
+    expect(listenMocks.attach).toHaveBeenCalledTimes(1)
+    const before = subscribeModule._getSubscriptionChangeCount()
+    await act(async () => listenMocks.fire(line({ type: "heartbeat" })))
+    expect(paused()).toBe(false)
+    expect(before).toBeGreaterThanOrEqual(1) // the retried subscription asked for a fresh view
+  })
+
+  test("a subscribe.start that keeps failing says so: the pause banner, not a silent stale pane", async () => {
+    rpcMocks.start.mockImplementation(() => Promise.reject(new Error("deadline")))
+    await mount()
+    await act(async () => {
+      await sleep(450)
+    })
+    expect(paused()).toBe(true)
+    expect(rpcMocks.start.mock.calls.length).toBeGreaterThan(2)
+  })
+
+  // AC8: the one resubscribe per pause used to be the last. A subscription left
+  // on a dead sidecar then stayed paused until someone relaunched the app.
+  test("a pause keeps resubscribing at its slow pace, and the first heartbeat ends it", async () => {
+    seams._setLivenessTiming?.({ pauseAfterMs: 300, tickMs: 25, resubscribeEveryMs: 150 })
+    await mount()
+    await act(async () => listenMocks.fire(line({ type: "heartbeat" })))
+    // Separate acts: React applies each resubscribe's state update when its act ends.
+    for (let i = 0; i < 8; i++) {
+      await act(async () => {
+        await sleep(120)
+      })
+    }
+    expect(paused()).toBe(true)
+    expect(rpcMocks.start.mock.calls.length).toBeGreaterThan(2)
+    await act(async () => listenMocks.fire(line({ type: "heartbeat" })))
+    expect(paused()).toBe(false)
   })
 
   test("a stream that never heartbeats (embedded mode) never pauses", async () => {
