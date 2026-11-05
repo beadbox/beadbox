@@ -225,7 +225,7 @@ function BeadRow({
         draggable={!sourceForBead}
         data-item-id={rowKey}
         data-project-id={source?.id}
-        data-bead-id={bead.id}
+        data-bead-id={source ? bead.id : undefined}
         onDragStart={(e) => {
           e.dataTransfer.setData(
             "application/x-bead-move",
