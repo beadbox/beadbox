@@ -396,6 +396,19 @@ jobs:
         # against the real script.
         run: python3 -I scripts/test-site-serves-latest.py
 
+      - name: Jobs pinned to ubuntu-24.04 stay pinned
+        # beadbox-73a: build-linux, build-frontend (release.yml) and the
+        # nightly's e2e-headless run on ubuntu-24.04, never ubuntu-latest, so an
+        # image move is a choice. Runs the check on the real tree, then decoy
+        # reds (each pinned job moved, a rename, a comment-only pin), then a
+        # stand-in checker that always passes.
+        run: bash scripts/ci-runner/test-pinned-runners.sh
+
+      - name: GLIBC ceiling table
+        # beadbox-73a: the check build-linux runs on the .deb, against a stub
+        # objdump: over the ceiling, three-part versions, no ELF, no symbols.
+        run: bash scripts/ci-runner/test-glibc-ceiling.sh
+
       - name: No fork-triggered workflows with secret access
         run: |
           set -euo pipefail

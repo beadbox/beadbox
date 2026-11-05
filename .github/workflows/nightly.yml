@@ -61,7 +61,11 @@ jobs:
     # what `bun build --compile` drops (§5.2), which the TypeScript entry used
     # locally cannot. The harness kills only the pids it spawns.
     name: E2E headless — Playwright vs the compiled sidecar
-    runs-on: ubuntu-latest
+    # beadbox-73a: pinned. Playwright 1.59.1 ships no Chromium for
+    # ubuntu-26.04, which ubuntu-latest became in 2026-10. Moving this job is a
+    # Playwright bump plus this line, together; workflow-hygiene refuses this
+    # job going back to ubuntu-latest.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

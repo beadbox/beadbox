@@ -154,7 +154,11 @@ jobs:
     # never final, so it is unaffected.)
     if: needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final
     needs: [validate-tag]
-    runs-on: ubuntu-latest
+    # beadbox-73a: pinned, not ubuntu-latest. Its cargo check compiles the
+    # Linux shell against the WebKit/GTK headers build-linux builds with, so
+    # both judge the tree on the same OS. Moving off 24.04 is a choice made
+    # in both jobs at once; workflow-hygiene refuses this one drifting.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -1154,7 +1158,11 @@ jobs:
       && (needs.create-draft.result == 'success' || (inputs.mode == 'build' && needs.create-draft.result == 'skipped'))
       && (github.event_name == 'push' || inputs.mode == 'build' || inputs.build_linux)
     needs: [validate-tag, build-frontend, create-draft]
-    runs-on: ubuntu-latest
+    # beadbox-73a: pinned to the oldest Ubuntu we support (24.04+). The image's
+    # glibc sets the .deb's GLIBC floor, so the image is a release decision,
+    # not GitHub's default (v0.32.0 was built on 26.04 by drift).
+    # workflow-hygiene refuses this job going back to ubuntu-latest.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -1240,6 +1248,24 @@ jobs:
           DEB_NAME="beadbox_${VERSION}_Linux_amd64.deb"
           cp "$DEB_SRC" "$DEB_NAME"
           echo "deb=$DEB_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: The .deb needs no glibc newer than Ubuntu 24.04's (beadbox-73a)
+        # We claim Ubuntu 24.04+, whose glibc is 2.39: no ELF file in the
+        # package may need a GLIBC_x.y above it. Then a live red: the same
+        # check at a 2.0 ceiling must refuse the same package, or it is not
+        # reading the symbols. Table test: scripts/ci-runner/test-glibc-ceiling.sh.
+        env:
+          DEB: ${{ steps.artifact.outputs.deb }}
+        run: |
+          set -euo pipefail
+          bash scripts/ci-runner/check-glibc-ceiling.sh deb 2.39 "$DEB"
+          if bash scripts/ci-runner/check-glibc-ceiling.sh deb 2.0 "$DEB" > "$RUNNER_TEMP/glibc-red.log" 2>&1; then
+            cat "$RUNNER_TEMP/glibc-red.log"
+            echo "::error::the glibc check passed a 2.0 ceiling, so it is not reading the package's symbols"
+            exit 1
+          fi
+          echo "OK: the same check refuses a 2.0 ceiling (live red):"
+          grep -c 'above the 2.0 ceiling' "$RUNNER_TEMP/glibc-red.log" | sed 's/^/  files refused: /'
 
       - name: Upload to draft release
         if: env.BUILD_MODE != 'build'
