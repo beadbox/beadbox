@@ -1,6 +1,6 @@
 [package]
 name = "beadbox"
-version = "0.32.0"
+version = "0.33.0"
 description = "Native desktop app for Beads issue tracker"
 authors = ["Nelson Melo"]
 license = "MIT"
