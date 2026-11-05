@@ -140,7 +140,7 @@ export function useWorkspaceRail(): WorkspaceRailController {
     async (workspace: WorkspaceCard) => {
       if (workspace.id === getWorkspaceCookie()) {
         // Already active: the only meaningful action is leaving the dashboard.
-        if (pathname === DASHBOARD_ROUTE) void navigate({ to: "/" })
+        if (pathname === DASHBOARD_ROUTE || pathname === "/all-projects") void navigate({ to: "/" })
         return
       }
       setSwitchingWorkspaceId(workspace.id)
@@ -148,7 +148,7 @@ export function useWorkspaceRail(): WorkspaceRailController {
         await activateWorkspace(workspace)
         // Switching from the dashboard opens the workspace; switching from a
         // workspace view keeps the current view (browser-tab semantics).
-        if (pathname === DASHBOARD_ROUTE) void navigate({ to: "/" })
+        if (pathname === DASHBOARD_ROUTE || pathname === "/all-projects") void navigate({ to: "/" })
       } finally {
         setSwitchingWorkspaceId(null)
       }

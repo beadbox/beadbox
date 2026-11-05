@@ -16,6 +16,7 @@
 //   gates -> Waiting view (open gates + resolving a human gate)
 
 import { wrapNamespace } from "../lib/handler-timeout"
+import * as aggregate from "./aggregate"
 import * as activity from "./activity"
 import * as beads from "./beads"
 import * as console from "./console"
@@ -42,6 +43,7 @@ import * as workspaces from "./workspaces"
 // handshake. If a hang surfaces inside change-detector, that's a separate
 // bead about the long-poll path, not the kkrpc method.
 export const handlers = {
+  aggregate: wrapNamespace(aggregate, "aggregate"),
   activity: wrapNamespace(activity, "activity"),
   beads: wrapNamespace(beads, "beads"),
   console: wrapNamespace(console, "console"),

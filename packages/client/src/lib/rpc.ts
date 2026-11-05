@@ -532,6 +532,7 @@ function buildTauriRpc(manager: Pick<SidecarManager, "call"> = sidecarManager): 
   // List the namespaces we know about. Adding a new server namespace requires
   // adding it here too — the `satisfies RemoteApi` check below catches drift.
   const tauri = {
+    aggregate: namespaceProxy("aggregate"),
     activity: namespaceProxy("activity"),
     beads: namespaceProxy("beads"),
     console: namespaceProxy("console"),

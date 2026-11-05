@@ -28,6 +28,7 @@ import {
   Zap,
 } from "lucide-react"
 import React, { useState } from "react"
+import { projectBeadKey } from "@/lib/aggregate"
 import { CopyableId } from "@/components/copyable-id"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -40,8 +41,17 @@ import type { Bead, BeadPriority, ReadState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { describeDeadline } from "@/lib/waiting"
 
+export type BeadSource = { id: string; name: string }
+type SourceForBead = (bead: Bead) => BeadSource | undefined
+const keyFor = (bead: Bead, sourceForBead?: SourceForBead) => {
+  const source = sourceForBead?.(bead)
+  return source ? projectBeadKey(source.id, bead.id) : bead.id
+}
+
 interface BeadTableProps {
   beads: Bead[]
+  sourceForBead?: SourceForBead
+  flat?: boolean
   onBeadClick: (bead: Bead) => void
   onArchive?: (beadId: string) => Promise<void>
   onDelete?: (beadId: string) => void
@@ -71,11 +81,11 @@ interface Wave {
   beads: Bead[]
 }
 
-function computeWaves(beads: Bead[]): Wave[] {
+function computeWaves(beads: Bead[], sourceForBead?: SourceForBead): Wave[] {
   if (beads.length === 0) return []
 
   // Build set of sibling IDs (beads in this list)
-  const siblingIds = new Set(beads.map((b) => b.id))
+  const siblingIds = new Set(beads.map((b) => keyFor(b, sourceForBead)))
 
   // Map each bead to its local blockers (blockedBy entries that are siblings)
   const localBlockers = new Map<string, Set<string>>()
@@ -83,12 +93,14 @@ function computeWaves(beads: Bead[]): Wave[] {
     const blockers = new Set<string>()
     if (bead.blockedBy) {
       for (const dep of bead.blockedBy) {
-        if (siblingIds.has(dep.id)) {
-          blockers.add(dep.id)
+        const source = sourceForBead?.(bead)
+        const depKey = source ? projectBeadKey(source.id, dep.id) : dep.id
+        if (siblingIds.has(depKey)) {
+          blockers.add(depKey)
         }
       }
     }
-    localBlockers.set(bead.id, blockers)
+    localBlockers.set(keyFor(bead, sourceForBead), blockers)
   }
 
   // Topological level assignment
@@ -103,18 +115,18 @@ function computeWaves(beads: Bead[]): Wave[] {
     const thisWave: string[] = []
 
     for (const bead of remaining) {
-      const blockers = localBlockers.get(bead.id)!
+      const blockers = localBlockers.get(keyFor(bead, sourceForBead))!
       // All local blockers must already be assigned to a previous wave
       const allBlockersResolved = [...blockers].every((b) => assigned.has(b))
       if (allBlockersResolved) {
-        thisWave.push(bead.id)
+        thisWave.push(keyFor(bead, sourceForBead))
       }
     }
 
     // If no beads could be assigned, we have a cycle. Dump all remaining into current wave.
     if (thisWave.length === 0) {
       for (const bead of remaining) {
-        waveOf.set(bead.id, currentWave)
+        waveOf.set(keyFor(bead, sourceForBead), currentWave)
       }
       break
     }
@@ -124,14 +136,14 @@ function computeWaves(beads: Bead[]): Wave[] {
       assigned.add(id)
     }
 
-    remaining = remaining.filter((b) => !assigned.has(b.id))
+    remaining = remaining.filter((b) => !assigned.has(keyFor(b, sourceForBead)))
     currentWave++
   }
 
   // Group beads by wave, preserving original order within each wave
   const waveGroups = new Map<number, Bead[]>()
   for (const bead of beads) {
-    const w = waveOf.get(bead.id) ?? 1
+    const w = waveOf.get(keyFor(bead, sourceForBead)) ?? 1
     if (!waveGroups.has(w)) {
       waveGroups.set(w, [])
     }
@@ -154,6 +166,8 @@ const depthBorderColors = [
 ]
 
 interface BeadRowProps {
+  sourceForBead?: SourceForBead
+  flat?: boolean
   bead: Bead
   depth: number
   onBeadClick: (bead: Bead) => void
@@ -174,6 +188,8 @@ interface BeadRowProps {
 }
 
 function BeadRow({
+  sourceForBead,
+  flat,
   bead,
   depth,
   onBeadClick,
@@ -194,9 +210,11 @@ function BeadRow({
 }: BeadRowProps) {
   const { isMobile } = useViewport()
   const [isArchiving, setIsArchiving] = useState(false)
-  const isSelected = selectedIds?.has(bead.id) ?? false
-  const hasChildren = bead.children && bead.children.length > 0
-  const isExpanded = expandedBeads?.has(bead.id) ?? false
+  const source = sourceForBead?.(bead)
+  const rowKey = keyFor(bead, sourceForBead)
+  const isSelected = selectedIds?.has(rowKey) ?? false
+  const hasChildren = !flat && bead.children && bead.children.length > 0
+  const isExpanded = expandedBeads?.has(rowKey) ?? false
   const borderColor = depthBorderColors[Math.min(depth, depthBorderColors.length - 1)]
   const indentPadding = depth > 0 ? `${depth * 16}px` : undefined
   const due = bead.dueAt ? describeDueAt(bead.dueAt) : null
@@ -204,8 +222,10 @@ function BeadRow({
   return (
     <>
       <div
-        draggable
-        data-item-id={bead.id}
+        draggable={!sourceForBead}
+        data-item-id={rowKey}
+        data-project-id={source?.id}
+        data-bead-id={bead.id}
         onDragStart={(e) => {
           e.dataTransfer.setData(
             "application/x-bead-move",
@@ -219,13 +239,13 @@ function BeadRow({
           "bead-row group flex items-center gap-x-2 gap-y-1 px-3 py-2 border-b border-border/50 hover:bg-white/5 cursor-grab active:cursor-grabbing transition-colors select-none",
           borderColor,
           hasChildren && "bg-white/[0.05]",
-          draggedBeadId === bead.id && "opacity-50",
-          focusedItemId === bead.id && "ring-1 ring-primary/60 border-l-2 border-l-primary",
-          selectedBeadId === bead.id && "bg-primary/15",
+          draggedBeadId === rowKey && "opacity-50",
+          focusedItemId === rowKey && "ring-1 ring-primary/60 border-l-2 border-l-primary",
+          selectedBeadId === rowKey && "bg-primary/15",
         )}
         style={{ paddingLeft: indentPadding ? `calc(0.75rem + ${indentPadding})` : undefined }}
         onClick={() => {
-          onFocusItem?.(bead.id)
+          onFocusItem?.(rowKey)
           onBeadClick(bead)
         }}
       >
@@ -239,7 +259,7 @@ function BeadRow({
           >
             <Checkbox
               checked={isSelected}
-              onCheckedChange={() => onToggleSelect(bead.id)}
+              onCheckedChange={() => onToggleSelect(rowKey)}
               aria-label={`Select bead ${bead.id}`}
             />
           </div>
@@ -253,7 +273,7 @@ function BeadRow({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation()
-                    onToggleBead?.(bead.id)
+                    onToggleBead?.(rowKey)
                   }}
                   className={cn(
                     "p-0.5 -ml-1 mr-1 text-muted-foreground hover:text-foreground transition-colors",
@@ -331,11 +351,12 @@ function BeadRow({
               <TooltipTrigger asChild>
                 <button
                   type="button"
+                  aria-label={`Archive bead ${bead.id}`}
                   disabled={isArchiving}
                   onClick={(e) => {
                     e.stopPropagation()
                     setIsArchiving(true)
-                    onArchive(bead.id).finally(() => setIsArchiving(false))
+                    onArchive(rowKey).finally(() => setIsArchiving(false))
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-amber-500/20 text-muted-foreground hover:text-amber-400 transition-colors opacity-0 group-hover:opacity-100",
@@ -361,9 +382,10 @@ function BeadRow({
               <TooltipTrigger asChild>
                 <button
                   type="button"
+                  aria-label={`Delete bead ${bead.id}`}
                   onClick={(e) => {
                     e.stopPropagation()
-                    onDelete(bead.id)
+                    onDelete(rowKey)
                   }}
                   className={cn(
                     "p-1.5 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100",
@@ -392,6 +414,15 @@ function BeadRow({
             <span className="shrink-0 w-1.5 h-1.5" />
           )}
           <span className="font-medium text-foreground/70 truncate min-w-[80px]">{bead.title}</span>
+          {source && (
+            <span
+              title={source.name}
+              data-testid="project-badge"
+              className="max-w-40 shrink-0 truncate rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+            >
+              {source.name}
+            </span>
+          )}
           {(bead as Bead & { gate?: GateInfo }).gate && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -417,7 +448,10 @@ function BeadRow({
             </Tooltip>
           )}
           {bead.type === "gate" && bead.status !== "closed" && bead.gateWait?.deadline && (
-            <span className="text-[10px] text-muted-foreground/70 shrink-0" data-testid="gate-deadline">
+            <span
+              className="text-[10px] text-muted-foreground/70 shrink-0"
+              data-testid="gate-deadline"
+            >
               {describeDeadline(bead.gateWait.deadline)}
             </span>
           )}
@@ -490,6 +524,8 @@ function BeadRow({
           <BeadRow
             key={`${child.id}-${idx}`}
             bead={child}
+            sourceForBead={sourceForBead}
+            flat={flat}
             depth={depth + 1}
             onBeadClick={onBeadClick}
             onArchive={onArchive}
@@ -591,6 +627,8 @@ const typeConfig: Record<string, BadgeConfig> = {
 }
 
 export function BeadTable({
+  sourceForBead,
+  flat,
   beads,
   onBeadClick,
   onArchive,
@@ -610,13 +648,15 @@ export function BeadTable({
   onToggleSelect,
   onToggleSelectAll,
 }: BeadTableProps) {
-  const waves = showWaves ? computeWaves(beads) : null
+  const waves = showWaves ? computeWaves(beads, sourceForBead) : null
   const useWaveView = waves && waves.length >= 2
 
   const renderBeadRow = (bead: Bead, index: number) => (
     <BeadRow
-      key={`${bead.id}-${index}`}
+      key={`${keyFor(bead, sourceForBead)}-${index}`}
       bead={bead}
+      sourceForBead={sourceForBead}
+      flat={flat}
       depth={0}
       onBeadClick={onBeadClick}
       onArchive={onArchive}
@@ -640,7 +680,7 @@ export function BeadTable({
   // `selectedIds` ∩ this table's top-level beads (children counted only when
   // expanded would over-collect; first cut keeps select-all to top-level
   // rows the user can see in the header view).
-  const visibleIds = beads.map((b) => b.id)
+  const visibleIds = beads.map((b) => keyFor(b, sourceForBead))
   let selectedHits = 0
   if (selectedIds) {
     for (const id of visibleIds) {

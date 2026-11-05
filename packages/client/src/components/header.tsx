@@ -208,7 +208,7 @@ export function Header({
     <header className="border-b border-border/50 bg-transparent">
       <div
         className={cn(
-          "flex items-center justify-between",
+          "flex flex-wrap items-center justify-between gap-2",
           isMobile ? "px-3 py-[5px]" : isTablet ? "px-4 py-3" : "px-6 py-3",
         )}
       >
@@ -467,14 +467,14 @@ export function Header({
                 <button
                   onClick={onSettingsOpen}
                   className={cn(
-                    "inline-flex items-center justify-center rounded-md",
+                    "inline-flex shrink-0 items-center justify-center gap-2 rounded-md px-3",
                     "text-muted-foreground hover:text-foreground hover:bg-accent",
-                    "transition-colors",
-                    isMobile ? "min-h-[44px] min-w-[44px]" : "h-9 w-9",
+                    "transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                    isMobile ? "min-h-[44px]" : "h-9",
                   )}
                 >
                   <Settings className="h-4 w-4" />
-                  <span className="sr-only">Settings</span>
+                  <span>Settings</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent>Settings (Cmd+,)</TooltipContent>

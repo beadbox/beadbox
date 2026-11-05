@@ -1,4 +1,4 @@
-import { createRootRoute, Outlet } from "@tanstack/react-router"
+import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { DevBadge } from "../components/dev-badge"
 import { LiveUpdatesPausedBanner } from "../components/live-updates-paused"
@@ -49,6 +49,7 @@ export const Route = createRootRoute({
 })
 
 function RootLayout() {
+  const aggregate = useRouterState({ select: (s) => s.location.pathname === "/all-projects" })
   return (
     <PostHogProvider>
       {/* Shell row: the workspace rail is a sibling of the gated route
@@ -61,13 +62,13 @@ function RootLayout() {
       <div className="flex h-full min-h-0">
         <WorkspaceRailPanel />
         <div className="min-w-0 flex-1">
-          <StartupGate>
+          {aggregate ? <Outlet /> : <StartupGate>
             <ChangeSubscriptionMount />
             <StatusColorsMount />
             {/* beadbox-01f.2: visible when the change stream stalls. */}
             <LiveUpdatesPausedBanner />
             <Outlet />
-          </StartupGate>
+          </StartupGate>}
         </div>
       </div>
       <Toaster position="bottom-right" theme="dark" />
