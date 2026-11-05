@@ -556,11 +556,11 @@ async function detailViaServe(
   ]
 }
 
-export async function getBeadDetail(id: string, dbPath?: string): Promise<Bead | null> {
+export async function getBeadDetail(id: string, dbPath?: string, fresh = false): Promise<Bead | null> {
   const options: BdOptions = dbPath ? { db: dbPath } : {}
 
-  if (hasCachedResult() && getCachedDbPath() === (dbPath ?? "")) {
-    const cached = getCachedBeadDetail(id)
+  if (!fresh) {
+    const cached = getCachedBeadDetail(id, dbPath ?? "")
     if (cached) {
       console.error(`[bd] show (cache hit) for ${id}`)
       return cached
@@ -603,7 +603,7 @@ export async function getBeadDetail(id: string, dbPath?: string): Promise<Bead |
       blocks: blocks.length > 0 ? blocks : undefined,
     }
 
-    setCachedBeadDetail(result)
+    setCachedBeadDetail(result, dbPath ?? "")
 
     return result
   } catch {

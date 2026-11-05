@@ -10,7 +10,7 @@ import {
   SlidersHorizontal,
   Waves,
 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { type ReactNode, useMemo, useState } from "react"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -50,6 +50,7 @@ export interface SortOption {
 }
 
 interface FilterBarProps {
+  extraFilters?: ReactNode
   filters: Filters
   onFiltersChange: (filters: Filters) => void
   assignees: string[]
@@ -113,6 +114,7 @@ function statusLabel(status: string): string {
 }
 
 export function FilterBar({
+  extraFilters,
   filters,
   onFiltersChange,
   assignees,
@@ -466,6 +468,7 @@ export function FilterBar({
             className="pl-9 h-9 bg-transparent border-0 rounded-none"
           />
         </div>
+        {extraFilters}
         {filterControls}
       </div>
     )
@@ -504,7 +507,10 @@ export function FilterBar({
       </div>
 
       <CollapsibleContent>
-        <div className="flex flex-col gap-2 pt-2">{filterControls}</div>
+        <div className="flex flex-col gap-2 pt-2">
+          {extraFilters}
+          {filterControls}
+        </div>
       </CollapsibleContent>
     </Collapsible>
   )

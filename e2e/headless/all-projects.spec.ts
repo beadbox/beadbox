@@ -1,0 +1,136 @@
+import { execFileSync } from "node:child_process"
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { expect, test } from "../fixtures/harness"
+import { childEnv, findBd } from "../fixtures/dolt-server"
+
+// The registry belongs to the whole worker: put it back after the test, pass
+// or fail, so later specs never see this test's extra projects.
+let restoreRegistry: (() => void) | undefined
+test.afterEach(() => {
+  restoreRegistry?.()
+  restoreRegistry = undefined
+})
+
+// Real, independent embedded stores, not exports or copies of demo tasks.
+test("aggregate isolates duplicate IDs, filters, CLI updates, failures and tab switches", async ({ page, workspace }, testInfo) => {
+  test.setTimeout(180_000)
+  page.setDefaultTimeout(15_000)
+  const root = dirname(workspace.registryPath)
+  const env = childEnv({ BD_NON_INTERACTIVE: "1" })
+  const run = (folder: string, args: string[]) => execFileSync(findBd(), args, { cwd: folder, env, encoding: "utf8", timeout: 30_000 })
+  const projects = ["Aggregate A", "Aggregate B"].map((name, index) => {
+    const folder = join(root, `aggregate-${index}`)
+    mkdirSync(folder, { recursive: true })
+    run(folder, ["init", "--non-interactive", "--prefix=shared", "--skip-hooks"])
+    run(folder, ["create", `${name} Epic`, "--id=shared-epic", "--type=epic"])
+    run(folder, ["create", `${name} Task — Проверка`, "--id=shared-task"])
+    run(folder, ["update", "shared-task", "--parent=shared-epic"])
+    run(folder, ["create", `${name} blocker`, "--id=shared-block"])
+    run(folder, ["dep", "add", "shared-task", "shared-block"])
+    return { id: `aggregate-${index}`, name, folder, local: { path: join(folder, ".beads") }, server: null, mode: "embedded", addedAt: new Date().toISOString() }
+  })
+  const original = readFileSync(workspace.registryPath, "utf8")
+  restoreRegistry = () => writeFileSync(workspace.registryPath, original)
+  const registry = JSON.parse(original)
+  registry.workspaces.push(...projects)
+  writeFileSync(workspace.registryPath, JSON.stringify(registry))
+  const [a, b] = projects
+  const row = (project: string, bead = "shared-task") => page.locator(`[data-project-id="${project}"][data-bead-id="${bead}"]`)
+  const detail = () => page.getByRole("region", { name: "Details: Aggregate A" })
+
+  await page.goto("/all-projects")
+  await expect(page.getByRole("heading", { name: "All projects", exact: true })).toBeVisible()
+  await expect(row(a.id)).toContainText("Проверка")
+  await expect(row(a.id)).toBeVisible()
+  await expect(row(b.id)).toBeVisible()
+  await expect(row(a.id, "shared-epic")).toBeVisible()
+
+  await expect(row(a.id).getByTestId("project-badge")).toHaveText("Aggregate A")
+  await row(a.id).getByRole("checkbox").click()
+  await expect(row(a.id).getByRole("checkbox")).toBeChecked()
+  await expect(row(b.id).getByRole("checkbox")).not.toBeChecked()
+  await page.getByRole("button", { name: "Set status of selected" }).click()
+  await page.getByRole("menuitem", { name: "In Progress", exact: true }).click()
+  await expect.poll(() => JSON.parse(run(a.folder, ["show", "shared-task", "--json"]))[0].status).toBe("in_progress")
+  expect(JSON.parse(run(b.folder, ["show", "shared-task", "--json"]))[0].status).toBe("open")
+  const checkSettings = async () => {
+    const button = page.getByRole("button", { name: "Settings", exact: true })
+    await expect(button).toBeVisible()
+    await button.focus()
+    await page.keyboard.press("Enter")
+    await expect(page.getByRole("dialog")).toBeVisible()
+    await expect(page.getByRole("dialog").getByText("General", { exact: true })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+  }
+  await checkSettings()
+  await page.setViewportSize({ width: 760, height: 800 })
+  await checkSettings()
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Source filter intersects with the existing search filter.
+  await page.getByRole("button", { name: "Project filter" }).click()
+  await page.locator("button[data-multi-select-row]").filter({ hasText: "All projects" }).click()
+  await page.locator("button[data-multi-select-row]").filter({ hasText: "Aggregate A" }).click()
+  await page.keyboard.press("Escape")
+  await expect(row(a.id)).toBeVisible()
+  await expect(row(b.id)).toHaveCount(0)
+  const search = page.getByPlaceholder(/search/i).first()
+  await search.fill("Task")
+  await expect(row(a.id, "shared-epic")).toHaveCount(0)
+  await search.fill("")
+  await page.getByRole("button", { name: "Project filter" }).click()
+  await page.locator("button[data-multi-select-row]").filter({ hasText: "Aggregate B" }).click()
+  await page.keyboard.press("Escape")
+  await expect(row(b.id)).toBeVisible()
+
+  await row(a.id).click()
+  await detail().getByRole("button", { name: "shared-block", exact: true }).click()
+  await expect(detail().getByText("Aggregate A blocker", { exact: true })).toBeVisible()
+  await row(a.id).click()
+  await detail().getByRole("button", { name: "Add label" }).click()
+  await page.getByRole("combobox", { name: "New label" }).fill("aggregate-ui")
+  await page.keyboard.press("Enter")
+  const shown = (folder: string) => JSON.parse(run(folder, ["show", "shared-task", "--json"]))[0]
+  await expect.poll(() => shown(a.folder).labels ?? []).toContain("aggregate-ui")
+  expect(shown(b.folder).labels ?? []).not.toContain("aggregate-ui")
+  await detail().getByRole("textbox", { name: "Comment", exact: true }).fill("Only in project A — комментарий")
+  await detail().getByRole("button", { name: "Add comment" }).click()
+  await expect(detail().getByText("Only in project A — комментарий", { exact: true })).toBeVisible()
+  expect(run(b.folder, ["comments", "shared-task", "--json"])).not.toContain("Only in project A — комментарий")
+
+  run(a.folder, ["update", "shared-task", "--title=CLI changed A"])
+  await expect(row(a.id)).toContainText("CLI changed A", { timeout: 15_000 })
+  await expect(row(b.id)).toContainText("Aggregate B Task")
+  // Wait through another complete refresh: loaded tasks must not disappear.
+  await page.waitForTimeout(6_000)
+  await expect(row(a.id)).toContainText("CLI changed A")
+  await expect(row(b.id)).toBeVisible()
+
+  renameSync(b.local.path, `${b.local.path}-offline`)
+  try {
+    await page.getByRole("button", { name: "Refresh", exact: true }).click()
+    await expect(page.getByRole("alert").filter({ hasText: "Aggregate B" })).toBeVisible()
+    await expect(row(a.id)).toBeVisible()
+    await page.getByRole("button", { name: "Open Aggregate A", exact: true }).click()
+    await expect(page).toHaveURL(/\/$|\/\?/)
+    await expect(page.getByText("Aggregate A Epic", { exact: true }).first()).toBeVisible()
+    await checkSettings()
+    await page.setViewportSize({ width: 760, height: 800 })
+    await checkSettings()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await expect(page.getByText("Aggregate B Task — Проверка", { exact: true })).toHaveCount(0)
+    await page.getByRole("button", { name: "All projects", exact: true }).click()
+    await expect(row(a.id)).toContainText("CLI changed A")
+  } finally { renameSync(`${b.local.path}-offline`, b.local.path) }
+  await page.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(row(b.id)).toBeVisible()
+  await row(b.id).click()
+  await expect(page.getByRole("region", { name: "Details: Aggregate B" }).getByText("Only in project A — комментарий", { exact: true })).toHaveCount(0)
+  await page.reload()
+  await expect(row(a.id)).toBeVisible()
+  await expect(row(b.id)).toBeVisible()
+  await checkSettings()
+  await page.screenshot({ path: testInfo.outputPath("all-projects.png"), fullPage: true })
+})

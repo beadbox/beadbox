@@ -268,6 +268,8 @@ export interface WorkspaceRailProps {
   dashboardActive: boolean
   /** Workspace whose switch is in flight — renders a spinner on that tab. */
   switchingWorkspaceId?: string | null
+  allProjectsActive?: boolean
+  onAllProjects?: () => void
   onDashboard: () => void
   onSelect: (workspace: WorkspaceCard) => void
   onRemove: (workspace: WorkspaceCard) => void
@@ -288,6 +290,8 @@ export function WorkspaceRail({
   dashboardActive,
   switchingWorkspaceId,
   onDashboard,
+  allProjectsActive,
+  onAllProjects,
   onSelect,
   onRemove,
   onRelabel,
@@ -302,6 +306,17 @@ export function WorkspaceRail({
       aria-label="Workspaces"
       data-testid="workspace-rail"
     >
+      {onAllProjects && <button
+        type="button"
+        onClick={onAllProjects}
+        aria-current={allProjectsActive ? "page" : undefined}
+        aria-label="All projects"
+        title="All projects"
+        className={cn(ROW_BASE, FOCUS_RING, "p-3", allProjectsActive ? ROW_ACTIVE : ROW_INACTIVE)}
+      >
+        <LayoutGrid className="h-5 w-5 shrink-0" />
+        {!collapsed && <span>All projects</span>}
+      </button>}
       {/* No bottom border here: the page header inside the content column is
           taller than this label row (its h-9 icon buttons set the height), so
           a divider would sit a few px off the header's own border. The rail

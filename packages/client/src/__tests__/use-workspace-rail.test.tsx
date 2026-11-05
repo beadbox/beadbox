@@ -95,6 +95,7 @@ function mountRail(initialPath: string) {
   const routeTree = rootRoute.addChildren([
     createRoute({ getParentRoute: () => rootRoute, path: "/", component: () => null }),
     createRoute({ getParentRoute: () => rootRoute, path: "/workspaces", component: () => null }),
+    createRoute({ getParentRoute: () => rootRoute, path: "/all-projects", component: () => null }),
   ])
   const router = createRouter({
     routeTree,
@@ -128,6 +129,16 @@ afterEach(() => {
 })
 
 describe("useWorkspaceRail", () => {
+  for (const target of [alpha, beta]) {
+    test(`leaving all projects opens ${target.name}, including the already active tab`, async () => {
+      setWorkspaceCookie(alpha.id)
+      const { seen, router } = await railAt("/all-projects", [alpha, beta])
+      await act(async () => { await seen.current?.selectWorkspace(target) })
+      await waitFor(() => expect(router.state.location.pathname).toBe("/"))
+      expect(getWorkspaceCookie()).toBe(target.id)
+    })
+  }
+
   test("loads the registry and mirrors the active cookie", async () => {
     setWorkspaceCookie(beta.id)
     const { mocks, seen } = await railAt("/", [alpha, beta])

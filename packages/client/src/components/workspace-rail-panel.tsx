@@ -7,6 +7,7 @@
 // md breakpoint (< 768px) — the mobile layout is single-panel and the
 // header's workspace button already reaches the dashboard.
 
+import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { useCallback, useState } from "react"
 import { useViewport } from "../hooks/use-viewport"
 import { useWorkspaceRail } from "../hooks/use-workspace-rail"
@@ -38,6 +39,8 @@ export function WorkspaceRailPanel() {
 }
 
 function WorkspaceRailShell() {
+  const navigate = useNavigate()
+  const allProjectsActive = useRouterState({ select: (s) => s.location.pathname === "/all-projects" })
   const {
     workspaces,
     activeWorkspaceId,
@@ -104,7 +107,9 @@ function WorkspaceRailShell() {
     <>
       <WorkspaceRail
         workspaces={workspaces}
-        activeWorkspaceId={activeWorkspaceId}
+        activeWorkspaceId={allProjectsActive ? null : activeWorkspaceId}
+        allProjectsActive={allProjectsActive}
+        onAllProjects={() => void navigate({ to: "/all-projects" })}
         width={width}
         collapsed={collapsed}
         dashboardActive={dashboardActive}
