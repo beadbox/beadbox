@@ -28,7 +28,12 @@ serde_json = "1"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-js = "0.1.0"
-tauri-plugin-updater = "2"
+# beadbox-mm6: without the default "zip" feature, so the zip crate is not in
+# the graph (RUSTSEC-2026-0367/0368/0369/0429). The feature gates only the
+# Windows .zip unpack and the Linux AppImage .tar.gz branch; the macOS
+# .app.tar.gz and the .deb install paths do not use it. rustls-tls is the
+# other default, kept. Recheck before shipping a Windows or AppImage build.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "linux-native"] }
 sha2 = "0.10"
 # beadbox-b2p (A-3'): private-repo self-update. reqwest makes the single
