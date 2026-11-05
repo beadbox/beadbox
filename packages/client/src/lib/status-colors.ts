@@ -271,14 +271,20 @@ export function cssEscapeIdent(s: string): string {
   return out
 }
 
-/** The stylesheet for the resolved colors; surface is the theme's card color. */
-export function buildStatusColorCss(css: StatusColorMap, surface: string): string {
+/**
+ * The stylesheet for the resolved colors; surface is the theme's card color.
+ * With a `scope` (a workspace id), every rule only matches inside elements
+ * tagged data-project-id with that id: the All projects view styles each
+ * project's rows with that project's own colors (beadbox-t6x).
+ */
+export function buildStatusColorCss(css: StatusColorMap, surface: string, scope?: string): string {
   const rules: string[] = []
+  const prefix = scope === undefined ? "" : `[data-project-id="${cssEscapeIdent(scope)}"] `
   for (const [name, hex] of Object.entries(css)) {
     if (!isHexColor(hex)) continue
     const [r, g, b] = toRgb(hex)
     const text = readableTextColor(hex, surface)
-    const sel = `[data-status="${cssEscapeIdent(name)}"]`
+    const sel = `${prefix}[data-status="${cssEscapeIdent(name)}"]`
     const tint = `rgb(${r} ${g} ${b} / 0.2)`
     const edge = `rgb(${r} ${g} ${b} / 0.4)`
     rules.push(

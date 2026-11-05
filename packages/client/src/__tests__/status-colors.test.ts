@@ -160,6 +160,32 @@ describe("buildStatusColorCss", () => {
   test("a non-hex value never reaches the stylesheet", () => {
     expect(buildStatusColorCss({ open: "red; background:url(x)" }, "#000000")).toBe("")
   })
+
+  // beadbox-t6x: the All projects view styles each project's rows with that
+  // project's own colors, so its rules are scoped to the project's elements.
+  test("a scope confines every rule to that project's elements", () => {
+    const colors = { open: "#ff0000", review: "#00aa00" }
+    const unscoped = buildStatusColorCss(colors, "#000000")
+    const scoped = buildStatusColorCss(colors, "#000000", "ws-a")
+    const rules = scoped.split("\n")
+    expect(rules.length).toBe(unscoped.split("\n").length)
+    for (const rule of rules) expect(rule.startsWith('[data-project-id="ws-a"] [data-status=')).toBe(true)
+    // Same declarations as the unscoped sheet, only the selector differs.
+    expect(scoped.replaceAll('[data-project-id="ws-a"] ', "")).toBe(unscoped)
+  })
+
+  test("a hostile workspace id cannot break out of the scope", () => {
+    const out = buildStatusColorCss({ open: "#ff0000" }, "#000000", 'a"] , body { x:y } [b="')
+    expect(out).not.toContain("body {")
+    expect(out.split("{").length).toBe(out.split("}").length)
+    expect(out.split("\n").every((r) => r.startsWith('[data-project-id="'))).toBe(true)
+  })
+
+  test("without a scope the sheet is unchanged", () => {
+    expect(buildStatusColorCss({ open: "#ff0000" }, "#000000", undefined)).toBe(
+      buildStatusColorCss({ open: "#ff0000" }, "#000000"),
+    )
+  })
 })
 
 describe("unchanged defaults (main @ 89cf7f18)", () => {

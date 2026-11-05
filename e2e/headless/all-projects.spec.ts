@@ -12,6 +12,9 @@ test.afterEach(() => {
   restoreRegistry = undefined
 })
 
+// Each project's own color for "open" (beadbox-t6x): A red, B blue.
+const OPEN_COLOR = ["#ff0000", "#0000ff"]
+
 // Real, independent embedded stores, not exports or copies of demo tasks.
 test("aggregate isolates duplicate IDs, filters, CLI updates, failures and tab switches", async ({ page, workspace }, testInfo) => {
   test.setTimeout(180_000)
@@ -28,7 +31,7 @@ test("aggregate isolates duplicate IDs, filters, CLI updates, failures and tab s
     run(folder, ["update", "shared-task", "--parent=shared-epic"])
     run(folder, ["create", `${name} blocker`, "--id=shared-block"])
     run(folder, ["dep", "add", "shared-task", "shared-block"])
-    return { id: `aggregate-${index}`, name, folder, local: { path: join(folder, ".beads") }, server: null, mode: "embedded", addedAt: new Date().toISOString() }
+    return { id: `aggregate-${index}`, name, folder, local: { path: join(folder, ".beads") }, server: null, mode: "embedded", addedAt: new Date().toISOString(), statusColors: { open: OPEN_COLOR[index] } }
   })
   const original = readFileSync(workspace.registryPath, "utf8")
   restoreRegistry = () => writeFileSync(workspace.registryPath, original)
@@ -45,6 +48,15 @@ test("aggregate isolates duplicate IDs, filters, CLI updates, failures and tab s
   await expect(row(a.id)).toBeVisible()
   await expect(row(b.id)).toBeVisible()
   await expect(row(a.id, "shared-epic")).toBeVisible()
+
+  // beadbox-t6x: each row's status badge uses its own project's color for the
+  // same status, the way each project's own board shows it.
+  const openBadge = (project: string) =>
+    row(project, "shared-epic").locator('[data-status="open"][data-status-role="badge"]')
+  const background = (el: import("@playwright/test").Locator) =>
+    el.evaluate((node) => getComputedStyle(node).backgroundColor)
+  await expect.poll(() => background(openBadge(a.id))).toBe("rgba(255, 0, 0, 0.2)")
+  await expect.poll(() => background(openBadge(b.id))).toBe("rgba(0, 0, 255, 0.2)")
 
   await expect(row(a.id).getByTestId("project-badge")).toHaveText("Aggregate A")
   await row(a.id).getByRole("checkbox").click()
@@ -128,6 +140,30 @@ test("aggregate isolates duplicate IDs, filters, CLI updates, failures and tab s
   await expect(row(b.id)).toBeVisible()
   await row(b.id).click()
   await expect(page.getByRole("region", { name: "Details: Aggregate B" }).getByText("Only in project A — комментарий", { exact: true })).toHaveCount(0)
+  // The detail pane uses its source's colors: B's open status text takes the
+  // color B's own stylesheet gives it, which A's never would.
+  const paneStatus = page
+    .getByRole("region", { name: "Details: Aggregate B" })
+    .locator('[data-status="open"][data-status-role="text"]')
+    .first()
+  const scopedTextColor = (project: string) =>
+    page.evaluate((id) => {
+      const css = document.querySelector(`style[data-beadbox-status-colors-project="${id}"]`)?.textContent ?? ""
+      const m = css.match(/\[data-status="open"\]\[data-status-role="text"\]\{color:([^}]+)\}/)
+      if (!m) return null
+      const probe = document.createElement("span")
+      probe.style.color = m[1]
+      document.body.append(probe)
+      const value = getComputedStyle(probe).color
+      probe.remove()
+      return value
+    }, project)
+  const expectedB = await scopedTextColor(b.id)
+  expect(expectedB).not.toBeNull()
+  expect(expectedB).not.toBe(await scopedTextColor(a.id))
+  await expect.poll(() => paneStatus.evaluate((node) => getComputedStyle(node).color)).toBe(expectedB)
+  // Colors are Beadbox's own setting: bd never sees them.
+  for (const folder of [a.folder, b.folder]) expect(run(folder, ["show", "shared-epic", "--json"])).not.toContain("#ff0000")
   await page.reload()
   await expect(row(a.id)).toBeVisible()
   await expect(row(b.id)).toBeVisible()
