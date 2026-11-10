@@ -38,6 +38,7 @@ import { type BadgeConfig, getStatusConfig, PillBadge, priorityConfig } from "@/
 import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
 import type { Bead, BeadPriority, ReadState } from "@/lib/types"
+import { makeKeyer } from "@/lib/stable-key"
 import { cn } from "@/lib/utils"
 import { describeDeadline } from "@/lib/waiting"
 
@@ -209,6 +210,7 @@ function BeadRow({
   onToggleSelect,
 }: BeadRowProps) {
   const { isMobile } = useViewport()
+  const childKey = makeKeyer()
   const [isArchiving, setIsArchiving] = useState(false)
   const source = sourceForBead?.(bead)
   const rowKey = keyFor(bead, sourceForBead)
@@ -522,7 +524,7 @@ function BeadRow({
         isExpanded &&
         bead.children!.map((child, idx) => (
           <BeadRow
-            key={`${child.id}-${idx}`}
+            key={childKey(child.id)}
             bead={child}
             sourceForBead={sourceForBead}
             flat={flat}
@@ -651,9 +653,10 @@ export function BeadTable({
   const waves = showWaves ? computeWaves(beads, sourceForBead) : null
   const useWaveView = waves && waves.length >= 2
 
+  const rowKey = makeKeyer()
   const renderBeadRow = (bead: Bead, index: number) => (
     <BeadRow
-      key={`${keyFor(bead, sourceForBead)}-${index}`}
+      key={rowKey(keyFor(bead, sourceForBead))}
       bead={bead}
       sourceForBead={sourceForBead}
       flat={flat}

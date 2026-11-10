@@ -25,6 +25,7 @@ import { getArchiveExpanded, setArchiveExpanded } from "@/lib/local-storage"
 import { computeStepGroups, isStepFinished, stepCount } from "@/lib/molecule-phases"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import type { Bead, Epic, ReadState } from "@/lib/types"
+import { makeKeyer } from "@/lib/stable-key"
 import { cn } from "@/lib/utils"
 
 interface EpicTreeProps {
@@ -232,6 +233,12 @@ export function EpicTree({
   // Expand/collapse all logic for epics
   const allEpicIds = collectAllEpicIds(epics)
   const allExpanded = allEpicIds.length > 0 && allEpicIds.every((id) => expandedEpics.has(id))
+  // One keyer per rendered list (beadbox-005): keys by id, never by index.
+  const epicKey = makeKeyer()
+  const moleculeKey = makeKeyer()
+  const convoyKey = makeKeyer()
+  const backlogKey = makeKeyer()
+  const archivedKey = makeKeyer()
 
   // Expand/collapse all logic for molecules
   const moleculeCount = molecules.length
@@ -393,7 +400,7 @@ export function EpicTree({
                 .filter((e) => e.id !== "_standalone")
                 .map((epic, index) => (
                   <EpicRow
-                    key={`${epic.id}-${index}`}
+                    key={epicKey(epic.id)}
                     epic={epic}
                     depth={0}
                     expandedEpics={expandedEpics}
@@ -521,7 +528,7 @@ export function EpicTree({
             <div className="space-y-3 mt-1">
               {molecules.map((molecule, index) => (
                 <EpicRow
-                  key={`molecule-${molecule.id}-${index}`}
+                  key={moleculeKey(`molecule-${molecule.id}`)}
                   epic={molecule}
                   depth={0}
                   expandedEpics={expandedEpics}
@@ -616,7 +623,7 @@ export function EpicTree({
             <div className="space-y-3 mt-1">
               {convoys.map((convoy, index) => (
                 <EpicRow
-                  key={`convoy-${convoy.id}-${index}`}
+                  key={convoyKey(`convoy-${convoy.id}`)}
                   epic={convoy}
                   depth={0}
                   expandedEpics={expandedEpics}
@@ -886,7 +893,7 @@ export function EpicTree({
               {/* Backlog epics */}
               {backlogEpics.map((epic, index) => (
                 <EpicRow
-                  key={`backlog-${epic.id}-${index}`}
+                  key={backlogKey(`backlog-${epic.id}`)}
                   epic={epic}
                   depth={0}
                   expandedEpics={expandedEpics}
@@ -1052,7 +1059,7 @@ export function EpicTree({
               {/* Archived epics */}
               {archivedEpics.map((epic, index) => (
                 <EpicRow
-                  key={`archived-${epic.id}-${index}`}
+                  key={archivedKey(`archived-${epic.id}`)}
                   epic={epic}
                   depth={0}
                   expandedEpics={expandedEpics}
@@ -1239,11 +1246,12 @@ export function EpicRow({
   // - Archived epics can be unarchived
   const isDraggable = !isStandalone
 
+  const childEpicKey = makeKeyer()
   // One child epic row: an ordinary epic's child epics, and a step's own child
   // epics (beadbox-e04o.1), so the step draws what j/k walks into.
   const renderChildEpic = (childEpic: Epic, index: number, childDepth: number) => (
     <EpicRow
-      key={`${childEpic.id}-${childDepth - 1}-${index}`}
+      key={childEpicKey(`${childEpic.id}-${childDepth - 1}`)}
       epic={childEpic}
       depth={childDepth}
       expandedEpics={expandedEpics}
