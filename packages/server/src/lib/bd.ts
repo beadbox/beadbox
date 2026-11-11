@@ -784,7 +784,11 @@ export async function updateStatus(
 // Throws when bd cannot read the config, so a caller that writes the list back
 // can refuse rather than drop categories.
 export async function getCustomStatusEntries(options: BdOptions = {}): Promise<StatusConfigEntry[]> {
-  return parseStatusConfig(await bdExecRaw(["config", "get", "status.custom"], options))
+  // --readonly: bd runs auto-push after any command it doesn't classify as read-only,
+  // and `config get` isn't on its list (same for `statuses` below).
+  return parseStatusConfig(
+    await bdExecRaw(["config", "get", "status.custom", "--readonly"], options),
+  )
 }
 
 // Get custom status names from bd config
@@ -820,7 +824,7 @@ export function parseStatusCatalog(value: BdStatusesResult): StatusCatalog {
 // Every status bd accepts, by name (`bd statuses`, present since bd 1.1.0).
 // Custom statuses come back alphabetical; order them from the config.
 export async function getStatusCatalog(options: BdOptions = {}): Promise<StatusCatalog> {
-  return parseStatusCatalog(await bdExec<BdStatusesResult>(["statuses"], options))
+  return parseStatusCatalog(await bdExec<BdStatusesResult>(["statuses", "--readonly"], options))
 }
 
 // Replace the custom-status list in bd config. Empty list unsets the key.
