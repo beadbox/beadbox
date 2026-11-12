@@ -717,7 +717,7 @@ export async function listEpics(options: BdOptions = {}): Promise<BdBead[]> {
 
 // Get epic status counters (total_children, closed_children for each epic)
 export async function getEpicStatuses(options: BdOptions = {}): Promise<BdEpicStatus[]> {
-  return bdExec<BdEpicStatus[]>(["epic", "status"], options)
+  return bdExec<BdEpicStatus[]>(["epic", "status", "--readonly", "--sandbox"], options)
 }
 
 // Get a single bead/epic by ID (includes dependents for epics).
@@ -784,7 +784,11 @@ export async function updateStatus(
 // Throws when bd cannot read the config, so a caller that writes the list back
 // can refuse rather than drop categories.
 export async function getCustomStatusEntries(options: BdOptions = {}): Promise<StatusConfigEntry[]> {
-  return parseStatusConfig(await bdExecRaw(["config", "get", "status.custom"], options))
+  // --sandbox suppresses auto-push on older supported bd versions where
+  // --readonly alone does not; neither flag belongs on writes.
+  return parseStatusConfig(
+    await bdExecRaw(["config", "get", "status.custom", "--readonly", "--sandbox"], options),
+  )
 }
 
 // Get custom status names from bd config
@@ -820,7 +824,7 @@ export function parseStatusCatalog(value: BdStatusesResult): StatusCatalog {
 // Every status bd accepts, by name (`bd statuses`, present since bd 1.1.0).
 // Custom statuses come back alphabetical; order them from the config.
 export async function getStatusCatalog(options: BdOptions = {}): Promise<StatusCatalog> {
-  return parseStatusCatalog(await bdExec<BdStatusesResult>(["statuses"], options))
+  return parseStatusCatalog(await bdExec<BdStatusesResult>(["statuses", "--readonly", "--sandbox"], options))
 }
 
 // Replace the custom-status list in bd config. Empty list unsets the key.
@@ -998,7 +1002,7 @@ export function parseAvailableTypes(value: BdTypesResult): string[] {
 }
 
 export async function getAvailableTypes(options: BdOptions = {}): Promise<string[]> {
-  const result = await bdExec<BdTypesResult>(["types"], options)
+  const result = await bdExec<BdTypesResult>(["types", "--readonly", "--sandbox"], options)
   return parseAvailableTypes(result)
 }
 
@@ -1276,7 +1280,7 @@ export interface BdStatusSummary {
 }
 
 export async function getWorkspaceStatus(options: BdOptions = {}): Promise<BdStatusSummary> {
-  const result = await bdExec<{ summary: BdStatusSummary }>(["status"], options)
+  const result = await bdExec<{ summary: BdStatusSummary }>(["status", "--readonly", "--sandbox"], options)
   return result.summary
 }
 
@@ -1679,7 +1683,7 @@ export async function getMoleculeProgress(
   id: string,
   options: BdOptions = {},
 ): Promise<MolProgress> {
-  const raw = await bdExec<MolProgressRaw>(["mol", "progress", assertSafeBeadId(id)], options)
+  const raw = await bdExec<MolProgressRaw>(["mol", "progress", assertSafeBeadId(id), "--readonly", "--sandbox"], options)
   return {
     id: raw.molecule_id,
     name: raw.molecule_title,
