@@ -49,7 +49,9 @@ mock.module("../../lib/exec", () => ({
 
 // resolveBdPath is invoked by run() to build the argv. Mock it to a
 // deterministic sentinel so tests can assert the file argument exactly.
+const realBdPaths = await import("../../lib/bd-paths")
 mock.module("../../lib/bd-paths", () => ({
+  ...realBdPaths,
   resolveBdPath: () => "/fake/bin/bd",
   COMMON_BD_PATHS: [],
   __resetBdPathCache: () => {},

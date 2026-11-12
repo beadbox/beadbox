@@ -6,7 +6,12 @@
 import { homedir } from "os"
 import { isAbsolute, resolve } from "path"
 import { flagArg } from "../lib/bd-argv"
-import { COMMON_BD_PATHS, resetPathCaches, resolveBdPath } from "../lib/bd-paths"
+import {
+  COMMON_BD_PATHS,
+  getCandidateBdPaths,
+  resetPathCaches,
+  resolveBdPath,
+} from "../lib/bd-paths"
 import { execFileAsync } from "../lib/exec"
 import { isValidDbPath } from "../lib/path-validation"
 import type { HealthError } from "../lib/startup-machine"
@@ -62,10 +67,12 @@ export async function checkBdHealth(): Promise<BdHealthResult> {
         : "UNKNOWN"
     const home = homedir()
     const sanitize = (p: string) => (p.startsWith(home) ? "~" + p.slice(home.length) : p)
+    const candidates =
+      typeof getCandidateBdPaths === "function" ? getCandidateBdPaths() : COMMON_BD_PATHS
     return {
       bdAvailable: false,
       platform: process.platform,
-      paths_checked: COMMON_BD_PATHS.map(sanitize),
+      paths_checked: candidates.map(sanitize),
       resolved_path: sanitize(bdPath),
       error_detail: errMsg,
       error_type: errCode,
