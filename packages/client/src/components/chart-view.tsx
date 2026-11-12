@@ -18,9 +18,10 @@ import { useAppHealth } from "@/hooks/use-app-health"
 import { useHasTrains } from "@/hooks/use-has-trains"
 import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { usePreferences } from "@/hooks/use-preferences"
+import { useLabelChoiceForWorkspace } from "@/hooks/use-label-choice-for-workspace"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { readSystemIssues, systemIssuesKey } from "@/hooks/use-workspace-lifecycle"
-import { extractAssignees, extractRigNames, flattenEpicsToBeads } from "@/lib/epic-tree-utils"
+import { extractAssignees, extractLabels, extractRigNames, flattenEpicsToBeads } from "@/lib/epic-tree-utils"
 import { buildGanttModel } from "@/lib/gantt-model"
 import { setSelectedBead as persistSelectedBead } from "@/lib/local-storage"
 import { rpc } from "@/lib/rpc"
@@ -99,6 +100,7 @@ export function ChartView() {
   const navigate = useNavigate()
   const { health: appHealth } = useAppHealth()
   const prefs = usePreferences()
+  useLabelChoiceForWorkspace(currentWorkspace?.id, prefs.filters, prefs.setFilters)
   const hasTrains = useHasTrains(currentWorkspace?.databasePath)
   const hasWaiting = useHasWaiting(currentWorkspace?.databasePath)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -128,6 +130,7 @@ export function ChartView() {
   const now = useNow()
 
   const assignees = useMemo(() => extractAssignees(epics), [epics])
+  const labels = useMemo(() => extractLabels(epics), [epics])
   const rigNames = useMemo(() => extractRigNames(epics), [epics])
   const typeOptions = useMemo(
     () => [...new Set([...(typesQuery.data ?? []), ...epics.map((e) => e.type), ...flattenEpicsToBeads(epics).map((b) => b.type)])],
@@ -188,6 +191,7 @@ export function ChartView() {
           filters={prefs.filters}
           onFiltersChange={prefs.setFilters}
           assignees={assignees}
+          availableLabels={labels}
           rigNames={rigNames}
           availableStatuses={statusesQuery.data}
           availableTypes={typeOptions}

@@ -32,6 +32,7 @@ import { useDevConsole } from "@/hooks/use-dev-console"
 import { useDevConsoleTaps } from "@/hooks/use-dev-console-taps"
 import { useEpicNavigation } from "@/hooks/use-epic-navigation"
 import { usePreferences } from "@/hooks/use-preferences"
+import { useLabelChoiceForWorkspace } from "@/hooks/use-label-choice-for-workspace"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { useViewport } from "@/hooks/use-viewport"
 import { useWorkspaceLifecycle } from "@/hooks/use-workspace-lifecycle"
@@ -327,6 +328,8 @@ function BeadsEpicsViewer() {
     handleRemoveWorkspace,
     doRemoveWorkspace,
   } = lifecycle
+
+  useLabelChoiceForWorkspace(currentWorkspace?.id, filters, setFilters)
 
   // Settings dialog state
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -1057,6 +1060,7 @@ function BeadsEpicsViewer() {
               filters={filters}
               onFiltersChange={setFilters}
               assignees={assignees}
+              availableLabels={labelSuggestions}
               rigNames={rigNames}
               availableStatuses={availableStatuses}
               availableTypes={typeOptions}

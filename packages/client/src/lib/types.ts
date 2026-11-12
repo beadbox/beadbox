@@ -341,6 +341,10 @@ export interface SortOption {
 }
 
 export interface Filters {
+  /** Match ANY selected label exactly; absent or empty means all labels. */
+  labels?: string[]
+  /** Workspace owning the saved label choice, retained across viewer remounts. */
+  labelsWorkspaceId?: string
   /** Optional workspace type filter. Omitted means all types. */
   type?: string
   /** Full view includes infrastructure messages even when the legacy message toggle is off. */

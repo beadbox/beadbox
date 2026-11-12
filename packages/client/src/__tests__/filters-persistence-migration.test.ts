@@ -135,3 +135,25 @@ describe("getFiltersPreference priority migration (beadbox-813)", () => {
     }
   })
 })
+
+describe("label filter preferences (GitHub #70)", () => {
+  test("new and legacy preferences default to all labels", () => {
+    expect(getFiltersPreference().labels).toEqual([])
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: "open" }))
+    expect(getFiltersPreference().labels).toEqual([])
+  })
+  test("saved labels persist with other filters", () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ labels: ["frontend", "urgent"], labelsWorkspaceId: "workspace-a", search: "needle" }))
+    expect(getFiltersPreference().labels).toEqual(["frontend", "urgent"])
+    expect(getFiltersPreference().search).toBe("needle")
+    expect(getFiltersPreference().labelsWorkspaceId).toBe("workspace-a")
+  })
+  test("malformed label choices normalize to strings or all labels", () => {
+    for (const labels of [null, "urgent", 7, {}]) {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify({ labels }))
+      expect(getFiltersPreference().labels).toEqual([])
+    }
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ labels: ["urgent", 7, null, "urgent"] }))
+    expect(getFiltersPreference().labels).toEqual(["urgent"])
+  })
+})

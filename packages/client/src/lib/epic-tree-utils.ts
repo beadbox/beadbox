@@ -167,6 +167,7 @@ const BEAD_FILTER_PREDICATES: BeadFilterPredicate[] = [
   (b, f) => !f.hasSpec || Boolean(b.specId),
   (b, f) => !f.hasDeadline || Boolean(b.dueAt),
   (b, f) => f.rig === "all" || b.rigName === f.rig,
+  (b, f) => !f.labels?.length || f.labels.some((label) => b.labels?.includes(label)),
   matchesSearch,
 ]
 
