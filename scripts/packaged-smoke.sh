@@ -6,7 +6,9 @@
 # Nothing can drive a WKWebView from outside on macOS (Playwright does not
 # attach to it and tauri-driver does not support macOS), so the app is checked
 # from the outside: its sidecar's log, process state, bd on the runner, and the
-# updater endpoint. Each check prints PASS or FAIL with its evidence; any FAIL
+# updater endpoint. The display helper wakes and holds the display, then
+# activates only the launched PID; failure artifacts name covering windows.
+# Each check prints PASS or FAIL with its evidence; any FAIL
 # makes the script exit 1.
 #
 # Shared Macs (beadbox-449.5): the runner may be the QA Mac, with other copies
@@ -51,8 +53,13 @@ reported=0
 EXPECTED_CHECKS=10
 started=$(date +%s)
 pass() { echo "PASS  $1"; reported=$((reported + 1)); }
-fail() { echo "FAIL  $1"; failures=$((failures + 1)); reported=$((reported + 1)); }
+fail() { echo "FAIL  $1"; failures=$((failures + 1)); reported=$((reported + 1)); smoke_display_diagnose; }
 elapsed() { echo "$(($(date +%s) - started))s"; }
+
+# Own the display assertion for the entire smoke, including early failures.
+# Native PID activation avoids Apple Events and their unattended consent prompts.
+source "$(dirname "${BASH_SOURCE[0]}")/packaged-smoke-display.sh"
+smoke_display_start || { fail "display: could not wake/hold the display"; exit 1; }
 
 # Wait until `pattern` appears in the sidecar log at least `count` times.
 wait_log() { # pattern, count, timeout seconds
@@ -121,6 +128,13 @@ for ((i = 0; i < 30; i++)); do
   sleep 1
 done
 if [ -n "$APP_PID" ]; then pass "launch: app process $APP_PID ($(elapsed))"; else fail "launch: no app process after 30s"; fi
+
+# Bring only this launch to the front before checking the visible app. The
+# live-update event/refetch check below stays unchanged; hidden refreshes remain
+# paused in the shipped app.
+if [ -n "$APP_PID" ]; then
+  smoke_display_front "$APP_PID" || { fail "window not visible: own app could not be foregrounded"; }
+fi
 
 # (a) The sidecar booted.
 if wait_log '\[beadbox-sidecar\] starting' 1 60; then
