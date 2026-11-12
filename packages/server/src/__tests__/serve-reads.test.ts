@@ -268,7 +268,8 @@ test("changing the saved bd path retires serve and starts the new binary on the 
   const previousSettings = process.env.BEADBOX_SETTINGS_PATH
   process.env.BEADBOX_SETTINGS_PATH = join(root, "settings.json")
   const first = process.env.BD_PATH as string
-  const next = join(root, "new bd with spaces")
+  mkdirSync(join(root, "new bd with spaces"))
+  const next = join(root, "new bd with spaces", "bd")
   writeFileSync(next, readFileSync(first), { mode: 0o700 })
   delete process.env.BD_PATH
   try {

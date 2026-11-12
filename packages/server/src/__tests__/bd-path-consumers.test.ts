@@ -50,7 +50,8 @@ test("changing saved bd updates health, bd.ts, console and an existing subscript
   )
   delete process.env.BD_PATH
   const fake = (name: string) => {
-    const binary = join(root!, name)
+    mkdirSync(join(root!, name), { recursive: true })
+    const binary = join(root!, name, "bd")
     const log = `${binary}.log`
     writeFileSync(
       binary,

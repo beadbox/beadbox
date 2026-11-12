@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { validateBdPathStatic } from "./bd-path-validation"
 
 function settingsPath(): string {
   return process.env.BEADBOX_SETTINGS_PATH || join(homedir(), ".beadbox", "settings.json")
@@ -23,10 +24,17 @@ function readSettings(): Record<string, unknown> {
   }
 }
 
-/** Return the user's choice even if the executable has since disappeared. */
+/** Recheck untrusted saved data and its current executable target on every read. */
 export function readSavedBdPath(): string | null {
   const path = readSettings().bdPath
-  return typeof path === "string" && path.length > 0 ? path : null
+  if (path === undefined) return null
+  try {
+    validateBdPathStatic(path)
+    return path
+  } catch {
+    console.warn("[bd:settings] Invalid saved bd path; using automatic detection")
+    return null
+  }
 }
 
 /** Atomically persist a validated path, preserving unrelated preferences. */

@@ -1,6 +1,7 @@
 import { accessSync, constants, statSync } from "fs"
 import { homedir } from "os"
-import { isAbsolute, join } from "path"
+import { join } from "path"
+import { validateBdPathStatic } from "./bd-path-validation"
 import { readSavedBdPath } from "./bd-preferences"
 import { execFileAsync } from "./exec"
 import { VERSION_MANAGER_DIRS } from "./tool-paths"
@@ -53,15 +54,7 @@ export function resolveBdPath(): string {
 
 /** Validate only the selected executable; fixed argv, bounded probe, never a shell. */
 export async function validateBdPath(path: string): Promise<string> {
-  if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0")) {
-    throw new Error("Choose an absolute bd path without NUL bytes")
-  }
-  try {
-    if (!statSync(path).isFile()) throw new Error("Choose a regular executable file")
-    accessSync(path, constants.X_OK)
-  } catch {
-    throw new Error("Choose an existing regular executable file")
-  }
+  validateBdPathStatic(path)
   let stdout: string
   try {
     ;({ stdout } = await execFileAsync(path, ["--version"], {

@@ -20,8 +20,9 @@ afterEach(async () => {
   paths.resetPathCaches()
   await rm(root, { recursive: true, force: true })
 })
-async function binary(name = "bd with spaces", output = "bd version 1.3.1") {
-  const path = join(root, name)
+async function binary(name = "directory with spaces", output = "bd version 1.3.1") {
+  await mkdir(join(root, name), { recursive: true })
+  const path = join(root, name, "bd")
   await writeFile(path, `#!/bin/sh\nprintf '%s\\n' '${output}'\n`, { mode: 0o700 })
   return path
 }
@@ -57,9 +58,9 @@ test.each(["relative/bd", "", "/tmp/bd\0evil"])("rejects malformed path %j", asy
   await expect(paths.validateBdPath(path)).rejects.toThrow("absolute")
 })
 test("rejects missing, directory and non-executable paths", async () => {
-  await expect(paths.validateBdPath(join(root, "missing"))).rejects.toThrow("executable")
-  await mkdir(join(root, "directory"))
-  await expect(paths.validateBdPath(join(root, "directory"))).rejects.toThrow("regular")
+  await expect(paths.validateBdPath(join(root, "missing", "bd"))).rejects.toThrow("executable")
+  await mkdir(join(root, "directory", "bd"), { recursive: true })
+  await expect(paths.validateBdPath(join(root, "directory", "bd"))).rejects.toThrow("regular")
   const path = await binary()
   await chmod(path, 0o600)
   await expect(paths.validateBdPath(path)).rejects.toThrow("executable")
@@ -73,7 +74,7 @@ test("rejects old and unparseable versions", async () => {
   )
 })
 test("bounds the version probe", async () => {
-  const path = join(root, "hang")
+  const path = join(root, "bd")
   await writeFile(path, "#!/bin/sh\nexec sleep 30\n", { mode: 0o700 })
   const start = Date.now()
   await expect(paths.validateBdPath(path)).rejects.toThrow("version")
@@ -85,7 +86,7 @@ test("save validates first; reset returns to automatic detection and preserves o
   await writeFile(process.env.BEADBOX_SETTINGS_PATH!, JSON.stringify({ other: true }))
   const path = await binary()
   expect((await setBdPath(path)).source).toBe("saved")
-  await expect(setBdPath(join(root, "missing"))).rejects.toThrow()
+  await expect(setBdPath(join(root, "missing", "bd"))).rejects.toThrow()
   expect((await getBdPath()).savedPath).toBe(path)
   expect((await setBdPath(null)).source).toBe("automatic")
   expect(JSON.parse(await readFile(process.env.BEADBOX_SETTINGS_PATH!, "utf8"))).toEqual({
@@ -93,15 +94,13 @@ test("save validates first; reset returns to automatic detection and preserves o
   })
 })
 
-test("a saved executable that disappears stays selected until reset", async () => {
+test("a saved executable that disappears falls back to automatic detection", async () => {
   const { setBdPath } = await import("../handlers/bd-settings")
-  const { checkBdHealth } = await import("../handlers/health")
   const path = await binary()
   await setBdPath(path)
   await rm(path)
-  expect(paths.resolveBdPath()).toBe(path)
-  expect(await checkBdHealth()).toMatchObject({ bdAvailable: false })
-  expect(paths.getBdPathSelection().source).toBe("saved")
+  expect(paths.resolveBdPath()).not.toBe(path)
+  expect(paths.getBdPathSelection().source).toBe("automatic")
   expect((await setBdPath(null)).source).toBe("automatic")
 })
 
@@ -132,8 +131,8 @@ test("automatic candidates retain order and Retry clears the cached choice", asy
     expect(paths.resolveBdPath()).toBe(first)
     paths.resetPathCaches()
     expect(paths.resolveBdPath()).toBe(second)
-    await writeFile(process.env.BEADBOX_SETTINGS_PATH!, JSON.stringify({ bdPath: "/saved/bd" }))
-    expect(paths.resolveBdPath()).toBe("/saved/bd")
+    await writeFile(process.env.BEADBOX_SETTINGS_PATH!, JSON.stringify({ bdPath: second }))
+    expect(paths.resolveBdPath()).toBe(second)
   } finally {
     paths.COMMON_BD_PATHS.splice(0, paths.COMMON_BD_PATHS.length, ...original)
   }
@@ -178,7 +177,7 @@ test("save expands ~/ with spaces before validating and persisting", async () =>
     [
       process.execPath,
       "-e",
-      `import {setBdPath} from ${JSON.stringify(join(import.meta.dir, "../handlers/bd-settings.ts"))}; console.log(JSON.stringify(await setBdPath("  ~/bd with spaces  ")))`,
+      `import {setBdPath} from ${JSON.stringify(join(import.meta.dir, "../handlers/bd-settings.ts"))}; console.log(JSON.stringify(await setBdPath("  ~/directory with spaces/bd  ")))`,
     ],
     {
       env: { ...process.env, HOME: root, BD_PATH: "" },
@@ -191,26 +190,11 @@ test("save expands ~/ with spaces before validating and persisting", async () =>
   expect(JSON.parse(output).savedPath).toBe(path)
 })
 
-test("a saved bd that loses execute permission reaches startup bd_missing recovery", async () => {
+test("a saved bd that loses execute permission falls back to automatic detection", async () => {
   const { setBdPath } = await import("../handlers/bd-settings")
-  const { checkHealth } = await import("../lib/workspace-health")
   const path = await binary()
   await setBdPath(path)
   await chmod(path, 0o600)
-  const beads = join(root, "workspace", ".beads")
-  await mkdir(beads, { recursive: true })
-  await writeFile(
-    join(beads, "metadata.json"),
-    JSON.stringify({ dolt_mode: "server", dolt_database: "test" }),
-  )
-  const result = await checkHealth({
-    id: "test",
-    name: "test",
-    mode: "embedded",
-    addedAt: new Date().toISOString(),
-    local: { path: beads },
-    server: null,
-  })
-  expect(result).toMatchObject({ ok: false, error: { kind: "bd_missing" }, bdPath: path })
-  expect(paths.getBdPathSelection().source).toBe("saved")
+  expect(paths.resolveBdPath()).not.toBe(path)
+  expect(paths.getBdPathSelection().source).toBe("automatic")
 })

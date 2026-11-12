@@ -35,7 +35,7 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
   // --- bd spawned outside lib/bd.ts ---
   "lib/bd-paths.ts::validateBdPath::execFileAsync": {
     count: 1,
-    why: "user-selected absolute regular executable, X_OK-checked; fixed --version argv, no shell, 5s timeout and 64KiB buffer; selection is global user configuration (beadbox-267)",
+    why: "user-selected absolute executable named bd (bd.exe on Windows); regular target, X_OK, current-user/root ownership and no group/world write checked before probe and on each saved read; fixed --version argv, no shell, 5s timeout and 64KiB buffer; selection is global user configuration (beadbox-267)",
   },
   "handlers/console.ts::run::execFileAsync": {
     count: 1,

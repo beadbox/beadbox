@@ -105,11 +105,11 @@ test.each([
   try {
     const dir = join(home, relative)
     await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, "eng9-fake-dolt"), "#!/bin/sh\necho found-dependency\n", {
+    await writeFile(join(dir, "fixture-dolt"), "#!/bin/sh\necho found-dependency\n", {
       mode: 0o700,
     })
     const bd = join(home, "bd")
-    await writeFile(bd, "#!/bin/sh\nexec eng9-fake-dolt\n", { mode: 0o700 })
+    await writeFile(bd, "#!/bin/sh\nexec fixture-dolt\n", { mode: 0o700 })
     const child = Bun.spawn(
       [
         process.execPath,

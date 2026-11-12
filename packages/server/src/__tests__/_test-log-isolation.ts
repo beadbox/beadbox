@@ -11,3 +11,10 @@ import { join } from "node:path"
 if (!process.env.BEADBOX_LOG_PATH) {
   process.env.BEADBOX_LOG_PATH = join(mkdtempSync(join(tmpdir(), "beadbox-test-log-")), "beadbox-sidecar.log")
 }
+
+// Resolver calls in any test (and inherited sidecars) must never read real preferences.
+if (!process.env.BEADBOX_SETTINGS_PATH) {
+  process.env.BEADBOX_SETTINGS_PATH = join(
+    mkdtempSync(join(tmpdir(), "beadbox-test-settings-")), "settings.json",
+  )
+}
