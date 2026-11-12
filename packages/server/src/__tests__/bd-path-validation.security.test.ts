@@ -85,7 +85,7 @@ test("save and read refuse a target owned by another user before probing", async
   const path = fake()
   writeFileSync(process.env.BEADBOX_SETTINGS_PATH!, JSON.stringify({ bdPath: path }))
   // Keep the actual file/stat boundary; simulate a different calling uid only.
-  const uid = spyOn(process, "getuid").mockReturnValue(process.getuid!() + 1)
+  const uid = spyOn(process as { getuid: () => number }, "getuid").mockReturnValue(process.getuid!() + 1)
   try {
     await expect(validateBdPath(path)).rejects.toThrow("owned")
     expect(getBdPathSelection().source).toBe("automatic")
