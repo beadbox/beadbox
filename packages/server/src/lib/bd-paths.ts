@@ -59,6 +59,7 @@ export async function validateBdPath(path: string): Promise<string> {
   try {
     ;({ stdout } = await execFileAsync(path, ["--version"], {
       timeout: 5000,
+      killSignal: "SIGKILL",
       maxBuffer: 64 * 1024,
     }))
   } catch {

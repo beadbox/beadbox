@@ -198,3 +198,30 @@ test("a saved bd that loses execute permission falls back to automatic detection
   expect(paths.resolveBdPath()).not.toBe(path)
   expect(paths.getBdPathSelection().source).toBe("automatic")
 })
+
+test("a TERM-ignoring version probe times out and releases the next saved-path change", async () => {
+  const { setBdPath } = await import("../handlers/bd-settings")
+  const path = join(root, "bd")
+  const pidFile = join(root, "probe.pid")
+  await writeFile(
+    path,
+    `#!/bin/sh\ntrap '' TERM\necho $$ > '${pidFile}'\nwhile :; do sleep 1; done\n`,
+    { mode: 0o700 },
+  )
+  // The watchdog makes the red safe: only kill the PID written by our own fake.
+  // Production must reject before this fallback and unblock the queued save.
+  let watchdogFired = false
+  const watchdog = setTimeout(async () => {
+    watchdogFired = true
+    process.kill(Number(await readFile(pidFile, "utf8")), "SIGKILL")
+  }, 9000)
+  try {
+    const timedOut = expect(setBdPath(path)).rejects.toThrow("timed out")
+    const next = setBdPath(await binary())
+    await timedOut
+    expect((await next).source).toBe("saved")
+    expect(watchdogFired).toBe(false)
+  } finally {
+    clearTimeout(watchdog)
+  }
+}, 15000)
