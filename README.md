@@ -128,3 +128,11 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md). Please don't open pub
 ## License
 
 [MIT](LICENSE) © 2026 Nelson Melo
+
+### Finding the bd executable
+
+Beadbox checks common Homebrew, Go and user-local install paths, then mise
+(`$MISE_DATA_DIR/shims` and `~/.local/share/mise/shims`), asdf (`~/.asdf/shims`),
+and Nix (`~/.nix-profile/bin`) before falling back to its inherited PATH.
+`BD_PATH` overrides automatic detection. This also works when a desktop launch
+does not inherit your terminal’s version-manager PATH.
