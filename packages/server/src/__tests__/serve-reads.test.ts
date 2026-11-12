@@ -262,3 +262,29 @@ describe("sec B1: blocked-by through serve never becomes 'no blockers'", () => {
     expect(JSON.stringify(tree)).not.toContain("from-serve") // the incomplete serve list was not used
   })
 })
+
+test("changing the saved bd path retires serve and starts the new binary on the next read", async () => {
+  const { setBdPath } = await import("../handlers/bd-settings")
+  const previousSettings = process.env.BEADBOX_SETTINGS_PATH
+  process.env.BEADBOX_SETTINGS_PATH = join(root, "settings.json")
+  const first = process.env.BD_PATH as string
+  const next = join(root, "new bd with spaces")
+  writeFileSync(next, readFileSync(first), { mode: 0o700 })
+  delete process.env.BD_PATH
+  try {
+    await setBdPath(first)
+    registry(true)
+    await warm()
+    expect(serveSpawns()).toBe(1)
+    expect(__serveReadsState().managerConstructed).toBe(true)
+    expect((await setBdPath(next)).resolvedPath).toBe(next)
+    expect(__serveReadsState().managerConstructed).toBe(false)
+    expect(__serveReadsState().workspaces.size).toBe(0)
+    await warm()
+    expect(serveSpawns()).toBe(2)
+    expect(await getCustomStatusList(beadsDir)).toEqual(["serve-a", "serve-b"])
+  } finally {
+    if (previousSettings === undefined) delete process.env.BEADBOX_SETTINGS_PATH
+    else process.env.BEADBOX_SETTINGS_PATH = previousSettings
+  }
+})

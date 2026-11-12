@@ -19,6 +19,7 @@ import { wrapNamespace } from "../lib/handler-timeout"
 import * as aggregate from "./aggregate"
 import * as activity from "./activity"
 import * as beads from "./beads"
+import * as bdSettings from "./bd-settings"
 import * as console from "./console"
 import * as diagnostics from "./diagnostics"
 import * as epics from "./epics"
@@ -46,6 +47,7 @@ export const handlers = {
   aggregate: wrapNamespace(aggregate, "aggregate"),
   activity: wrapNamespace(activity, "activity"),
   beads: wrapNamespace(beads, "beads"),
+  bdSettings: wrapNamespace(bdSettings, "bdSettings"),
   console: wrapNamespace(console, "console"),
   diagnostics: wrapNamespace(diagnostics, "diagnostics"),
   epics: wrapNamespace(epics, "epics"),

@@ -33,6 +33,10 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
   "lib/bd.ts::listActivity::execFileAsync": { count: 2, why: BD_TS_FUZZED },
 
   // --- bd spawned outside lib/bd.ts ---
+  "lib/bd-paths.ts::validateBdPath::execFileAsync": {
+    count: 1,
+    why: "user-selected absolute regular executable, X_OK-checked; fixed --version argv, no shell, 5s timeout and 64KiB buffer; selection is global user configuration (beadbox-267)",
+  },
   "handlers/console.ts::run::execFileAsync": {
     count: 1,
     why: "the in-app bd console: argv IS the user's typed command by design, gated by ALLOWED_COMMANDS / ALLOWED_SUBCOMMANDS / MUTATING_SUBCOMMAND_ANYWHERE; --db is isValidDbPath-checked",
@@ -63,7 +67,7 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
   },
   "lib/change-detector.ts::bdServerPoll::execFile": {
     count: 1,
-    why: "fixed SQL poll; --db is normalizeDbPath of the registry path, value of a two-token --db. KNOWN GAP (beadbox-c29 finding F-3): spawns bare 'bd' via PATH, not resolveBdPath()",
+    why: "fixed SQL poll through resolveBdPath(); --db is normalizeDbPath of the registry path, value of a two-token --db",
   },
   "lib/change-detector.ts::startServerPollChild::spawn": {
     count: 1,

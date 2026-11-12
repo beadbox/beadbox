@@ -1,0 +1,49 @@
+// Per-user bd selection; deliberately independent of workspace registries.
+
+import { randomUUID } from "node:crypto"
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { dirname, join } from "node:path"
+
+function settingsPath(): string {
+  return process.env.BEADBOX_SETTINGS_PATH || join(homedir(), ".beadbox", "settings.json")
+}
+
+function readSettings(): Record<string, unknown> {
+  try {
+    const value = JSON.parse(readFileSync(settingsPath(), "utf8"))
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Invalid settings file")
+    return value
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
+    throw error
+  }
+}
+
+/** Return the user's choice even if the executable has since disappeared. */
+export function readSavedBdPath(): string | null {
+  const path = readSettings().bdPath
+  return typeof path === "string" && path.length > 0 ? path : null
+}
+
+/** Atomically persist a validated path, preserving unrelated preferences. */
+export function writeSavedBdPath(path: string | null): void {
+  const file = settingsPath()
+  const settings = readSettings()
+  if (path === null) delete settings.bdPath
+  else settings.bdPath = path
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+  const temporary = `${file}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600, flag: "wx" })
+    renameSync(temporary, file)
+  } catch (error) {
+    try {
+      unlinkSync(temporary)
+    } catch {
+      /* best-effort cleanup; preserve the write error */
+    }
+    throw error
+  }
+}

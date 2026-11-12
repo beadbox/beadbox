@@ -90,6 +90,8 @@ function startInBackground(entry: RegistryEntry, state: WorkspaceServe): void {
 }
 
 function onFailure(key: string, state: WorkspaceServe, error: unknown): void {
+  // A read/start from a retired manager must not stop a replacement child.
+  if (workspaces.get(key) !== state) return
   const cls = classifyServeFailure(error)
   const why = error instanceof Error ? error.message : String(error)
   if (cls === "integrity") {
@@ -169,15 +171,21 @@ export function __serveReadsState(): { managerConstructed: boolean; workspaces: 
   return { managerConstructed: manager !== null, workspaces }
 }
 
-/** @internal tests only */
-export async function __resetServeReads(): Promise<void> {
-  await manager?.stopAll()
+/** Stop old bd serve processes before switching executables. */
+export async function resetServeReads(): Promise<void> {
+  const previous = manager
+  const starts = [...workspaces.values()].map((s) => s.starting)
   manager = null
   workspaces.clear()
   bdVersionByPath.clear()
+  await Promise.all(starts)
+  await previous?.stopAll()
 }
 
 /** @internal tests only: wait for any background starts to settle. */
 export async function __settleServeStarts(): Promise<void> {
   await Promise.all([...workspaces.values()].map((s) => s.starting ?? Promise.resolve()))
 }
+
+/** @internal tests only */
+export const __resetServeReads = resetServeReads

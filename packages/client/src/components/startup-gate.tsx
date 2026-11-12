@@ -15,6 +15,7 @@ import {
   BdUpgradeInstructions,
   type PlatformFlags,
 } from "./bd-install-instructions"
+import { BdPathSettings } from "./bd-path-settings"
 import { useRouter, useRouterState } from "@tanstack/react-router"
 import { Circle, ExternalLink, RefreshCw, X } from "lucide-react"
 import {
@@ -638,6 +639,12 @@ function ErrorScreen({ error, platform, onRetry, onRemoveWorkspace }: ErrorScree
             </a>
           )}
         </div>
+
+        {(error.kind === "bd_missing" || error.kind === "bd_version_too_old") && (
+          <div className="mt-6 border-t pt-4">
+            <BdPathSettings onSaved={onRetry} />
+          </div>
+        )}
 
         {updateAvailable && (
           <div className="flex items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary/5 px-4 py-2.5 mt-6">

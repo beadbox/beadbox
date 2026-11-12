@@ -535,6 +535,7 @@ function buildTauriRpc(manager: Pick<SidecarManager, "call"> = sidecarManager): 
     aggregate: namespaceProxy("aggregate"),
     activity: namespaceProxy("activity"),
     beads: namespaceProxy("beads"),
+    bdSettings: namespaceProxy("bdSettings"),
     console: namespaceProxy("console"),
     diagnostics: namespaceProxy("diagnostics"),
     epics: namespaceProxy("epics"),
@@ -577,6 +578,7 @@ function buildStubRpc(): RemoteApi {
   return {
     activity: namespaceStub("activity"),
     beads: namespaceStub("beads"),
+    bdSettings: namespaceStub("bdSettings"),
     console: namespaceStub("console"),
     diagnostics: namespaceStub("diagnostics"),
     epics: namespaceStub("epics"),

@@ -134,5 +134,17 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md). Please don't open pub
 Beadbox checks common Homebrew, Go and user-local install paths, then mise
 (`$MISE_DATA_DIR/shims` and `~/.local/share/mise/shims`), asdf (`~/.asdf/shims`),
 and Nix (`~/.nix-profile/bin`) before falling back to its inherited PATH.
-`BD_PATH` overrides automatic detection. This also works when a desktop launch
-does not inherit your terminal’s version-manager PATH.
+Set a per-user path in **Settings → General → bd executable**, or directly on
+any missing-bd or too-old-bd screen. Use the absolute executable path (spaces are
+supported). Beadbox checks that it is an executable file and reports a supported
+bd version before saving it. **Use automatic detection** clears the preference.
+The active path and source are shown beside the controls.
+
+Precedence is `BD_PATH` environment variable, then the saved path, then automatic
+detection. An environment override stays active until it is removed from the
+app's launch environment; saving or clearing a preference does not override it.
+The choice is stored in `~/.beadbox/settings.json`, applies to every workspace,
+and survives restarts. Changes apply to new commands immediately and refresh
+active polling and bd serve processes. Commands already running may finish with
+the previous binary. If a saved executable disappears later, Beadbox reports the
+failure so you can choose another path or return to automatic detection.

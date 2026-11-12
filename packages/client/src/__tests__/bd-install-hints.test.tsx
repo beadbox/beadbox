@@ -5,7 +5,7 @@
 // four times.
 
 import { afterEach, describe, expect, test } from "bun:test"
-import { cleanup, render } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import { DialogFooter } from "../components/update-dialog"
 import { BdMissingScreen } from "../components/workspaces-page"
 import { bdUpgradeHint } from "../lib/version-requirements"
@@ -83,4 +83,9 @@ describe("client bdUpgradeHint (bd error fixes)", () => {
   test.each(NOT_MAC)("platform %p never gets brew", (platform) => {
     expect(JSON.stringify(bdUpgradeHint(platform))).not.toContain("brew")
   })
+})
+
+test("workspace missing-bd screen offers a saved executable path", () => {
+  renderMissing("darwin")
+  expect(screen.getByLabelText("bd executable path")).toBeTruthy()
 })
