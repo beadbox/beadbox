@@ -1,5 +1,40 @@
-import { expect, test } from "../fixtures/harness"
+import { expect, test as base } from "../fixtures/harness"
 import { type Listed, openTree, renderedIds } from "./helpers"
+
+// These workspaces are worker-scoped: every label-filter test must return
+// their beads, labels and statuses to the state the next spec expects.
+const test = base.extend<{ restoreWorkspaces: void }>({
+  restoreWorkspaces: [async ({ workspace, statusesWorkspace }, use) => {
+    const list = (ws: typeof workspace) => ws.bdJson<Listed[]>(["list", "--status", "all", "--limit", "0", "--flat"])
+    const state = (beads: Listed[]) => beads.map(({ id, status, labels }) => ({
+      id, status, labels: [...(labels ?? [])].sort(),
+    })).sort((a, b) => a.id.localeCompare(b.id))
+    const snapshots = [workspace, statusesWorkspace].map((ws) => ({ ws, beads: list(ws) }))
+    try {
+      await use()
+    } finally {
+      for (const { ws, beads } of snapshots) {
+        const current = list(ws)
+        const originalIds = new Set(beads.map((bead) => bead.id))
+        const createdIds = current.filter((bead) => !originalIds.has(bead.id)).map((bead) => bead.id)
+        if (createdIds.length) ws.bd(["delete", ...createdIds, "--force"])
+        for (const original of beads) {
+          const changed = current.find((bead) => bead.id === original.id)
+          expect(changed, "label-filter must preserve existing beads").toBeDefined()
+          const labels = original.labels ?? []
+          const changedLabels = changed!.labels ?? []
+          const updates = [
+            ...(changed!.status === original.status ? [] : [`--status=${original.status}`]),
+            ...changedLabels.filter((label) => !labels.includes(label)).map((label) => `--remove-label=${label}`),
+            ...labels.filter((label) => !changedLabels.includes(label)).map((label) => `--add-label=${label}`),
+          ]
+          if (updates.length) ws.bd(["update", original.id, ...updates])
+        }
+        expect(state(list(ws)), "label-filter must restore the shared workspace").toEqual(state(beads))
+      }
+    }
+  }, { auto: true }],
+})
 
 test("label selection matches bd, composes, clears, persists and resets on workspace switch", async ({ page, workspace: ws, statusesWorkspace }) => {
   test.setTimeout(60_000)
