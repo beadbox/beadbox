@@ -129,3 +129,11 @@ describe("bd_missing", () => {
     expect(container.textContent).not.toContain("brew")
   })
 })
+
+for (const error of [{ kind: "bd_missing" } as const, tooOld]) {
+  test(`allows choosing bd from the ${error.kind} screen`, async () => {
+    mountFailingGate("darwin", error)
+    expect(await screen.findByLabelText("bd executable path")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Use automatic detection" })).toBeTruthy()
+  })
+}

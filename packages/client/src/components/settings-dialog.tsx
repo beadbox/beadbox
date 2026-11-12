@@ -20,6 +20,7 @@ import { clearCache, getAnalyticsEnabled, setAnalyticsEnabled } from "../lib/loc
 import { rpc } from "../lib/rpc"
 import type { UpdateInfo } from "../lib/update-checker"
 import { cn } from "../lib/utils"
+import { BdPathSettings } from "./bd-path-settings"
 import { CustomStatusesManager } from "./custom-statuses-manager"
 import { Button } from "./ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible"
@@ -353,6 +354,7 @@ export function SettingsDialog({
           <div className="flex-1 overflow-y-auto p-6" role="tabpanel">
             {activeTab === "general" && (
               <div className="space-y-6">
+                <BdPathSettings />
                 <div>
                   <h3 className="text-lg font-semibold mb-1">Theme</h3>
                   <p className="text-sm text-muted-foreground mb-4">

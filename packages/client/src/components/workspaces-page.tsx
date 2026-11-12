@@ -20,6 +20,7 @@
 // registry-only state on this route stays in sync the same way the Next.js
 // page did.
 
+import { BdPathSettings } from "./bd-path-settings"
 import { BdInstallInstructions } from "@/components/bd-install-instructions"
 import { useRouter } from "@tanstack/react-router"
 import { Circle, ExternalLink, FolderOpen, HardDrive, Loader2, Plus, RefreshCw } from "lucide-react"
@@ -125,7 +126,9 @@ export function BdMissingScreen({
             After installing, add bd to your PATH and restart Beadbox so it can find it.
           </p>
         )}
-        <div className="mb-6" />
+        <div className="my-6">
+          <BdPathSettings onSaved={onCheckAgain} />
+        </div>
         {feedback && <p className="text-sm text-amber-400 text-center mb-4">{feedback}</p>}
         <div className="flex items-center justify-center gap-4">
           <Button onClick={handleCheck} disabled={checking}>

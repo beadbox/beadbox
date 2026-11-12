@@ -3,6 +3,7 @@ import { existsSync } from "fs"
 import { homedir } from "os"
 import { join } from "path"
 import { promisify } from "util"
+import { VERSION_MANAGER_DIRS } from "./tool-paths"
 
 // Augment process.env.PATH with common tool directories so child processes
 // (bd, dolt) can find binaries regardless of how the Node process was launched.
@@ -10,6 +11,7 @@ import { promisify } from "util"
 // PATH is often stripped to a minimal set that excludes /usr/local/bin, Homebrew
 // paths, and user-local install directories.
 const COMMON_TOOL_DIRS = [
+  ...VERSION_MANAGER_DIRS,
   "/opt/homebrew/bin",
   "/usr/local/bin",
   "/home/linuxbrew/.linuxbrew/bin",
@@ -20,7 +22,7 @@ const COMMON_TOOL_DIRS = [
 
 const currentPath = process.env.PATH ?? ""
 const currentDirs = new Set(currentPath.split(":").filter(Boolean))
-const missing = COMMON_TOOL_DIRS.filter((d) => !currentDirs.has(d) && existsSync(d))
+const missing = [...new Set(COMMON_TOOL_DIRS)].filter((d) => !currentDirs.has(d) && existsSync(d))
 if (missing.length > 0) {
   process.env.PATH = `${currentPath}:${missing.join(":")}`
 }

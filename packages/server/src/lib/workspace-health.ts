@@ -460,6 +460,7 @@ export function classifyHealthError(
     combined.includes("command not found") ||
     combined.includes("enoent") ||
     combined.includes("enoexec") ||
+    combined.includes("eacces") ||
     combined.includes("no such file")
   ) {
     return { kind: "bd_missing" }
