@@ -12,7 +12,7 @@ import {
   type ProjectBead,
   type ProjectSnapshot,
 } from "../lib/aggregate"
-import { matchesBead, resolveStatusFilter } from "../lib/epic-tree-utils"
+import { extractLabels, matchesBead, resolveStatusFilter } from "../lib/epic-tree-utils"
 import { useBeadSelection } from "../hooks/use-bead-selection"
 import { compareBead } from "../lib/sort"
 import { getSortPreference, getFiltersPreference } from "../lib/local-storage"
@@ -151,6 +151,7 @@ export function AllProjectsPage() {
   }, [includeSystem])
 
   const allRows = useMemo(() => snapshots.flatMap(projectBeads), [snapshots])
+  const labels = useMemo(() => extractLabels(snapshots.flatMap((s) => s.epics ?? [])), [snapshots])
   const statuses = [...new Set(allRows.map((r) => r.bead.status))]
   const resolved = resolveStatusFilter(filters, statuses)
   const filteredRows = allRows.filter(
@@ -269,6 +270,7 @@ export function AllProjectsPage() {
           rigNames={[
             ...new Set(allRows.map((r) => r.bead.rigName).filter((name): name is string => !!name)),
           ]}
+          availableLabels={labels}
           availableStatuses={statuses}
           availableTypes={[...new Set(allRows.map((r) => r.bead.type))]}
           selectedType={filters.type ?? "all"}

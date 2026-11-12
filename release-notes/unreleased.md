@@ -1,3 +1,7 @@
+## Added
+
+- Filter beads by any selected label, together with status, search, and the other filters. Label choices are available in Beads, Chart, and All projects. Thanks to [Kyle Dodson (@seniorquico)](https://github.com/seniorquico) for requesting this in [#70](https://github.com/beadbox/beadbox/issues/70).
+
 ## Fixed
 
 - Status, type, workspace summary, epic status, and molecule progress reads now pass both `--readonly` and `--sandbox` to bd to suppress auto-push, including on bd 1.1.0. Thanks to [Bart Wegrzyn (@bwegrzyn)](https://github.com/bwegrzyn) for diagnosing the status-refresh push race and contributing the initial fix in [#71](https://github.com/beadbox/beadbox/pull/71).

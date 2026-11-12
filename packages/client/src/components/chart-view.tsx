@@ -20,7 +20,7 @@ import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { usePreferences } from "@/hooks/use-preferences"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { readSystemIssues, systemIssuesKey } from "@/hooks/use-workspace-lifecycle"
-import { extractAssignees, extractRigNames, flattenEpicsToBeads } from "@/lib/epic-tree-utils"
+import { extractAssignees, extractLabels, extractRigNames, flattenEpicsToBeads } from "@/lib/epic-tree-utils"
 import { buildGanttModel } from "@/lib/gantt-model"
 import { setSelectedBead as persistSelectedBead } from "@/lib/local-storage"
 import { rpc } from "@/lib/rpc"
@@ -128,6 +128,7 @@ export function ChartView() {
   const now = useNow()
 
   const assignees = useMemo(() => extractAssignees(epics), [epics])
+  const labels = useMemo(() => extractLabels(epics), [epics])
   const rigNames = useMemo(() => extractRigNames(epics), [epics])
   const typeOptions = useMemo(
     () => [...new Set([...(typesQuery.data ?? []), ...epics.map((e) => e.type), ...flattenEpicsToBeads(epics).map((b) => b.type)])],
@@ -188,6 +189,7 @@ export function ChartView() {
           filters={prefs.filters}
           onFiltersChange={prefs.setFilters}
           assignees={assignees}
+          availableLabels={labels}
           rigNames={rigNames}
           availableStatuses={statusesQuery.data}
           availableTypes={typeOptions}
