@@ -204,9 +204,13 @@ function sameValue(a: unknown, b: unknown): boolean {
   )
 }
 
-function sameRowState(bead: Bead, a: BeadRowProps, b: BeadRowProps): boolean {
-  const key = keyFor(a.bead, a.sourceForBead)
-  if (key !== keyFor(b.bead, b.sourceForBead)) return false
+function rowContentKey(props: RowContentProps): string {
+  return props.source ? projectBeadKey(props.source.id, props.bead.id) : props.bead.id
+}
+
+function sameRowState(bead: Bead, a: RowContentProps, b: RowContentProps): boolean {
+  const key = rowContentKey(a)
+  if (key !== rowContentKey(b)) return false
   if (
     a.expandedBeads?.has(key) !== b.expandedBeads?.has(key) ||
     a.selectedIds?.has(key) !== b.selectedIds?.has(key) ||
@@ -220,18 +224,18 @@ function sameRowState(bead: Bead, a: BeadRowProps, b: BeadRowProps): boolean {
   return true
 }
 
-type RowContentProps = BeadRowProps & { getBead: () => Bead }
-
-function sameRowBead(a: Bead, b: Bead): boolean {
-  const { children: aChildren, ...aFields } = a
-  const { children: bChildren, ...bFields } = b
-  return !!aChildren?.length === !!bChildren?.length && sameValue(aFields, bFields)
+type RowContentProps = Omit<BeadRowProps, "sourceForBead"> & {
+  getBead: () => Bead
+  source?: BeadSource
+  sourced: boolean
+  hasChildren: boolean | undefined
 }
 
 function sameRow(a: RowContentProps, b: RowContentProps): boolean {
   return (
-    !!a.sourceForBead === !!b.sourceForBead &&
-    sameValue(a.sourceForBead?.(a.bead), b.sourceForBead?.(b.bead)) &&
+    a.sourced === b.sourced &&
+    a.hasChildren === b.hasChildren &&
+    sameValue(a.source, b.source) &&
     a.flat === b.flat &&
     a.depth === b.depth &&
     a.epicId === b.epicId &&
@@ -244,7 +248,7 @@ function sameRow(a: RowContentProps, b: RowContentProps): boolean {
     a.onFocusItem === b.onFocusItem &&
     a.onToggleSelect === b.onToggleSelect &&
     a.getBead === b.getBead &&
-    sameRowBead(a.bead, b.bead) &&
+    sameValue(a.bead, b.bead) &&
     sameRowState(b.bead, a, b)
   )
 }
@@ -297,8 +301,9 @@ function useRowCallbacks(callbacks: RowCallbacks): RowCallbacks {
 
 const BeadRowContent = memo(function BeadRowContent({
   getBead,
-  sourceForBead,
-  flat,
+  source,
+  sourced,
+  hasChildren,
   bead,
   depth,
   onBeadClick,
@@ -319,10 +324,8 @@ const BeadRowContent = memo(function BeadRowContent({
 }: RowContentProps) {
   const { isMobile } = useViewport()
   const [isArchiving, setIsArchiving] = useState(false)
-  const source = sourceForBead?.(bead)
-  const rowKey = keyFor(bead, sourceForBead)
+  const rowKey = source ? projectBeadKey(source.id, bead.id) : bead.id
   const isSelected = selectedIds?.has(rowKey) ?? false
-  const hasChildren = !flat && bead.children && bead.children.length > 0
   const isExpanded = expandedBeads?.has(rowKey) ?? false
   const borderColor = depthBorderColors[Math.min(depth, depthBorderColors.length - 1)]
   const indentPadding = depth > 0 ? `${depth * 16}px` : undefined
@@ -331,7 +334,7 @@ const BeadRowContent = memo(function BeadRowContent({
   return (
     <>
       <div
-        draggable={!sourceForBead}
+        draggable={!sourced}
         data-item-id={rowKey}
         data-project-id={source?.id}
         data-bead-id={source ? bead.id : undefined}
@@ -638,11 +641,22 @@ function BeadRow(props: BeadRowProps) {
     latestBead.current = props.bead
   }, [props.bead])
   const getBead = useCallback(() => latestBead.current, [])
+  // Keep full trees and lookup closures out of memoized snapshots. The latest
+  // bead stays in the ref above for click handlers, without retaining history.
+  const { bead, sourceForBead, ...rowProps } = props
+  const { children, ...fields } = bead
   const childKey = makeKeyer()
   const expanded = !props.flat && props.expandedBeads?.has(keyFor(props.bead, props.sourceForBead))
   return (
     <>
-      <BeadRowContent {...props} getBead={getBead} />
+      <BeadRowContent
+        {...rowProps}
+        bead={fields}
+        source={sourceForBead?.(bead)}
+        sourced={!!sourceForBead}
+        hasChildren={!props.flat && children && children.length > 0}
+        getBead={getBead}
+      />
       {expanded &&
         props.bead.children?.map((child) => (
           <BeadRow
