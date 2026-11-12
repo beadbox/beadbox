@@ -27,7 +27,7 @@ import {
   Wrench,
   Zap,
 } from "lucide-react"
-import React, { useState } from "react"
+import React, { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { projectBeadKey } from "@/lib/aggregate"
 import { CopyableId } from "@/components/copyable-id"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -188,7 +188,115 @@ interface BeadRowProps {
   onToggleSelect?: (beadId: string) => void
 }
 
-function BeadRow({
+// RPC replies and filtered trees contain fresh objects, including Dates.
+// Compare their values without serializing a second copy of the whole board.
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime()
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every((key) => Object.hasOwn(right, key) && sameValue(left[key], right[key]))
+  )
+}
+
+function sameRowState(bead: Bead, a: BeadRowProps, b: BeadRowProps): boolean {
+  const key = keyFor(a.bead, a.sourceForBead)
+  if (key !== keyFor(b.bead, b.sourceForBead)) return false
+  if (
+    a.expandedBeads?.has(key) !== b.expandedBeads?.has(key) ||
+    a.selectedIds?.has(key) !== b.selectedIds?.has(key) ||
+    (a.focusedItemId === key) !== (b.focusedItemId === key) ||
+    (a.selectedBeadId === key) !== (b.selectedBeadId === key) ||
+    (a.draggedBeadId === key) !== (b.draggedBeadId === key) ||
+    !!a.readState !== !!b.readState ||
+    !sameValue(a.readState?.[bead.id], b.readState?.[bead.id])
+  )
+    return false
+  return true
+}
+
+type RowContentProps = BeadRowProps & { getBead: () => Bead }
+
+function sameRowBead(a: Bead, b: Bead): boolean {
+  const { children: aChildren, ...aFields } = a
+  const { children: bChildren, ...bFields } = b
+  return !!aChildren?.length === !!bChildren?.length && sameValue(aFields, bFields)
+}
+
+function sameRow(a: RowContentProps, b: RowContentProps): boolean {
+  return (
+    !!a.sourceForBead === !!b.sourceForBead &&
+    sameValue(a.sourceForBead?.(a.bead), b.sourceForBead?.(b.bead)) &&
+    a.flat === b.flat &&
+    a.depth === b.depth &&
+    a.epicId === b.epicId &&
+    a.onBeadClick === b.onBeadClick &&
+    a.onArchive === b.onArchive &&
+    a.onDelete === b.onDelete &&
+    a.onDragStart === b.onDragStart &&
+    a.onDragEnd === b.onDragEnd &&
+    a.onToggleBead === b.onToggleBead &&
+    a.onFocusItem === b.onFocusItem &&
+    a.onToggleSelect === b.onToggleSelect &&
+    a.getBead === b.getBead &&
+    sameRowBead(a.bead, b.bead) &&
+    sameRowState(b.bead, a, b)
+  )
+}
+
+type RowCallbacks = Pick<
+  BeadRowProps,
+  | "onBeadClick"
+  | "onArchive"
+  | "onDelete"
+  | "onDragStart"
+  | "onDragEnd"
+  | "onToggleBead"
+  | "onFocusItem"
+  | "onToggleSelect"
+>
+
+// Event handlers read the latest committed page callbacks. Tree refreshes can
+// replace their closures without invalidating every memoized row.
+function useRowCallbacks(callbacks: RowCallbacks): RowCallbacks {
+  const latest = useRef(callbacks)
+  useLayoutEffect(() => {
+    latest.current = callbacks
+  })
+  const stable = useMemo<RowCallbacks>(
+    () => ({
+      onBeadClick: (bead) => latest.current.onBeadClick(bead),
+      onArchive: async (id) => {
+        await latest.current.onArchive?.(id)
+      },
+      onDelete: (id) => latest.current.onDelete?.(id),
+      onDragStart: (id) => latest.current.onDragStart?.(id),
+      onDragEnd: () => latest.current.onDragEnd?.(),
+      onToggleBead: (id) => latest.current.onToggleBead?.(id),
+      onFocusItem: (id) => latest.current.onFocusItem?.(id),
+      onToggleSelect: (id) => latest.current.onToggleSelect?.(id),
+    }),
+    [],
+  )
+  return {
+    ...stable,
+    onArchive: callbacks.onArchive ? stable.onArchive : undefined,
+    onDelete: callbacks.onDelete ? stable.onDelete : undefined,
+    onDragStart: callbacks.onDragStart ? stable.onDragStart : undefined,
+    onDragEnd: callbacks.onDragEnd ? stable.onDragEnd : undefined,
+    onToggleBead: callbacks.onToggleBead ? stable.onToggleBead : undefined,
+    onFocusItem: callbacks.onFocusItem ? stable.onFocusItem : undefined,
+    onToggleSelect: callbacks.onToggleSelect ? stable.onToggleSelect : undefined,
+  }
+}
+
+const BeadRowContent = memo(function BeadRowContent({
+  getBead,
   sourceForBead,
   flat,
   bead,
@@ -208,9 +316,8 @@ function BeadRow({
   readState,
   selectedIds,
   onToggleSelect,
-}: BeadRowProps) {
+}: RowContentProps) {
   const { isMobile } = useViewport()
-  const childKey = makeKeyer()
   const [isArchiving, setIsArchiving] = useState(false)
   const source = sourceForBead?.(bead)
   const rowKey = keyFor(bead, sourceForBead)
@@ -248,7 +355,7 @@ function BeadRow({
         style={{ paddingLeft: indentPadding ? `calc(0.75rem + ${indentPadding})` : undefined }}
         onClick={() => {
           onFocusItem?.(rowKey)
-          onBeadClick(bead)
+          onBeadClick(getBead())
         }}
       >
         {/* bb-y729: bulk-select checkbox (only when wired by parent) */}
@@ -519,31 +626,30 @@ function BeadRow({
           )}
         </div>
       </div>
-      {/* Render children if expanded */}
-      {hasChildren &&
-        isExpanded &&
-        bead.children!.map((child, idx) => (
+    </>
+  )
+}, sameRow)
+
+// Traverse expanded children outside the expensive row memo boundary. A child
+// edit can update that row without rendering its unchanged ancestor's controls.
+function BeadRow(props: BeadRowProps) {
+  const latestBead = useRef(props.bead)
+  useLayoutEffect(() => {
+    latestBead.current = props.bead
+  }, [props.bead])
+  const getBead = useCallback(() => latestBead.current, [])
+  const childKey = makeKeyer()
+  const expanded = !props.flat && props.expandedBeads?.has(keyFor(props.bead, props.sourceForBead))
+  return (
+    <>
+      <BeadRowContent {...props} getBead={getBead} />
+      {expanded &&
+        props.bead.children?.map((child) => (
           <BeadRow
-            key={childKey(child.id)}
+            {...props}
+            key={childKey(keyFor(child, props.sourceForBead))}
             bead={child}
-            sourceForBead={sourceForBead}
-            flat={flat}
-            depth={depth + 1}
-            onBeadClick={onBeadClick}
-            onArchive={onArchive}
-            onDelete={onDelete}
-            epicId={epicId}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            draggedBeadId={draggedBeadId}
-            expandedBeads={expandedBeads}
-            onToggleBead={onToggleBead}
-            focusedItemId={focusedItemId}
-            onFocusItem={onFocusItem}
-            selectedBeadId={selectedBeadId}
-            readState={readState}
-            selectedIds={selectedIds}
-            onToggleSelect={onToggleSelect}
+            depth={props.depth + 1}
           />
         ))}
     </>
@@ -650,6 +756,16 @@ export function BeadTable({
   onToggleSelect,
   onToggleSelectAll,
 }: BeadTableProps) {
+  const rowCallbacks = useRowCallbacks({
+    onBeadClick,
+    onArchive,
+    onDelete,
+    onDragStart,
+    onDragEnd,
+    onToggleBead,
+    onFocusItem,
+    onToggleSelect,
+  })
   const waves = showWaves ? computeWaves(beads, sourceForBead) : null
   const useWaveView = waves && waves.length >= 2
 
@@ -661,21 +777,14 @@ export function BeadTable({
       sourceForBead={sourceForBead}
       flat={flat}
       depth={0}
-      onBeadClick={onBeadClick}
-      onArchive={onArchive}
-      onDelete={onDelete}
       epicId={epicId}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       draggedBeadId={draggedBeadId}
       expandedBeads={expandedBeads}
-      onToggleBead={onToggleBead}
       focusedItemId={focusedItemId}
-      onFocusItem={onFocusItem}
       selectedBeadId={selectedBeadId}
       readState={readState}
       selectedIds={selectedIds}
-      onToggleSelect={onToggleSelect}
+      {...rowCallbacks}
     />
   )
 

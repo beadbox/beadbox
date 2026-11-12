@@ -78,12 +78,14 @@ function mountLifecycle(
     rejectStatuses?: boolean
     getAvailableTypes?: (dbPath?: string) => Promise<string[]>
     getEpicsResult?: unknown
+    treeRequest?: (dbPath?: string) => Promise<unknown>
   } = {},
 ): Harness {
   let calls = 0
   let pendingResolve: (() => void) | null = null
 
   const getEpics = mock((dbPath?: string) => {
+    if (options.treeRequest) return options.treeRequest(dbPath)
     calls += 1
     const key = (dbPath ?? "").replace(/\/beads\.db$/, "")
     const payload = { success: true as const, epics: EPICS_BY_DB[key] ?? [] }
@@ -375,5 +377,64 @@ describe("useWorkspaceLifecycle workspace switching", () => {
     // rather than showing alpha's beads as if they were beta's.
     expect(seen.current?.hasExistingDataRef.current).toBe(false)
     expect(seen.current?.isLoading).toBe(true)
+  })
+})
+
+describe("tree refresh admission", () => {
+  test("a slow refresh burst admits one request and one latest follow-up", async () => {
+    setWorkspaceCookie(alpha.id)
+    const pending: Array<(value: unknown) => void> = []
+    const { seen, getEpics } = mountLifecycle({
+      treeRequest: () => new Promise((resolve) => pending.push(resolve)),
+    })
+    await waitFor(() => expect(getEpics.mock.calls.length).toBe(1))
+    act(() => {
+      for (let n = 0; n < 20; n++) void seen.current?.loadEpics()
+    })
+    expect(getEpics.mock.calls.length).toBe(1)
+    await act(async () => pending.shift()?.({ success: true, epics: [epic("old")] }))
+    await waitFor(() => expect(getEpics.mock.calls.length).toBe(2))
+    await act(async () => pending.shift()?.({ success: true, epics: [epic("newest")] }))
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("newest"))
+    expect(getEpics.mock.calls.length).toBe(2)
+  })
+
+  test("hidden changes fetch nothing and showing runs one catch-up", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle()
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
+    const count = getEpics.mock.calls.length
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    try {
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"))
+        for (let n = 0; n < 20; n++) void seen.current?.loadEpics()
+      })
+      expect(getEpics.mock.calls.length).toBe(count)
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      await waitFor(() => expect(getEpics.mock.calls.length).toBe(count + 1))
+    } finally {
+      Reflect.deleteProperty(document, "visibilityState")
+    }
+  })
+
+  test("a queued workspace switch discards the in-flight old tree", async () => {
+    setWorkspaceCookie(alpha.id)
+    const pending: Array<{ db?: string; resolve: (value: unknown) => void }> = []
+    const { seen } = mountLifecycle({
+      treeRequest: (db) => new Promise((resolve) => pending.push({ db, resolve })),
+    })
+    await waitFor(() => expect(pending.length).toBe(1))
+    await act(async () => setWorkspaceCookie(beta.id))
+    await act(async () => pending.shift()?.resolve({ success: true, epics: [epic("stale-alpha")] }))
+    await waitFor(() => expect(pending.some((p) => p.db?.includes("beta"))).toBe(true))
+    expect(seen.current?.epics.some((e) => e.id === "stale-alpha")).toBe(false)
+    await act(async () =>
+      pending
+        .find((p) => p.db?.includes("beta"))
+        ?.resolve({ success: true, epics: [epic("latest-beta")] }),
+    )
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("latest-beta"))
   })
 })

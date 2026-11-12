@@ -431,6 +431,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       // its own; firing here causes a false "did not respond" on slow
       // first connections, e.g. server workspaces with setup overhead).
       if (
+        document.visibilityState !== "hidden" &&
         !hasExistingDataRef.current &&
         appHealthRef.current.status === "healthy" &&
         !loadInProgressRef.current
@@ -634,7 +635,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   )
 
   // Fetch epics when workspace changes.
-  const loadEpics = useCallback(async () => {
+  const fetchEpics = useCallback(async () => {
     // Increment generation counter. Any in-flight load from a prior call
     // sees a stale gen and discards its results in the finally block.
     const gen = ++loadGenRef.current
@@ -703,6 +704,47 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     handleEpicsCatch,
     setHealthy,
   ])
+
+  // Keep just the newest requested refresh, including workspace switches.
+  // Generation checks above still reject results from a superseded workspace.
+  const latestFetchRef = useRef(fetchEpics)
+  latestFetchRef.current = fetchEpics
+  const refreshDirtyRef = useRef(false)
+  const refreshPromiseRef = useRef<Promise<void> | null>(null)
+  const mountedRef = useRef(true)
+  const loadEpics = useCallback((): Promise<void> => {
+    refreshDirtyRef.current = true
+    if (refreshPromiseRef.current) return refreshPromiseRef.current
+    if (document.visibilityState === "hidden") return Promise.resolve()
+    const drain = async () => {
+      while (
+        mountedRef.current &&
+        refreshDirtyRef.current &&
+        document.visibilityState !== "hidden"
+      ) {
+        refreshDirtyRef.current = false
+        await latestFetchRef.current()
+      }
+    }
+    const promise = drain().finally(() => {
+      refreshPromiseRef.current = null
+    })
+    refreshPromiseRef.current = promise
+    return promise
+  }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    const catchUp = () => {
+      if (document.visibilityState !== "hidden" && refreshDirtyRef.current) void loadEpics()
+    }
+    document.addEventListener("visibilitychange", catchUp)
+    return () => {
+      mountedRef.current = false
+      loadGenRef.current++
+      document.removeEventListener("visibilitychange", catchUp)
+    }
+  }, [loadEpics])
 
   // Clear all auto-retry timers
   const clearAutoRetry = useCallback(() => {
@@ -782,7 +824,6 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       setIsRefreshing(false)
     }
   }, [loadEpics, isRefreshing, clearAutoRetry])
-
 
   useEffect(() => {
     if (currentWorkspace) {
