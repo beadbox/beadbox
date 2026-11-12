@@ -34,6 +34,7 @@ const DEFAULT_FILTERS: Filters = {
   status: [...DEFAULT_STATUSES],
   assignee: "all",
   priority: [],
+  labels: [],
   showMessages: false,
   showWaves: false,
   hasSpec: false,
@@ -81,6 +82,21 @@ function migratePriority(stored: unknown): BeadPriority[] {
   return []
 }
 
+// beadbox-ymx (GH #70): labels are workspace-defined non-empty strings; empty
+// means "All Labels". Keep valid strings deduplicated in order, migrate a
+// singleton string ('all' or '' -> []), and fall back to [] on malformed data.
+function migrateLabels(stored: unknown): string[] {
+  if (Array.isArray(stored)) {
+    return [
+      ...new Set(stored.filter((v): v is string => typeof v === "string" && v.length > 0)),
+    ]
+  }
+  if (typeof stored === "string") {
+    return stored.length > 0 && stored !== "all" ? [stored] : []
+  }
+  return []
+}
+
 export function getFiltersPreference(): Filters {
   if (typeof window === "undefined") return DEFAULT_FILTERS
 
@@ -100,6 +116,7 @@ export function getFiltersPreference(): Filters {
         parsed.status = [...DEFAULT_STATUSES]
       }
       parsed.priority = migratePriority(parsed.priority)
+      parsed.labels = migrateLabels(parsed.labels)
       return { ...DEFAULT_FILTERS, ...parsed }
     }
   } catch {
@@ -113,6 +130,24 @@ export function setFiltersPreference(filters: Filters): void {
 
   try {
     localStorage.setItem(FILTERS_KEY, JSON.stringify(filters))
+  } catch {
+    // localStorage might be full or disabled
+  }
+}
+
+/**
+ * Clear any persisted label selection while keeping the rest of the saved
+ * filter preferences intact. Labels are workspace-specific, so switching away
+ * from a workspace resets the label filter cleanly.
+ */
+export function resetLabelFilterPreference(): void {
+  if (typeof window === "undefined") return
+
+  try {
+    if (!localStorage.getItem(FILTERS_KEY)) return
+    const current = getFiltersPreference()
+    if (current.labels.length === 0) return
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ ...current, labels: [] }))
   } catch {
     // localStorage might be full or disabled
   }

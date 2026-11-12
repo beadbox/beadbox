@@ -205,7 +205,7 @@ import { getVersionStatus } from "@/lib/version-requirements"
 function BeadsEpicsViewer() {
   const { workspaces: initialWorkspaces } = useWorkspaceGate()
   const { bdVersion, platform } = useBdHealth()
-  const prefs = usePreferences()
+  const prefs = usePreferences(initialWorkspaces)
   const {
     filters,
     sort,
@@ -1057,6 +1057,7 @@ function BeadsEpicsViewer() {
               filters={filters}
               onFiltersChange={setFilters}
               assignees={assignees}
+              availableLabels={labelSuggestions}
               rigNames={rigNames}
               availableStatuses={availableStatuses}
               availableTypes={typeOptions}

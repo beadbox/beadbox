@@ -8,6 +8,7 @@ const FILTERS: Filters = {
   status: ALL_STATUSES,
   assignee: "all",
   priority: [],
+  labels: [],
   showMessages: false,
   showWaves: false,
   hasSpec: false,

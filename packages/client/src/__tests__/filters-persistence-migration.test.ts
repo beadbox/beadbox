@@ -99,6 +99,7 @@ describe("getFiltersPreference migration (beadbox-brg)", () => {
     const f = getFiltersPreference()
     expect(f.grouped).toBe(false)
     expect(f.priority).toEqual([])
+    expect(f.labels).toEqual([])
     expect(f.assignee).toBe("all")
   })
 })
@@ -132,6 +133,43 @@ describe("getFiltersPreference priority migration (beadbox-813)", () => {
     for (const bad of [null, { not: "a list" }, "urgent", 7]) {
       localStorage.setItem(FILTERS_KEY, JSON.stringify({ priority: bad }))
       expect(getFiltersPreference().priority).toEqual([])
+    }
+  })
+})
+
+// beadbox-ymx (GH #70): pre-label stored filter blobs and malformed shapes
+// must migrate cleanly to labels: string[], where [] means "All Labels".
+describe("getFiltersPreference labels migration (beadbox-ymx)", () => {
+  test("absent or pre-label stored blob → [] (All Labels)", () => {
+    expect(getFiltersPreference().labels).toEqual([])
+    localStorage.setItem(
+      FILTERS_KEY,
+      JSON.stringify({ status: ["open"], priority: ["high"], assignee: "all" }),
+    )
+    expect(getFiltersPreference().labels).toEqual([])
+  })
+
+  test("string[] round-trips, deduplicating and dropping empty or non-string entries", () => {
+    localStorage.setItem(
+      FILTERS_KEY,
+      JSON.stringify({ labels: ["frontend", "urgent", "frontend", "", 42, null] }),
+    )
+    expect(getFiltersPreference().labels).toEqual(["frontend", "urgent"])
+  })
+
+  test("singleton string: 'all' or '' → [], concrete label → [label]", () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ labels: "all" }))
+    expect(getFiltersPreference().labels).toEqual([])
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ labels: "" }))
+    expect(getFiltersPreference().labels).toEqual([])
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ labels: "urgent" }))
+    expect(getFiltersPreference().labels).toEqual(["urgent"])
+  })
+
+  test("malformed values (null / object / number / boolean) → []", () => {
+    for (const bad of [null, { not: "a list" }, 7, true]) {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify({ labels: bad }))
+      expect(getFiltersPreference().labels).toEqual([])
     }
   })
 })

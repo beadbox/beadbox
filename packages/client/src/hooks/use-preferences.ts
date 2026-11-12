@@ -15,6 +15,7 @@ import {
   getZoomLevel,
   setFilterBarVisible as persistFilterBarVisible,
   setZoomLevel as persistZoomLevel,
+  resetLabelFilterPreference,
   setFiltersPreference,
   setSortPreference,
   setThemePreference,
@@ -26,8 +27,15 @@ import {
 } from "../lib/local-storage"
 import { applyThemeClass } from "../lib/theme"
 import { DEFAULT_STATUSES, type Filters, type SortOption } from "../lib/types"
+import { getWorkspaceCookie, subscribeWorkspaceCookie } from "../lib/workspace-cookie"
 
-export function usePreferences() {
+/**
+ * Persisted UI preferences (filters, sort, theme, zoom, vim navigation, and
+ * update checker settings). Pass `initialWorkspaces` when mounted inside a
+ * workspace view so switching from a cookie-unset fallback workspace resets
+ * workspace-scoped label filters too.
+ */
+export function usePreferences(initialWorkspaces?: readonly { id: string }[]) {
   const [theme, setTheme] = useState<ThemeVariant>("gray")
   const [zoomLevel, setZoomLevelState] = useState(100)
   const [isTauri, setIsTauri] = useState(false)
@@ -40,6 +48,7 @@ export function usePreferences() {
     status: [...DEFAULT_STATUSES],
     assignee: "all",
     priority: [],
+    labels: [],
     showMessages: false,
     showWaves: false,
     hasSpec: false,
@@ -49,12 +58,41 @@ export function usePreferences() {
     grouped: false,
   })
   const prevFiltersRef = useRef<Filters | null>(null)
+  const activeWorkspaceIdRef = useRef<string | null>(
+    getWorkspaceCookie() ?? initialWorkspaces?.[0]?.id ?? null,
+  )
+  if (
+    activeWorkspaceIdRef.current === null &&
+    initialWorkspaces &&
+    initialWorkspaces.length > 0
+  ) {
+    activeWorkspaceIdRef.current = getWorkspaceCookie() ?? initialWorkspaces[0].id
+  }
 
   // Load filters preference from localStorage on mount
   useEffect(() => {
     const loaded = getFiltersPreference()
     setFiltersState(loaded)
     prevFiltersRef.current = loaded
+  }, [])
+
+  // beadbox-ymx (GH #70): labels are workspace-scoped; reset cleanly when the
+  // active workspace changes while keeping global filters intact.
+  useEffect(() => {
+    return subscribeWorkspaceCookie(() => {
+      const nextId = getWorkspaceCookie()
+      const prevId = activeWorkspaceIdRef.current
+      if (prevId !== null && nextId !== prevId) {
+        resetLabelFilterPreference()
+        setFiltersState((prev) => {
+          if (prev.labels.length === 0) return prev
+          const next = { ...prev, labels: [] }
+          prevFiltersRef.current = next
+          return next
+        })
+      }
+      activeWorkspaceIdRef.current = nextId
+    })
   }, [])
 
   // Wrap setFilters to persist to localStorage and fire analytics
@@ -70,6 +108,7 @@ export function usePreferences() {
       const tracked: { key: keyof Filters; label: string; defaultVal: string }[] = [
         { key: "status", label: "status", defaultVal: "" },
         { key: "priority", label: "priority", defaultVal: "" },
+        { key: "labels", label: "labels", defaultVal: "" },
         { key: "assignee", label: "assignee", defaultVal: "all" },
         { key: "showMessages", label: "show_messages", defaultVal: "false" },
         { key: "showWaves", label: "show_waves", defaultVal: "false" },

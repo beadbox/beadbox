@@ -20,6 +20,15 @@ export function priorityFilterNarrows(selected: readonly BeadPriority[]): boolea
 }
 
 /**
+ * True when a label selection narrows the list. Empty means "All Labels"
+ * (both labelled and unlabelled beads); unlike Priority, selecting every
+ * workspace label still excludes beads that carry no labels.
+ */
+export function labelFilterNarrows(selected: readonly string[]): boolean {
+  return selected.length > 0
+}
+
+/**
  * The status selection a fresh install starts with (and what most saved
  * preferences still hold): the canonical core + chain statuses. It means
  * "show everything until the user narrows", so it is read as every listed
@@ -359,6 +368,10 @@ export interface Filters {
   // the list is never blank because of this filter. Otherwise a bead matches
   // if its priority is in the list.
   priority: BeadPriority[]
+  // beadbox-ymx (GH #70): label filter is multi-select. Empty array means all
+  // beads (labelled and unlabelled); non-empty matches beads carrying ANY
+  // selected label.
+  labels: string[]
   search: string
   showMessages: boolean
   showWaves: boolean

@@ -24,6 +24,7 @@ function filters(status: string[]): Filters {
     status,
     assignee: "all",
     priority: [],
+    labels: [],
     search: "",
     showMessages: false,
     showWaves: false,

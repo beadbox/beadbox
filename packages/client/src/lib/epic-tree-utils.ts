@@ -4,6 +4,7 @@ import {
   type Epic,
   type Filters,
   effectiveStatusSelection,
+  labelFilterNarrows,
   priorityFilterNarrows,
   statusFilterNarrows,
 } from "./types"
@@ -162,6 +163,11 @@ const BEAD_FILTER_PREDICATES: BeadFilterPredicate[] = [
   // beadbox-813: multi-select priority. Empty or all five = no filtering (so
   // beads with no or an unknown priority still show); otherwise match ANY.
   (b, f) => !priorityFilterNarrows(f.priority) || f.priority.includes(b.priority),
+  // beadbox-ymx (GH #70): multi-select labels. Empty = all beads (including
+  // unlabelled); non-empty matches beads carrying ANY selected label.
+  (b, f) =>
+    !labelFilterNarrows(f.labels) ||
+    (b.labels?.some((label) => f.labels.includes(label)) ?? false),
   (b, f) => !f.type || f.type === "all" || b.type === f.type,
   (b, f) => f.assignee === "all" || b.assignee === f.assignee,
   (b, f) => !f.hasSpec || Boolean(b.specId),

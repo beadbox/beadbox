@@ -23,6 +23,8 @@
 // resolved first. The 'storage' DOM event is cross-tab only and Beadbox is
 // a single-window Tauri app, so we synthesize our own pub/sub here.
 
+import { resetLabelFilterPreference } from "./local-storage"
+
 const WORKSPACE_KEY = "beads-workspace"
 const COOKIE_CHANGE_EVENT = "workspace-cookie-change"
 
@@ -40,7 +42,11 @@ export function getWorkspaceCookie(): string | null {
 export function setWorkspaceCookie(workspaceId: string): void {
   if (typeof localStorage === "undefined") return
   try {
+    const previous = localStorage.getItem(WORKSPACE_KEY)
     localStorage.setItem(WORKSPACE_KEY, workspaceId)
+    if (previous !== null && previous !== workspaceId) {
+      resetLabelFilterPreference()
+    }
     workspaceCookieEvents.dispatchEvent(new Event(COOKIE_CHANGE_EVENT))
   } catch {
     /* localStorage might be full or disabled */
@@ -50,7 +56,11 @@ export function setWorkspaceCookie(workspaceId: string): void {
 export function clearWorkspaceCookie(): void {
   if (typeof localStorage === "undefined") return
   try {
+    const previous = localStorage.getItem(WORKSPACE_KEY)
     localStorage.removeItem(WORKSPACE_KEY)
+    if (previous !== null) {
+      resetLabelFilterPreference()
+    }
     workspaceCookieEvents.dispatchEvent(new Event(COOKIE_CHANGE_EVENT))
   } catch {
     /* tolerable during teardown */

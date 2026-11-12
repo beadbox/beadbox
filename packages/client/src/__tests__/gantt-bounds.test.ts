@@ -12,6 +12,7 @@ const FILTERS: Filters = {
   status: ["open", "in_progress", "closed", "blocked", "deferred"],
   assignee: "all",
   priority: [],
+  labels: [],
   showMessages: false,
   showWaves: false,
   hasSpec: false,

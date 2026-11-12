@@ -36,6 +36,7 @@ import {
   effectiveStatusSelection,
   FALLBACK_STATUSES,
   type Filters,
+  labelFilterNarrows,
   priorityFilterNarrows,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -54,6 +55,7 @@ interface FilterBarProps {
   filters: Filters
   onFiltersChange: (filters: Filters) => void
   assignees: string[]
+  availableLabels?: string[]
   rigNames?: string[]
   availableStatuses?: string[]
   availableTypes?: string[]
@@ -118,6 +120,7 @@ export function FilterBar({
   filters,
   onFiltersChange,
   assignees,
+  availableLabels = [],
   rigNames,
   availableStatuses,
   availableTypes = [],
@@ -142,6 +145,7 @@ export function FilterBar({
     // a filter narrowing the bead set), so it doesn't bump the badge.
     if (filters.status.length > 0) count++
     if (priorityFilterNarrows(filters.priority)) count++
+    if (labelFilterNarrows(filters.labels)) count++
     if (filters.assignee !== "all") count++
     if (filters.showMessages) count++
     if (filters.showWaves) count++
@@ -200,6 +204,31 @@ export function FilterBar({
     if (!priorityNarrows) return "All Priority"
     if (filters.priority.length === 1) return PRIORITY_LABELS[filters.priority[0]]
     return `${filters.priority.length} priorities`
+  }
+
+  // beadbox-ymx (GH #70): label multi-select. Empty selection means "All Labels"
+  // (including unlabelled beads); 1+ selected labels match ANY selected label.
+  const labelNarrows = labelFilterNarrows(filters.labels)
+  const labelOptions = useMemo(
+    () =>
+      [...new Set([...availableLabels, ...filters.labels])]
+        .sort()
+        .map((label) => ({ value: label, label })),
+    [availableLabels, filters.labels],
+  )
+
+  function toggleLabel(label: string): void {
+    const current = filters.labels
+    const next = current.includes(label)
+      ? current.filter((l) => l !== label)
+      : [...current, label]
+    updateFilter("labels", next)
+  }
+
+  function labelTriggerLabel(): string {
+    if (!labelNarrows) return "All Labels"
+    if (filters.labels.length === 1) return filters.labels[0]
+    return `${filters.labels.length} labels`
   }
 
   const triggerClassName = cn(
@@ -306,6 +335,19 @@ export function FilterBar({
           ))}
         </SelectContent>
       </Select>
+
+      {/* Label Filter — beadbox-ymx (GH #70) multi-select */}
+      <MultiSelectFilter
+        triggerLabel={labelTriggerLabel()}
+        triggerClassName={triggerClassName}
+        ariaLabel="Label filter"
+        allLabel="All Labels"
+        allState={labelNarrows ? "indeterminate" : true}
+        onToggleAll={() => updateFilter("labels", [])}
+        options={labelOptions}
+        selected={filters.labels}
+        onToggle={toggleLabel}
+      />
 
       {/* Rig Filter (only for multi-rig workspaces) */}
       {rigNames && rigNames.length > 0 && (

@@ -41,6 +41,7 @@ const baseFilters = (over: Partial<Filters> = {}): Filters => ({
   assignee: "all",
   // beadbox-813: empty = no priority filter.
   priority: [],
+  labels: [],
   search: "",
   showMessages: false,
   showWaves: false,

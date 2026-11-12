@@ -21,6 +21,7 @@ function baseFilters(over: Partial<Filters> = {}): Filters {
     status: [...STATUSES],
     assignee: "all",
     priority: [],
+    labels: [],
     search: "",
     showMessages: false,
     showWaves: false,

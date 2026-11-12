@@ -266,6 +266,7 @@ export function AllProjectsPage() {
           filters={filters}
           onFiltersChange={setFilters}
           assignees={[...new Set(allRows.map((r) => r.bead.assignee).filter(Boolean))]}
+          availableLabels={[...new Set(allRows.flatMap((r) => r.bead.labels ?? []))].sort()}
           rigNames={[
             ...new Set(allRows.map((r) => r.bead.rigName).filter((name): name is string => !!name)),
           ]}
