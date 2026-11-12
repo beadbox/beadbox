@@ -54,6 +54,7 @@ interface FilterBarProps {
   filters: Filters
   onFiltersChange: (filters: Filters) => void
   assignees: string[]
+  availableLabels?: string[]
   rigNames?: string[]
   availableStatuses?: string[]
   availableTypes?: string[]
@@ -118,6 +119,7 @@ export function FilterBar({
   filters,
   onFiltersChange,
   assignees,
+  availableLabels = [],
   rigNames,
   availableStatuses,
   availableTypes = [],
@@ -143,6 +145,7 @@ export function FilterBar({
     if (filters.status.length > 0) count++
     if (priorityFilterNarrows(filters.priority)) count++
     if (filters.assignee !== "all") count++
+    if (filters.labels?.length) count++
     if (filters.showMessages) count++
     if (filters.showWaves) count++
     if (filters.hasSpec) count++
@@ -284,6 +287,34 @@ export function FilterBar({
         options={PRIORITY_OPTIONS}
         selected={filters.priority}
         onToggle={togglePriority}
+      />
+
+      <MultiSelectFilter
+        triggerLabel={
+          !filters.labels?.length
+            ? "All Labels"
+            : filters.labels.length === 1
+              ? filters.labels[0]
+              : `${filters.labels.length} labels`
+        }
+        triggerClassName={triggerClassName}
+        ariaLabel="Label filter"
+        allLabel="All Labels"
+        allState={filters.labels?.length ? "indeterminate" : true}
+        onToggleAll={() => updateFilter("labels", [])}
+        options={[...new Set([...availableLabels, ...(filters.labels ?? [])])]
+          .sort()
+          .map((label) => ({ value: label, label }))}
+        selected={filters.labels ?? []}
+        onToggle={(label) => {
+          const current = filters.labels ?? []
+          updateFilter(
+            "labels",
+            current.includes(label)
+              ? current.filter((selected) => selected !== label)
+              : [...current, label],
+          )
+        }}
       />
 
       {/* Assignee Filter */}

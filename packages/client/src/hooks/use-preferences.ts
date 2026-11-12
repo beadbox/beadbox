@@ -40,6 +40,7 @@ export function usePreferences() {
     status: [...DEFAULT_STATUSES],
     assignee: "all",
     priority: [],
+    labels: [],
     showMessages: false,
     showWaves: false,
     hasSpec: false,

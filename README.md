@@ -19,7 +19,7 @@ Beadbox gives `bd` users a visual interface for the things a terminal can't show
 - **Waiting** — open `bd` gates (human, timer, gh:run, gh:pr, bead), oldest first, with the work each one holds; resolve a human gate in place. The tab (⌘6) appears only while a gate is open
 - **Live updates** — changes made from the `bd` CLI appear in the UI in real time; no refresh
 - **Bead detail** — full descriptions, comments, dependencies, and workflow advancement in a side panel or modal
-- **Filters** — slice by status, type, priority, and assignee; filters persist across sessions
+- **Filters** — slice by status, type, priority, assignee, and label (any selected label matches); filters persist across sessions, and label selections clear when switching workspaces
 - **Activity feed** — a timeline of what changed, by whom, across the workspace
 - **Multi-workspace** — a rail of project tabs switches between local `.beads/` projects and remote Dolt servers; rename a tab, give it an emoji, and switching back is instant
 - **Keyboard-first** — power-user paths work without touching the mouse

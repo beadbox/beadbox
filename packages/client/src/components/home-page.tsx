@@ -328,6 +328,17 @@ function BeadsEpicsViewer() {
     doRemoveWorkspace,
   } = lifecycle
 
+  // Workspace switches can remount this viewer. Keep the label choice's
+  // workspace in the saved preference so a remount also detects a switch.
+  useEffect(() => {
+    if (!currentWorkspace || filters.labelsWorkspaceId === currentWorkspace.id) return
+    setFilters({
+      ...filters,
+      labels: filters.labelsWorkspaceId ? [] : (filters.labels ?? []),
+      labelsWorkspaceId: currentWorkspace.id,
+    })
+  }, [currentWorkspace, filters, setFilters])
+
   // Settings dialog state
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined)
@@ -1057,6 +1068,7 @@ function BeadsEpicsViewer() {
               filters={filters}
               onFiltersChange={setFilters}
               assignees={assignees}
+              availableLabels={labelSuggestions}
               rigNames={rigNames}
               availableStatuses={availableStatuses}
               availableTypes={typeOptions}

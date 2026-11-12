@@ -34,6 +34,7 @@ const DEFAULT_FILTERS: Filters = {
   status: [...DEFAULT_STATUSES],
   assignee: "all",
   priority: [],
+  labels: [],
   showMessages: false,
   showWaves: false,
   hasSpec: false,
@@ -99,6 +100,9 @@ export function getFiltersPreference(): Filters {
       } else if (!Array.isArray(parsed.status)) {
         parsed.status = [...DEFAULT_STATUSES]
       }
+      parsed.labels = Array.isArray(parsed.labels)
+        ? [...new Set(parsed.labels.filter((label: unknown): label is string => typeof label === "string"))]
+        : []
       parsed.priority = migratePriority(parsed.priority)
       return { ...DEFAULT_FILTERS, ...parsed }
     }
