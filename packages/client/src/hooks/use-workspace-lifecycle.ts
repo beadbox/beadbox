@@ -112,6 +112,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         // Keep this session's setting even when WebView storage is unavailable.
       }
       loadGenRef.current++
+      refreshInFlightRef.current = null
       const cached = sessionEpics.get(treeCacheKey(currentWorkspace.id, enabled))
       epicsWorkspaceIdRef.current = cached
         ? (treeCacheKey(currentWorkspace.id, enabled) ?? null)
@@ -285,6 +286,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         // before loadEpics re-runs would otherwise pass its gen check and
         // publish the wrong tree.
         loadGenRef.current++
+        refreshInFlightRef.current = null
         setLoadingWorkspaceId(target.id)
         setCurrentWorkspace(target)
         setHealthy()
@@ -697,6 +699,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       }
     }
   }, [
+    currentWorkspace?.id,
     currentWorkspace?.databasePath,
     includeSystem,
     handleEpicsSuccess,
@@ -705,32 +708,55 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     setHealthy,
   ])
 
-  // Keep just the newest requested refresh, including workspace switches.
-  // Generation checks above still reject results from a superseded workspace.
-  const latestFetchRef = useRef(fetchEpics)
-  latestFetchRef.current = fetchEpics
+  // Same-key bursts share one request and one latest-state follow-up. A
+  // workspace/mode switch starts immediately; generations reject old replies.
+  const refreshKey = JSON.stringify([currentWorkspace?.databasePath, includeSystem])
+  const latestFetchRef = useRef({ key: refreshKey, fetch: fetchEpics })
+  latestFetchRef.current = { key: refreshKey, fetch: fetchEpics }
   const refreshDirtyRef = useRef(false)
-  const refreshPromiseRef = useRef<Promise<void> | null>(null)
+  const refreshInFlightRef = useRef<{
+    key: string
+    dirty: boolean
+    promise: Promise<void> | null
+  } | null>(null)
   const mountedRef = useRef(true)
   const loadEpics = useCallback((): Promise<void> => {
     refreshDirtyRef.current = true
-    if (refreshPromiseRef.current) return refreshPromiseRef.current
     if (document.visibilityState === "hidden") return Promise.resolve()
+    const request = latestFetchRef.current
+    const current = refreshInFlightRef.current
+    if (current?.key === request.key) {
+      current.dirty = true
+      return current.promise ?? Promise.resolve()
+    }
+    const flight = { key: request.key, dirty: true, promise: null as Promise<void> | null }
+    refreshInFlightRef.current = flight
     const drain = async () => {
       while (
         mountedRef.current &&
-        refreshDirtyRef.current &&
+        refreshInFlightRef.current === flight &&
+        latestFetchRef.current.key === flight.key &&
+        flight.dirty &&
         document.visibilityState !== "hidden"
       ) {
+        flight.dirty = false
         refreshDirtyRef.current = false
-        await latestFetchRef.current()
+        await latestFetchRef.current.fetch()
       }
     }
-    const promise = drain().finally(() => {
-      refreshPromiseRef.current = null
+    flight.promise = drain().finally(() => {
+      if (refreshInFlightRef.current !== flight) return
+      refreshInFlightRef.current = null
+      // A notification can land after the loop ends but before this cleanup.
+      if (
+        mountedRef.current &&
+        flight.dirty &&
+        document.visibilityState !== "hidden" &&
+        latestFetchRef.current.key === flight.key
+      )
+        return loadEpics()
     })
-    refreshPromiseRef.current = promise
-    return promise
+    return flight.promise
   }, [])
 
   useEffect(() => {
@@ -741,6 +767,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     document.addEventListener("visibilitychange", catchUp)
     return () => {
       mountedRef.current = false
+      refreshInFlightRef.current = null
       loadGenRef.current++
       document.removeEventListener("visibilitychange", catchUp)
     }

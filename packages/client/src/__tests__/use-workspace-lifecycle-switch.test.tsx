@@ -20,7 +20,7 @@ import {
 import { act, cleanup, render, waitFor } from "@testing-library/react"
 
 import type { AppHealth } from "../hooks/use-app-health"
-import { useWorkspaceLifecycle } from "../hooks/use-workspace-lifecycle"
+import { systemIssuesKey, useWorkspaceLifecycle } from "../hooks/use-workspace-lifecycle"
 import { ERROR_CATEGORY_TITLES } from "../lib/epic-tree-utils"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import type { Epic, Workspace } from "../lib/types"
@@ -78,14 +78,14 @@ function mountLifecycle(
     rejectStatuses?: boolean
     getAvailableTypes?: (dbPath?: string) => Promise<string[]>
     getEpicsResult?: unknown
-    treeRequest?: (dbPath?: string) => Promise<unknown>
+    treeRequest?: (dbPath?: string, includeSystem?: boolean) => Promise<unknown>
   } = {},
 ): Harness {
   let calls = 0
   let pendingResolve: (() => void) | null = null
 
-  const getEpics = mock((dbPath?: string) => {
-    if (options.treeRequest) return options.treeRequest(dbPath)
+  const getEpics = mock((dbPath?: string, includeSystem?: boolean) => {
+    if (options.treeRequest) return options.treeRequest(dbPath, includeSystem)
     calls += 1
     const key = (dbPath ?? "").replace(/\/beads\.db$/, "")
     const payload = { success: true as const, epics: EPICS_BY_DB[key] ?? [] }
@@ -165,6 +165,7 @@ afterEach(() => {
   _resetRpc()
   _resetWorkspaceSessions()
   clearWorkspaceCookie()
+  localStorage.removeItem(systemIssuesKey(alpha.id))
 })
 
 describe("useWorkspaceLifecycle workspace switching", () => {
@@ -419,7 +420,7 @@ describe("tree refresh admission", () => {
     }
   })
 
-  test("a queued workspace switch discards the in-flight old tree", async () => {
+  test("a workspace switch starts immediately and discards the in-flight old tree", async () => {
     setWorkspaceCookie(alpha.id)
     const pending: Array<{ db?: string; resolve: (value: unknown) => void }> = []
     const { seen } = mountLifecycle({
@@ -427,6 +428,7 @@ describe("tree refresh admission", () => {
     })
     await waitFor(() => expect(pending.length).toBe(1))
     await act(async () => setWorkspaceCookie(beta.id))
+    await waitFor(() => expect(pending.length).toBe(2))
     await act(async () => pending.shift()?.resolve({ success: true, epics: [epic("stale-alpha")] }))
     await waitFor(() => expect(pending.some((p) => p.db?.includes("beta"))).toBe(true))
     expect(seen.current?.epics.some((e) => e.id === "stale-alpha")).toBe(false)
@@ -437,4 +439,79 @@ describe("tree refresh admission", () => {
     )
     await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("latest-beta"))
   })
+})
+
+describe("review: switch latency", () => {
+  test("switching away from a stalled workspace starts the new load at once", async () => {
+    setWorkspaceCookie(alpha.id)
+    const pending: Array<{ db?: string; resolve: (value: unknown) => void }> = []
+    mountLifecycle({
+      treeRequest: (db) => new Promise((resolve) => pending.push({ db, resolve })),
+    })
+    await waitFor(() => expect(pending.length).toBe(1))
+    await act(async () => setWorkspaceCookie(beta.id))
+    // alpha never answers (a stalled workspace)
+    await waitFor(() => expect(pending.some((p) => p.db?.includes("beta"))).toBe(true), {
+      timeout: 1500,
+    })
+  })
+})
+
+test("switching system-issue mode does not wait for the previous mode", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<{ all?: boolean; resolve: (value: unknown) => void }> = []
+  const { seen } = mountLifecycle({
+    treeRequest: (_db, all) => new Promise((resolve) => pending.push({ all, resolve })),
+  })
+  await waitFor(() => expect(pending.length).toBe(1))
+  await act(async () => seen.current?.setIncludeSystem(true))
+  await waitFor(() => expect(pending.map((p) => p.all)).toEqual([false, true]))
+  await act(async () => pending[1].resolve({ success: true, epics: [epic("all-issues")] }))
+  await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("all-issues"))
+  await act(async () => pending[0].resolve({ success: true, epics: [epic("stale-normal")] }))
+  expect(seen.current?.epics[0]?.id).toBe("all-issues")
+  expect(seen.current?.isLoading).toBe(false)
+  act(() => seen.current?.setIncludeSystem(false))
+})
+
+test("an old workspace's dirty follow-up cannot join the current workspace burst", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<{ db?: string; resolve: (value: unknown) => void }> = []
+  const { seen, getEpics } = mountLifecycle({
+    treeRequest: (db) => new Promise((resolve) => pending.push({ db, resolve })),
+  })
+  await waitFor(() => expect(pending.length).toBe(1))
+  act(() => {
+    for (let n = 0; n < 5; n++) void seen.current?.loadEpics()
+  })
+  await act(async () => setWorkspaceCookie(beta.id))
+  await waitFor(() => expect(pending.length).toBe(2))
+  act(() => {
+    for (let n = 0; n < 10; n++) void seen.current?.loadEpics()
+  })
+  await act(async () => pending[0].resolve({ success: true, epics: [epic("old-alpha")] }))
+  expect(getEpics.mock.calls.length).toBe(2)
+  await act(async () => pending[1].resolve({ success: true, epics: [epic("older-beta")] }))
+  await waitFor(() => expect(pending.length).toBe(3))
+  await act(async () => pending[2].resolve({ success: true, epics: [epic("latest-beta")] }))
+  await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("latest-beta"))
+  expect(getEpics.mock.calls.length).toBe(3)
+})
+
+test("a refresh arriving as the current drain settles is not lost", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<(value: unknown) => void> = []
+  const { seen, getEpics } = mountLifecycle({
+    treeRequest: () => new Promise((resolve) => pending.push(resolve)),
+  })
+  await waitFor(() => expect(pending.length).toBe(1))
+  await act(async () => {
+    pending[0]({ success: true, epics: [epic("first")] })
+    await Promise.resolve()
+    await Promise.resolve()
+    void seen.current?.loadEpics()
+  })
+  await waitFor(() => expect(getEpics.mock.calls.length).toBe(2))
+  await act(async () => pending[1]({ success: true, epics: [epic("latest")] }))
+  await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("latest"))
 })

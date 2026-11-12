@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test"
 import { cleanup, fireEvent, render, within } from "@testing-library/react"
 import { BeadTable } from "../components/bead-table"
-import * as dueFormat from "../lib/due-format"
+import * as badgeConfig from "../lib/badge-config"
 import type { Bead } from "../lib/types"
 
 afterEach(cleanup)
@@ -10,7 +10,7 @@ const bead = (id: string, day: number): Bead => ({
   title: `Task ${id}`,
   type: "task",
   description: "",
-  status: "open",
+  status: id,
   priority: "medium",
   assignee: "",
   comments: [],
@@ -18,21 +18,21 @@ const bead = (id: string, day: number): Bead => ({
 })
 
 test("a fresh tree reply changing one bead renders only that row and uses latest callbacks", () => {
-  // describeDueAt runs once in each row render, including memoized nested rows.
-  const due = spyOn(dueFormat, "describeDueAt")
+  // Status configuration runs inside the expensive controls, not the cheap traversal.
+  const rowRenders = spyOn(badgeConfig, "getStatusConfig")
   try {
     const original = [bead("first", 1), bead("second", 2)]
     const clicked = mock(() => {})
     const view = render(<BeadTable beads={original} epicId="epic" onBeadClick={() => {}} />)
-    due.mockClear()
+    rowRenders.mockClear()
     const fresh = original.map((b) => ({ ...b, dueAt: new Date(b.dueAt!), comments: [] }))
     fresh[0].title = "changed"
     view.rerender(<BeadTable beads={fresh} epicId="epic" onBeadClick={clicked} />)
-    expect(due.mock.calls.map(([date]) => new Date(date).getDate())).toEqual([1])
+    expect(rowRenders.mock.calls.map(([status]) => status)).toEqual(["first"])
     fireEvent.click(view.getByText("Task second"))
     expect(clicked).toHaveBeenCalledWith(fresh[1])
   } finally {
-    due.mockRestore()
+    rowRenders.mockRestore()
   }
 })
 
@@ -82,23 +82,23 @@ test("memoized nested rows update expansion, selection and keyboard focus", () =
 })
 
 test("changing a nested bead does not render its unchanged parent or sibling rows", () => {
-  const due = spyOn(dueFormat, "describeDueAt")
+  const rowRenders = spyOn(badgeConfig, "getStatusConfig")
   try {
     const parent = { ...bead("parent", 1), children: [bead("child", 3), bead("other-child", 4)] }
     const props = { epicId: "epic", onBeadClick: () => {}, expandedBeads: new Set(["parent"]) }
     const view = render(<BeadTable {...props} beads={[parent, bead("sibling", 2)]} />)
-    due.mockClear()
+    rowRenders.mockClear()
     const next = { ...parent, children: parent.children.map((b) => ({ ...b })) }
     next.children[0].title = "Edited child"
     view.rerender(<BeadTable {...props} beads={[next, bead("sibling", 2)]} />)
-    expect(due.mock.calls.map(([date]) => new Date(date).getDate())).toEqual([3])
+    expect(rowRenders.mock.calls.map(([status]) => status)).toEqual(["child"])
   } finally {
-    due.mockRestore()
+    rowRenders.mockRestore()
   }
 })
 
 test("aggregate source lookup replacement does not render unchanged project rows", () => {
-  const due = spyOn(dueFormat, "describeDueAt")
+  const rowRenders = spyOn(badgeConfig, "getStatusConfig")
   try {
     const rows = [bead("first", 1), bead("second", 2)]
     const view = render(
@@ -110,7 +110,7 @@ test("aggregate source lookup replacement does not render unchanged project rows
         sourceForBead={() => ({ id: "project", name: "Project" })}
       />,
     )
-    due.mockClear()
+    rowRenders.mockClear()
     const next = rows.map((b) => ({ ...b }))
     next[0].title = "Updated project bead"
     view.rerender(
@@ -122,8 +122,8 @@ test("aggregate source lookup replacement does not render unchanged project rows
         sourceForBead={() => ({ id: "project", name: "Project" })}
       />,
     )
-    expect(due.mock.calls.map(([date]) => new Date(date).getDate())).toEqual([1])
+    expect(rowRenders.mock.calls.map(([status]) => status)).toEqual(["first"])
   } finally {
-    due.mockRestore()
+    rowRenders.mockRestore()
   }
 })

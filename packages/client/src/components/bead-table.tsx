@@ -33,7 +33,7 @@ import { CopyableId } from "@/components/copyable-id"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useViewport } from "@/hooks/use-viewport"
-import { describeDueAt } from "@/lib/due-format"
+import { describeDueAt, type DueDisplay } from "@/lib/due-format"
 import { type BadgeConfig, getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
 import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
@@ -189,7 +189,7 @@ interface BeadRowProps {
 }
 
 // RPC replies and filtered trees contain fresh objects, including Dates.
-// Compare their values without serializing a second copy of the whole board.
+// Compare their acyclic RPC JSON values without serializing another board copy.
 function sameValue(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true
   if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime()
@@ -229,12 +229,16 @@ type RowContentProps = Omit<BeadRowProps, "sourceForBead"> & {
   source?: BeadSource
   sourced: boolean
   hasChildren: boolean | undefined
+  due: DueDisplay | null
+  deadline: string
 }
 
 function sameRow(a: RowContentProps, b: RowContentProps): boolean {
   return (
     a.sourced === b.sourced &&
     a.hasChildren === b.hasChildren &&
+    sameValue(a.due, b.due) &&
+    a.deadline === b.deadline &&
     sameValue(a.source, b.source) &&
     a.flat === b.flat &&
     a.depth === b.depth &&
@@ -304,6 +308,8 @@ const BeadRowContent = memo(function BeadRowContent({
   source,
   sourced,
   hasChildren,
+  due,
+  deadline,
   bead,
   depth,
   onBeadClick,
@@ -329,7 +335,6 @@ const BeadRowContent = memo(function BeadRowContent({
   const isExpanded = expandedBeads?.has(rowKey) ?? false
   const borderColor = depthBorderColors[Math.min(depth, depthBorderColors.length - 1)]
   const indentPadding = depth > 0 ? `${depth * 16}px` : undefined
-  const due = bead.dueAt ? describeDueAt(bead.dueAt) : null
 
   return (
     <>
@@ -564,7 +569,7 @@ const BeadRowContent = memo(function BeadRowContent({
               className="text-[10px] text-muted-foreground/70 shrink-0"
               data-testid="gate-deadline"
             >
-              {describeDeadline(bead.gateWait.deadline)}
+              {deadline}
             </span>
           )}
           {bead.orphanedFromEpic && (
@@ -645,6 +650,12 @@ function BeadRow(props: BeadRowProps) {
   // bead stays in the ref above for click handlers, without retaining history.
   const { bead, sourceForBead, ...rowProps } = props
   const { children, ...fields } = bead
+  // Refresh-driven clock output must stay outside the controls' memo boundary.
+  const due = bead.dueAt ? describeDueAt(bead.dueAt) : null
+  const deadline =
+    bead.type === "gate" && bead.status !== "closed" && bead.gateWait?.deadline
+      ? describeDeadline(bead.gateWait.deadline)
+      : ""
   const childKey = makeKeyer()
   const expanded = !props.flat && props.expandedBeads?.has(keyFor(props.bead, props.sourceForBead))
   return (
@@ -656,6 +667,8 @@ function BeadRow(props: BeadRowProps) {
         sourced={!!sourceForBead}
         hasChildren={!props.flat && children && children.length > 0}
         getBead={getBead}
+        due={due}
+        deadline={deadline}
       />
       {expanded &&
         props.bead.children?.map((child) => (
