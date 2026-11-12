@@ -30,7 +30,19 @@ export function useDevConsole({ dbPath }: UseDevConsoleOptions) {
   const [events, setEvents] = useState<WsLifecycleEvent[]>([])
   const [showHeartbeats, setShowHeartbeats] = useState(false)
 
+  // Capture diagnostics without waking the board while the console is closed.
+  const commandBuffer = useRef<BdCommandEvent[]>([])
+  const eventBuffer = useRef<WsLifecycleEvent[]>([])
+  const openRef = useRef(open)
+  openRef.current = open
   const prevDbPathRef = useRef(dbPath)
+
+  useEffect(() => {
+    if (open) {
+      setCommands(commandBuffer.current)
+      setEvents(eventBuffer.current)
+    }
+  }, [open])
 
   // Read height from localStorage on mount
   useEffect(() => {
@@ -41,6 +53,8 @@ export function useDevConsole({ dbPath }: UseDevConsoleOptions) {
   useEffect(() => {
     if (prevDbPathRef.current !== dbPath) {
       prevDbPathRef.current = dbPath
+      commandBuffer.current = []
+      eventBuffer.current = []
       setCommands([])
       setEvents([])
     }
@@ -59,21 +73,23 @@ export function useDevConsole({ dbPath }: UseDevConsoleOptions) {
   const close = useCallback(() => setOpen(false), [])
 
   const addCommand = useCallback((event: BdCommandEvent) => {
-    setCommands((prev) => {
-      const next = [...prev, event]
-      return next.length > MAX_ENTRIES ? next.slice(next.length - MAX_ENTRIES) : next
-    })
+    commandBuffer.current = [...commandBuffer.current.slice(-(MAX_ENTRIES - 1)), event]
+    if (openRef.current) setCommands(commandBuffer.current)
   }, [])
 
   const addEvent = useCallback((event: WsLifecycleEvent) => {
-    setEvents((prev) => {
-      const next = [...prev, event]
-      return next.length > MAX_ENTRIES ? next.slice(next.length - MAX_ENTRIES) : next
-    })
+    eventBuffer.current = [...eventBuffer.current.slice(-(MAX_ENTRIES - 1)), event]
+    if (openRef.current) setEvents(eventBuffer.current)
   }, [])
 
-  const clearCommands = useCallback(() => setCommands([]), [])
-  const clearEvents = useCallback(() => setEvents([]), [])
+  const clearCommands = useCallback(() => {
+    commandBuffer.current = []
+    setCommands([])
+  }, [])
+  const clearEvents = useCallback(() => {
+    eventBuffer.current = []
+    setEvents([])
+  }, [])
 
   const setHeight = useCallback((h: number) => {
     const clamped = Math.max(100, Math.min(h, window.innerHeight * 0.6))

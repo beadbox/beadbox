@@ -27,13 +27,13 @@ import {
   Wrench,
   Zap,
 } from "lucide-react"
-import React, { useState } from "react"
+import React, { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { projectBeadKey } from "@/lib/aggregate"
 import { CopyableId } from "@/components/copyable-id"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useViewport } from "@/hooks/use-viewport"
-import { describeDueAt } from "@/lib/due-format"
+import { describeDueAt, type DueDisplay } from "@/lib/due-format"
 import { type BadgeConfig, getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
 import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
@@ -188,9 +188,128 @@ interface BeadRowProps {
   onToggleSelect?: (beadId: string) => void
 }
 
-function BeadRow({
-  sourceForBead,
-  flat,
+// RPC replies and filtered trees contain fresh objects, including Dates.
+// Compare their acyclic RPC JSON values without serializing another board copy.
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime()
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every((key) => Object.hasOwn(right, key) && sameValue(left[key], right[key]))
+  )
+}
+
+function rowContentKey(props: RowContentProps): string {
+  return props.source ? projectBeadKey(props.source.id, props.bead.id) : props.bead.id
+}
+
+function sameRowState(bead: Bead, a: RowContentProps, b: RowContentProps): boolean {
+  const key = rowContentKey(a)
+  if (key !== rowContentKey(b)) return false
+  if (
+    a.expandedBeads?.has(key) !== b.expandedBeads?.has(key) ||
+    a.selectedIds?.has(key) !== b.selectedIds?.has(key) ||
+    (a.focusedItemId === key) !== (b.focusedItemId === key) ||
+    (a.selectedBeadId === key) !== (b.selectedBeadId === key) ||
+    (a.draggedBeadId === key) !== (b.draggedBeadId === key) ||
+    !!a.readState !== !!b.readState ||
+    !sameValue(a.readState?.[bead.id], b.readState?.[bead.id])
+  )
+    return false
+  return true
+}
+
+type RowContentProps = Omit<BeadRowProps, "sourceForBead"> & {
+  getBead: () => Bead
+  source?: BeadSource
+  sourced: boolean
+  hasChildren: boolean | undefined
+  due: DueDisplay | null
+  deadline: string
+}
+
+function sameRow(a: RowContentProps, b: RowContentProps): boolean {
+  return (
+    a.sourced === b.sourced &&
+    a.hasChildren === b.hasChildren &&
+    sameValue(a.due, b.due) &&
+    a.deadline === b.deadline &&
+    sameValue(a.source, b.source) &&
+    a.flat === b.flat &&
+    a.depth === b.depth &&
+    a.epicId === b.epicId &&
+    a.onBeadClick === b.onBeadClick &&
+    a.onArchive === b.onArchive &&
+    a.onDelete === b.onDelete &&
+    a.onDragStart === b.onDragStart &&
+    a.onDragEnd === b.onDragEnd &&
+    a.onToggleBead === b.onToggleBead &&
+    a.onFocusItem === b.onFocusItem &&
+    a.onToggleSelect === b.onToggleSelect &&
+    a.getBead === b.getBead &&
+    sameValue(a.bead, b.bead) &&
+    sameRowState(b.bead, a, b)
+  )
+}
+
+type RowCallbacks = Pick<
+  BeadRowProps,
+  | "onBeadClick"
+  | "onArchive"
+  | "onDelete"
+  | "onDragStart"
+  | "onDragEnd"
+  | "onToggleBead"
+  | "onFocusItem"
+  | "onToggleSelect"
+>
+
+// Event handlers read the latest committed page callbacks. Tree refreshes can
+// replace their closures without invalidating every memoized row.
+function useRowCallbacks(callbacks: RowCallbacks): RowCallbacks {
+  const latest = useRef(callbacks)
+  useLayoutEffect(() => {
+    latest.current = callbacks
+  })
+  const stable = useMemo<RowCallbacks>(
+    () => ({
+      onBeadClick: (bead) => latest.current.onBeadClick(bead),
+      onArchive: async (id) => {
+        await latest.current.onArchive?.(id)
+      },
+      onDelete: (id) => latest.current.onDelete?.(id),
+      onDragStart: (id) => latest.current.onDragStart?.(id),
+      onDragEnd: () => latest.current.onDragEnd?.(),
+      onToggleBead: (id) => latest.current.onToggleBead?.(id),
+      onFocusItem: (id) => latest.current.onFocusItem?.(id),
+      onToggleSelect: (id) => latest.current.onToggleSelect?.(id),
+    }),
+    [],
+  )
+  return {
+    ...stable,
+    onArchive: callbacks.onArchive ? stable.onArchive : undefined,
+    onDelete: callbacks.onDelete ? stable.onDelete : undefined,
+    onDragStart: callbacks.onDragStart ? stable.onDragStart : undefined,
+    onDragEnd: callbacks.onDragEnd ? stable.onDragEnd : undefined,
+    onToggleBead: callbacks.onToggleBead ? stable.onToggleBead : undefined,
+    onFocusItem: callbacks.onFocusItem ? stable.onFocusItem : undefined,
+    onToggleSelect: callbacks.onToggleSelect ? stable.onToggleSelect : undefined,
+  }
+}
+
+const BeadRowContent = memo(function BeadRowContent({
+  getBead,
+  source,
+  sourced,
+  hasChildren,
+  due,
+  deadline,
   bead,
   depth,
   onBeadClick,
@@ -208,23 +327,19 @@ function BeadRow({
   readState,
   selectedIds,
   onToggleSelect,
-}: BeadRowProps) {
+}: RowContentProps) {
   const { isMobile } = useViewport()
-  const childKey = makeKeyer()
   const [isArchiving, setIsArchiving] = useState(false)
-  const source = sourceForBead?.(bead)
-  const rowKey = keyFor(bead, sourceForBead)
+  const rowKey = source ? projectBeadKey(source.id, bead.id) : bead.id
   const isSelected = selectedIds?.has(rowKey) ?? false
-  const hasChildren = !flat && bead.children && bead.children.length > 0
   const isExpanded = expandedBeads?.has(rowKey) ?? false
   const borderColor = depthBorderColors[Math.min(depth, depthBorderColors.length - 1)]
   const indentPadding = depth > 0 ? `${depth * 16}px` : undefined
-  const due = bead.dueAt ? describeDueAt(bead.dueAt) : null
 
   return (
     <>
       <div
-        draggable={!sourceForBead}
+        draggable={!sourced}
         data-item-id={rowKey}
         data-project-id={source?.id}
         data-bead-id={source ? bead.id : undefined}
@@ -248,7 +363,7 @@ function BeadRow({
         style={{ paddingLeft: indentPadding ? `calc(0.75rem + ${indentPadding})` : undefined }}
         onClick={() => {
           onFocusItem?.(rowKey)
-          onBeadClick(bead)
+          onBeadClick(getBead())
         }}
       >
         {/* bb-y729: bulk-select checkbox (only when wired by parent) */}
@@ -454,7 +569,7 @@ function BeadRow({
               className="text-[10px] text-muted-foreground/70 shrink-0"
               data-testid="gate-deadline"
             >
-              {describeDeadline(bead.gateWait.deadline)}
+              {deadline}
             </span>
           )}
           {bead.orphanedFromEpic && (
@@ -519,31 +634,49 @@ function BeadRow({
           )}
         </div>
       </div>
-      {/* Render children if expanded */}
-      {hasChildren &&
-        isExpanded &&
-        bead.children!.map((child, idx) => (
+    </>
+  )
+}, sameRow)
+
+// Traverse expanded children outside the expensive row memo boundary. A child
+// edit can update that row without rendering its unchanged ancestor's controls.
+function BeadRow(props: BeadRowProps) {
+  const latestBead = useRef(props.bead)
+  useLayoutEffect(() => {
+    latestBead.current = props.bead
+  }, [props.bead])
+  const getBead = useCallback(() => latestBead.current, [])
+  // Keep full trees and lookup closures out of memoized snapshots. The latest
+  // bead stays in the ref above for click handlers, without retaining history.
+  const { bead, sourceForBead, ...rowProps } = props
+  const { children, ...fields } = bead
+  // Refresh-driven clock output must stay outside the controls' memo boundary.
+  const due = bead.dueAt ? describeDueAt(bead.dueAt) : null
+  const deadline =
+    bead.type === "gate" && bead.status !== "closed" && bead.gateWait?.deadline
+      ? describeDeadline(bead.gateWait.deadline)
+      : ""
+  const childKey = makeKeyer()
+  const expanded = !props.flat && props.expandedBeads?.has(keyFor(props.bead, props.sourceForBead))
+  return (
+    <>
+      <BeadRowContent
+        {...rowProps}
+        bead={fields}
+        source={sourceForBead?.(bead)}
+        sourced={!!sourceForBead}
+        hasChildren={!props.flat && children && children.length > 0}
+        getBead={getBead}
+        due={due}
+        deadline={deadline}
+      />
+      {expanded &&
+        props.bead.children?.map((child) => (
           <BeadRow
-            key={childKey(child.id)}
+            {...props}
+            key={childKey(keyFor(child, props.sourceForBead))}
             bead={child}
-            sourceForBead={sourceForBead}
-            flat={flat}
-            depth={depth + 1}
-            onBeadClick={onBeadClick}
-            onArchive={onArchive}
-            onDelete={onDelete}
-            epicId={epicId}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            draggedBeadId={draggedBeadId}
-            expandedBeads={expandedBeads}
-            onToggleBead={onToggleBead}
-            focusedItemId={focusedItemId}
-            onFocusItem={onFocusItem}
-            selectedBeadId={selectedBeadId}
-            readState={readState}
-            selectedIds={selectedIds}
-            onToggleSelect={onToggleSelect}
+            depth={props.depth + 1}
           />
         ))}
     </>
@@ -650,6 +783,16 @@ export function BeadTable({
   onToggleSelect,
   onToggleSelectAll,
 }: BeadTableProps) {
+  const rowCallbacks = useRowCallbacks({
+    onBeadClick,
+    onArchive,
+    onDelete,
+    onDragStart,
+    onDragEnd,
+    onToggleBead,
+    onFocusItem,
+    onToggleSelect,
+  })
   const waves = showWaves ? computeWaves(beads, sourceForBead) : null
   const useWaveView = waves && waves.length >= 2
 
@@ -661,21 +804,14 @@ export function BeadTable({
       sourceForBead={sourceForBead}
       flat={flat}
       depth={0}
-      onBeadClick={onBeadClick}
-      onArchive={onArchive}
-      onDelete={onDelete}
       epicId={epicId}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       draggedBeadId={draggedBeadId}
       expandedBeads={expandedBeads}
-      onToggleBead={onToggleBead}
       focusedItemId={focusedItemId}
-      onFocusItem={onFocusItem}
       selectedBeadId={selectedBeadId}
       readState={readState}
       selectedIds={selectedIds}
-      onToggleSelect={onToggleSelect}
+      {...rowCallbacks}
     />
   )
 

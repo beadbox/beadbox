@@ -112,6 +112,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         // Keep this session's setting even when WebView storage is unavailable.
       }
       loadGenRef.current++
+      refreshInFlightRef.current = null
       const cached = sessionEpics.get(treeCacheKey(currentWorkspace.id, enabled))
       epicsWorkspaceIdRef.current = cached
         ? (treeCacheKey(currentWorkspace.id, enabled) ?? null)
@@ -285,6 +286,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         // before loadEpics re-runs would otherwise pass its gen check and
         // publish the wrong tree.
         loadGenRef.current++
+        refreshInFlightRef.current = null
         setLoadingWorkspaceId(target.id)
         setCurrentWorkspace(target)
         setHealthy()
@@ -431,6 +433,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       // its own; firing here causes a false "did not respond" on slow
       // first connections, e.g. server workspaces with setup overhead).
       if (
+        document.visibilityState !== "hidden" &&
         !hasExistingDataRef.current &&
         appHealthRef.current.status === "healthy" &&
         !loadInProgressRef.current
@@ -634,7 +637,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   )
 
   // Fetch epics when workspace changes.
-  const loadEpics = useCallback(async () => {
+  const fetchEpics = useCallback(async () => {
     // Increment generation counter. Any in-flight load from a prior call
     // sees a stale gen and discards its results in the finally block.
     const gen = ++loadGenRef.current
@@ -696,6 +699,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       }
     }
   }, [
+    currentWorkspace?.id,
     currentWorkspace?.databasePath,
     includeSystem,
     handleEpicsSuccess,
@@ -703,6 +707,71 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     handleEpicsCatch,
     setHealthy,
   ])
+
+  // Same-key bursts share one request and one latest-state follow-up. A
+  // workspace/mode switch starts immediately; generations reject old replies.
+  const refreshKey = JSON.stringify([currentWorkspace?.databasePath, includeSystem])
+  const latestFetchRef = useRef({ key: refreshKey, fetch: fetchEpics })
+  latestFetchRef.current = { key: refreshKey, fetch: fetchEpics }
+  const refreshDirtyRef = useRef(false)
+  const refreshInFlightRef = useRef<{
+    key: string
+    dirty: boolean
+    promise: Promise<void> | null
+  } | null>(null)
+  const mountedRef = useRef(true)
+  const loadEpics = useCallback((): Promise<void> => {
+    refreshDirtyRef.current = true
+    if (document.visibilityState === "hidden") return Promise.resolve()
+    const request = latestFetchRef.current
+    const current = refreshInFlightRef.current
+    if (current?.key === request.key) {
+      current.dirty = true
+      return current.promise ?? Promise.resolve()
+    }
+    const flight = { key: request.key, dirty: true, promise: null as Promise<void> | null }
+    refreshInFlightRef.current = flight
+    const drain = async () => {
+      while (
+        mountedRef.current &&
+        refreshInFlightRef.current === flight &&
+        latestFetchRef.current.key === flight.key &&
+        flight.dirty &&
+        document.visibilityState !== "hidden"
+      ) {
+        flight.dirty = false
+        refreshDirtyRef.current = false
+        await latestFetchRef.current.fetch()
+      }
+    }
+    flight.promise = drain().finally(() => {
+      if (refreshInFlightRef.current !== flight) return
+      refreshInFlightRef.current = null
+      // A notification can land after the loop ends but before this cleanup.
+      if (
+        mountedRef.current &&
+        flight.dirty &&
+        document.visibilityState !== "hidden" &&
+        latestFetchRef.current.key === flight.key
+      )
+        return loadEpics()
+    })
+    return flight.promise
+  }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    const catchUp = () => {
+      if (document.visibilityState !== "hidden" && refreshDirtyRef.current) void loadEpics()
+    }
+    document.addEventListener("visibilitychange", catchUp)
+    return () => {
+      mountedRef.current = false
+      refreshInFlightRef.current = null
+      loadGenRef.current++
+      document.removeEventListener("visibilitychange", catchUp)
+    }
+  }, [loadEpics])
 
   // Clear all auto-retry timers
   const clearAutoRetry = useCallback(() => {
@@ -782,7 +851,6 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       setIsRefreshing(false)
     }
   }, [loadEpics, isRefreshing, clearAutoRetry])
-
 
   useEffect(() => {
     if (currentWorkspace) {
