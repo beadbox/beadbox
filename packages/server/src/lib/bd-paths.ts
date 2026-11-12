@@ -1,24 +1,32 @@
-import { accessSync, constants, existsSync, statSync } from "fs"
+import { accessSync, constants, statSync } from "fs"
 import { homedir } from "os"
 import { isAbsolute, join } from "path"
 import { readSavedBdPath } from "./bd-preferences"
 import { execFileAsync } from "./exec"
+import { VERSION_MANAGER_DIRS } from "./tool-paths"
 import { compareVersions, MIN_BD_VERSION } from "./version-requirements"
 
 export const COMMON_BD_PATHS = [
+  ...VERSION_MANAGER_DIRS.map((dir) => join(dir, "bd")),
   "/opt/homebrew/bin/bd",
   "/usr/local/bin/bd",
   "/home/linuxbrew/.linuxbrew/bin/bd",
   join(homedir(), "go/bin/bd"),
   join(homedir(), ".local/bin/bd"),
-  ...(process.env.MISE_DATA_DIR ? [join(process.env.MISE_DATA_DIR, "shims/bd")] : []),
-  join(homedir(), ".local/share/mise/shims/bd"),
-  join(homedir(), ".asdf/shims/bd"),
-  join(homedir(), ".nix-profile/bin/bd"),
   "/usr/bin/bd",
   ...(process.env.LOCALAPPDATA ? [join(process.env.LOCALAPPDATA, "Programs", "bd", "bd.exe")] : []),
   join(homedir(), "AppData", "Local", "Programs", "bd", "bd.exe"),
 ]
+
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
 
 let cachedBdPath: string | null = null
 
@@ -32,7 +40,7 @@ export function getBdPathSelection(): {
   if (process.env.BD_PATH)
     return { resolvedPath: process.env.BD_PATH, source: "environment", savedPath }
   if (savedPath) return { resolvedPath: savedPath, source: "saved", savedPath }
-  if (!cachedBdPath) cachedBdPath = COMMON_BD_PATHS.find((p) => existsSync(p)) ?? "bd"
+  if (!cachedBdPath) cachedBdPath = COMMON_BD_PATHS.find(isExecutableFile) ?? "bd"
   return { resolvedPath: cachedBdPath, source: "automatic", savedPath: null }
 }
 

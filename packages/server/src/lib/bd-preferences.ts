@@ -17,7 +17,9 @@ function readSettings(): Record<string, unknown> {
     return value
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
-    throw error
+    // Do not log file contents or parser messages, which may contain preferences.
+    console.warn("[bd:settings] Could not read preferences; ignoring saved bd path")
+    return {}
   }
 }
 

@@ -138,3 +138,79 @@ test("automatic candidates retain order and Retry clears the cached choice", asy
     paths.COMMON_BD_PATHS.splice(0, paths.COMMON_BD_PATHS.length, ...original)
   }
 })
+
+test.each([
+  "{broken",
+  "[]",
+  "null",
+])("corrupt settings %s do not break bd calls and reset overwrites them", async (contents) => {
+  const { spyOn } = await import("bun:test")
+  const { setBdPath } = await import("../handlers/bd-settings")
+  const { checkBdHealth } = await import("../handlers/health")
+  const path = await binary()
+  const original = [...paths.COMMON_BD_PATHS]
+  paths.COMMON_BD_PATHS.splice(0, paths.COMMON_BD_PATHS.length, path)
+  const warning = spyOn(console, "warn").mockImplementation(() => {})
+  try {
+    await writeFile(process.env.BEADBOX_SETTINGS_PATH!, contents)
+    expect(paths.getBdPathSelection()).toMatchObject({ source: "automatic", savedPath: null })
+    expect(await checkBdHealth()).toMatchObject({ bdAvailable: true, bdPath: path })
+    expect(warning.mock.calls.flat().join(" ")).toContain("[bd:settings]")
+    expect(warning.mock.calls.flat().join(" ")).not.toContain(contents)
+    await setBdPath(null)
+    expect(JSON.parse(await readFile(process.env.BEADBOX_SETTINGS_PATH!, "utf8"))).toEqual({})
+  } finally {
+    warning.mockRestore()
+    paths.COMMON_BD_PATHS.splice(0, paths.COMMON_BD_PATHS.length, ...original)
+  }
+})
+
+test("save trims the path before validating and persisting", async () => {
+  const { setBdPath } = await import("../handlers/bd-settings")
+  const path = await binary()
+  expect((await setBdPath(`  ${path}\n`)).savedPath).toBe(path)
+  expect(JSON.parse(await readFile(process.env.BEADBOX_SETTINGS_PATH!, "utf8")).bdPath).toBe(path)
+})
+
+test("save expands ~/ with spaces before validating and persisting", async () => {
+  const path = await binary()
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `import {setBdPath} from ${JSON.stringify(join(import.meta.dir, "../handlers/bd-settings.ts"))}; console.log(JSON.stringify(await setBdPath("  ~/bd with spaces  ")))`,
+    ],
+    {
+      env: { ...process.env, HOME: root, BD_PATH: "" },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  )
+  const output = await new Response(child.stdout).text()
+  expect(await child.exited).toBe(0)
+  expect(JSON.parse(output).savedPath).toBe(path)
+})
+
+test("a saved bd that loses execute permission reaches startup bd_missing recovery", async () => {
+  const { setBdPath } = await import("../handlers/bd-settings")
+  const { checkHealth } = await import("../lib/workspace-health")
+  const path = await binary()
+  await setBdPath(path)
+  await chmod(path, 0o600)
+  const beads = join(root, "workspace", ".beads")
+  await mkdir(beads, { recursive: true })
+  await writeFile(
+    join(beads, "metadata.json"),
+    JSON.stringify({ dolt_mode: "server", dolt_database: "test" }),
+  )
+  const result = await checkHealth({
+    id: "test",
+    name: "test",
+    mode: "embedded",
+    addedAt: new Date().toISOString(),
+    local: { path: beads },
+    server: null,
+  })
+  expect(result).toMatchObject({ ok: false, error: { kind: "bd_missing" }, bdPath: path })
+  expect(paths.getBdPathSelection().source).toBe("saved")
+})

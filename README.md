@@ -131,18 +131,28 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md). Please don't open pub
 
 ### Finding the bd executable
 
-Beadbox checks common Homebrew, Go and user-local install paths, then mise
-(`$MISE_DATA_DIR/shims` and `~/.local/share/mise/shims`), asdf (`~/.asdf/shims`),
-and Nix (`~/.nix-profile/bin`) before falling back to its inherited PATH.
+Beadbox checks executable files in mise (`$MISE_DATA_DIR/shims`,
+`$XDG_DATA_HOME/mise/shims`, and `~/.local/share/mise/shims`), asdf
+(`$ASDF_DATA_DIR/shims` and `~/.asdf/shims`), and Nix profiles before Homebrew,
+Go and user-local installs, then falls back to its inherited PATH. Nix profiles
+include `~/.nix-profile/bin`, `~/.local/state/nix/profiles/profile/bin`,
+`/etc/profiles/per-user/$USER/bin`,
+`/nix/var/nix/profiles/per-user/$USER/profile/bin`, and
+`/nix/var/nix/profiles/default/bin`.
+Existing version-manager directories are also added to child PATH so bd can
+find tools installed beside it. The inherited PATH keeps its existing order.
 Set a per-user path in **Settings → General → bd executable**, or directly on
 any missing-bd or too-old-bd screen. Use the absolute executable path (spaces are
-supported). Beadbox checks that it is an executable file and reports a supported
-bd version before saving it. **Use automatic detection** clears the preference.
+supported; surrounding whitespace is trimmed and `~/` is expanded). Beadbox
+checks that it is an executable file and reports a supported bd version before
+saving it. **Use automatic detection** clears the preference.
 The active path and source are shown beside the controls.
 
 Precedence is `BD_PATH` environment variable, then the saved path, then automatic
 detection. An environment override stays active until it is removed from the
 app's launch environment; saving or clearing a preference does not override it.
+Corrupt settings are logged and treated as no saved path; resetting replaces the
+invalid file. A saved path that loses execute permission shows bd recovery.
 The choice is stored in `~/.beadbox/settings.json`, applies to every workspace,
 and survives restarts. Changes apply to new commands immediately and refresh
 active polling and bd serve processes. Commands already running may finish with

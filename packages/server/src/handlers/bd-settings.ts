@@ -1,4 +1,6 @@
 // Per-user executable selection shared by Settings and startup recovery.
+import { homedir } from "os"
+import { join } from "path"
 import { getBdPathSelection, resetPathCaches, validateBdPath } from "../lib/bd-paths"
 import { writeSavedBdPath } from "../lib/bd-preferences"
 import { beadsDirFromDatabasePath } from "../lib/beadtrain-fs"
@@ -16,8 +18,11 @@ export async function getBdPath() {
 /** Validate and save the global choice, then replace long-lived bd consumers. */
 export function setBdPath(path: string | null): Promise<ReturnType<typeof getBdPathSelection>> {
   const operation = pending.then(async () => {
-    if (path !== null) await validateBdPath(path)
-    writeSavedBdPath(path)
+    let normalized = path === null ? null : path.trim()
+    if (normalized === "~") normalized = homedir()
+    else if (normalized?.startsWith("~/")) normalized = join(homedir(), normalized.slice(2))
+    if (normalized !== null) await validateBdPath(normalized)
+    writeSavedBdPath(normalized)
     resetPathCaches()
     invalidateEpicCache()
     await resetServeReads()
