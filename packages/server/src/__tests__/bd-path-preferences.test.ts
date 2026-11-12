@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test"
+import { execFileSync } from "node:child_process"
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -208,17 +209,27 @@ test("a TERM-ignoring version probe times out and releases the next saved-path c
     `#!/bin/sh\ntrap '' TERM\necho $$ > '${pidFile}'\nwhile :; do sleep 1; done\n`,
     { mode: 0o700 },
   )
-  // The watchdog makes the red safe: only kill the PID written by our own fake.
+  // The watchdog makes the red safe: verify the PID still belongs to our fake.
   // Production must reject before this fallback and unblock the queued save.
   let watchdogFired = false
   const watchdog = setTimeout(async () => {
     watchdogFired = true
-    process.kill(Number(await readFile(pidFile, "utf8")), "SIGKILL")
+    try {
+      const pid = Number(await readFile(pidFile, "utf8"))
+      if (!Number.isSafeInteger(pid) || pid <= 0) return
+      const command = execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+        encoding: "utf8",
+      })
+      if (command.includes(path)) process.kill(pid, "SIGKILL")
+    } catch {
+      // The probe may not have started or may already have exited.
+    }
   }, 9000)
   try {
     const timedOut = expect(setBdPath(path)).rejects.toThrow("timed out")
     const next = setBdPath(await binary())
     await timedOut
+    clearTimeout(watchdog)
     expect((await next).source).toBe("saved")
     expect(watchdogFired).toBe(false)
   } finally {
