@@ -18,6 +18,7 @@ import { useAppHealth } from "@/hooks/use-app-health"
 import { useHasTrains } from "@/hooks/use-has-trains"
 import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { usePreferences } from "@/hooks/use-preferences"
+import { useLabelChoiceForWorkspace } from "@/hooks/use-label-choice-for-workspace"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { readSystemIssues, systemIssuesKey } from "@/hooks/use-workspace-lifecycle"
 import { extractAssignees, extractLabels, extractRigNames, flattenEpicsToBeads } from "@/lib/epic-tree-utils"
@@ -99,6 +100,7 @@ export function ChartView() {
   const navigate = useNavigate()
   const { health: appHealth } = useAppHealth()
   const prefs = usePreferences()
+  useLabelChoiceForWorkspace(currentWorkspace?.id, prefs.filters, prefs.setFilters)
   const hasTrains = useHasTrains(currentWorkspace?.databasePath)
   const hasWaiting = useHasWaiting(currentWorkspace?.databasePath)
   const [settingsOpen, setSettingsOpen] = useState(false)

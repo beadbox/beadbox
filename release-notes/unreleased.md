@@ -1,6 +1,6 @@
 ## Added
 
-- Filter beads by any selected label, together with status, search, and the other filters. Label choices are available in Beads, Chart, and All projects. Thanks to [Kyle Dodson (@seniorquico)](https://github.com/seniorquico) for requesting this in [#70](https://github.com/beadbox/beadbox/issues/70).
+- Filter beads by any selected label, together with status, search, and the other filters. Label choices are available in Beads, Chart, and All projects. Selections persist on reload and clear when switching workspaces from Beads or Chart. Thanks to [Kyle Dodson (@seniorquico)](https://github.com/seniorquico) for requesting this in [#70](https://github.com/beadbox/beadbox/issues/70).
 
 ## Fixed
 

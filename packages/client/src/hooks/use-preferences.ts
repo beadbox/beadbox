@@ -25,7 +25,7 @@ import {
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { applyThemeClass } from "../lib/theme"
-import { DEFAULT_STATUSES, type Filters, type SortOption } from "../lib/types"
+import type { Filters, SortOption } from "../lib/types"
 
 export function usePreferences() {
   const [theme, setTheme] = useState<ThemeVariant>("gray")
@@ -33,30 +33,10 @@ export function usePreferences() {
   const [isTauri, setIsTauri] = useState(false)
   const isTauriRef = useRef(false)
 
-  const [filters, setFiltersState] = useState<Filters>({
-    // beadbox-brg: default to the canonical-known statuses so beads are
-    // visible on first render. Replaced from localStorage in the mount
-    // effect below.
-    status: [...DEFAULT_STATUSES],
-    assignee: "all",
-    priority: [],
-    labels: [],
-    showMessages: false,
-    showWaves: false,
-    hasSpec: false,
-    hasDeadline: false,
-    search: "",
-    rig: "all",
-    grouped: false,
-  })
-  const prevFiltersRef = useRef<Filters | null>(null)
-
-  // Load filters preference from localStorage on mount
-  useEffect(() => {
-    const loaded = getFiltersPreference()
-    setFiltersState(loaded)
-    prevFiltersRef.current = loaded
-  }, [])
+  // Read saved filters on the first render so workspace-binding effects
+  // cannot overwrite them with defaults before preferences have loaded.
+  const [filters, setFiltersState] = useState<Filters>(getFiltersPreference)
+  const prevFiltersRef = useRef<Filters | null>(filters)
 
   // Wrap setFilters to persist to localStorage and fire analytics
   // NOTE: does NOT handle scroll reset; page.tsx wraps this to add scroll behavior

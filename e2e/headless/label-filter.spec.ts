@@ -100,3 +100,56 @@ for (const [view, path] of [["Chart", "/chart"], ["All projects", "/all-projects
     await expect(trigger).toHaveText("2 labels")
   })
 }
+
+test("Chart workspace switches clear the previous workspace's labels without visiting Beads", async ({ page, workspace: ws, statusesWorkspace }) => {
+  const beads = ws.bdJson<Listed[]>(["list", "--status", "all", "--limit", "0", "--flat"])
+  const target = beads.find((b) => b.title === "Critical Bug")!
+  ws.bd(["update", target.id, "--add-label=ttl-chart-switch"])
+  const returnTarget = statusesWorkspace.bdJson<Listed[]>(["list", "--status", "all", "--limit", "0", "--flat"])[0]
+  statusesWorkspace.bd(["update", returnTarget.id, "--add-label=ttl-chart-return"])
+  await openTree(page, ws)
+  const trigger = page.getByRole("button", { name: "Label filter", exact: true })
+  await trigger.click()
+  await page.locator("[data-multi-select-row]").filter({ has: page.getByRole("checkbox", { name: "ttl-chart-switch", exact: true }) }).click()
+  await page.keyboard.press("Escape")
+  await page.goto("/chart")
+  await expect(trigger).toHaveText("ttl-chart-switch")
+  const chartIds = () => page.getByTestId("gantt-row-title").evaluateAll((rows) => rows.map((r) => (r.getAttribute("title") ?? "").split(":")[0]).sort())
+  await expect.poll(chartIds).toEqual([target.id])
+  for (const workspace of [statusesWorkspace, ws]) {
+    await page.getByRole("button", { name: `Open ${workspace.name}`, exact: true }).click()
+    await expect(page).toHaveURL(/\/chart$/)
+    await expect(trigger).toHaveText("All Labels")
+    const expected = workspace.bdJson<Listed[]>(["list", "--status", "all", "--limit", "0", "--flat"])
+    await expect.poll(chartIds).toEqual(expected.filter((b) => b.issue_type !== "epic").map((b) => b.id).sort())
+    if (workspace.id === statusesWorkspace.id) {
+      await trigger.click()
+      await page.locator("[data-multi-select-row]").filter({ has: page.getByRole("checkbox", { name: "ttl-chart-return", exact: true }) }).click()
+      await page.keyboard.press("Escape")
+      await expect.poll(chartIds).toEqual([returnTarget.id])
+    }
+  }
+})
+
+test("label selector supports Enter, arrow navigation, Space and Escape", async ({ page, workspace: ws }) => {
+  const beads = ws.bdJson<Listed[]>(["list", "--status", "all", "--limit", "0", "--flat"])
+  ws.bd(["update", beads.find((b) => b.title === "Critical Bug")!.id, "--add-label=ttl-keyboard"])
+  await openTree(page, ws)
+  const trigger = page.getByRole("button", { name: "Label filter", exact: true })
+  await trigger.focus()
+  await page.keyboard.press("Enter")
+  const rows = page.locator("button[data-multi-select-row]")
+  await expect(rows.first()).toBeVisible()
+  await page.keyboard.press("Home")
+  await expect(rows.first()).toBeFocused()
+  await page.keyboard.press("ArrowDown")
+  const option = rows.nth(1)
+  await expect(option).toBeFocused()
+  const label = await option.getByRole("checkbox").getAttribute("aria-label")
+  expect(label).toBeTruthy()
+  await page.keyboard.press("Space")
+  await expect(option.getByRole("checkbox")).toBeChecked()
+  await page.keyboard.press("Escape")
+  await expect(trigger).toBeFocused()
+  await expect(trigger).toHaveText(label!)
+})

@@ -32,6 +32,7 @@ import { useDevConsole } from "@/hooks/use-dev-console"
 import { useDevConsoleTaps } from "@/hooks/use-dev-console-taps"
 import { useEpicNavigation } from "@/hooks/use-epic-navigation"
 import { usePreferences } from "@/hooks/use-preferences"
+import { useLabelChoiceForWorkspace } from "@/hooks/use-label-choice-for-workspace"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { useViewport } from "@/hooks/use-viewport"
 import { useWorkspaceLifecycle } from "@/hooks/use-workspace-lifecycle"
@@ -328,16 +329,7 @@ function BeadsEpicsViewer() {
     doRemoveWorkspace,
   } = lifecycle
 
-  // Workspace switches can remount this viewer. Keep the label choice's
-  // workspace in the saved preference so a remount also detects a switch.
-  useEffect(() => {
-    if (!currentWorkspace || filters.labelsWorkspaceId === currentWorkspace.id) return
-    setFilters({
-      ...filters,
-      labels: filters.labelsWorkspaceId ? [] : (filters.labels ?? []),
-      labelsWorkspaceId: currentWorkspace.id,
-    })
-  }, [currentWorkspace, filters, setFilters])
+  useLabelChoiceForWorkspace(currentWorkspace?.id, filters, setFilters)
 
   // Settings dialog state
   const [settingsOpen, setSettingsOpen] = useState(false)
