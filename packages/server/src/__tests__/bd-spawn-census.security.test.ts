@@ -61,9 +61,13 @@ const REVIEWED: Record<string, { count: number; why: string }> = {
     count: 1,
     why: "fixed verbs; --db is isValidDbPath-checked. --prefix <prefix> reads metadata.json (repo-controlled) as the value of a two-token flag: not a flag injection, but the fragile form (beadbox-c29 finding F-4)",
   },
+  "lib/bd-settings.ts::probeBdBinary::execFileAsync": {
+    count: 1,
+    why: "fixed argv ([\"--version\"]) with timeout and no shell; probes either bare \"bd\" for status reporting or a path validated as absolute, regular, NUL-free and executable by validateBdBinary (bd-path-validation.security.test.ts)",
+  },
   "lib/change-detector.ts::bdServerPoll::execFile": {
     count: 1,
-    why: "fixed SQL poll; --db is normalizeDbPath of the registry path, value of a two-token --db. KNOWN GAP (beadbox-c29 finding F-3): spawns bare 'bd' via PATH, not resolveBdPath()",
+    why: "fixed SQL poll via resolveBdPath(); --db is normalizeDbPath of the registry path, value of a two-token --db (beadbox-7vo fixes beadbox-c29 F-3)",
   },
   "lib/change-detector.ts::startServerPollChild::spawn": {
     count: 1,

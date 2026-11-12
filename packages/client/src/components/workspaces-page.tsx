@@ -37,6 +37,7 @@ import { cn } from "../lib/utils"
 import { clearWorkspaceCookie, getWorkspaceCookie } from "../lib/workspace-cookie"
 import { subscribeWorkspaceRegistryChange } from "../lib/workspace-registry-events"
 import { AddWorkspaceDialog } from "./add-workspace-dialog"
+import { BdPathControl } from "./bd-path-control"
 import { EditConnectionDialog } from "./edit-connection-dialog"
 import { InitWorkspaceDialog } from "./init-workspace-dialog"
 import {
@@ -125,6 +126,13 @@ export function BdMissingScreen({
             After installing, add bd to your PATH and restart Beadbox so it can find it.
           </p>
         )}
+        <BdPathControl
+          variant="onboarding"
+          platform={platform}
+          onApplied={() => {
+            void handleCheck()
+          }}
+        />
         <div className="mb-6" />
         {feedback && <p className="text-sm text-amber-400 text-center mb-4">{feedback}</p>}
         <div className="flex items-center justify-center gap-4">

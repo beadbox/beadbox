@@ -27,6 +27,7 @@ import {
   useState,
 } from "react"
 import { useUpdateChecker } from "../hooks/use-update-checker"
+import { subscribeBdPathChange } from "../lib/bd-path-events"
 import { getAnalyticsEnabled } from "../lib/local-storage"
 import { safeCapture } from "../lib/posthog-safe"
 import { rpc } from "../lib/rpc"
@@ -41,6 +42,7 @@ import {
   setWorkspaceCookie,
   subscribeWorkspaceCookie,
 } from "../lib/workspace-cookie"
+import { BdPathControl } from "./bd-path-control"
 import { CopyableCommand } from "./copyable-command"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
@@ -149,6 +151,22 @@ export function StartupGate({ children }: StartupGateProps) {
   // Boot on mount
   useEffect(() => {
     dispatch({ type: "BOOT" })
+  }, [])
+
+  // Refresh BdHealthContext in place when the per-user bd path changes in Settings
+  useEffect(() => {
+    return subscribeBdPathChange(() => {
+      verifiedWorkspacesRef.current.clear()
+      if (typeof rpc.health?.getBdPathInfo !== "function") return
+      rpc.health
+        .getBdPathInfo()
+        .then((info) => {
+          setBdPath(info.effectivePath)
+          setBdVersion(info.bdVersion ?? undefined)
+          setServerPlatform(info.platform)
+        })
+        .catch(() => {})
+    })
   }, [])
 
   // Telemetry: emit app_startup_phase whenever the state machine transitions.
@@ -566,6 +584,7 @@ function ErrorScreen({ error, platform, onRetry, onRemoveWorkspace }: ErrorScree
 
         <ErrorGuidance
           error={error}
+          platform={platform}
           isMac={isMac}
           isWindows={isWindows}
           isLinux={isLinux}
@@ -818,12 +837,14 @@ function SchemaMigrationGuidance({
 
 function ErrorGuidance({
   error,
+  platform,
   isMac,
   isWindows,
   isLinux,
   onRetry,
 }: {
   error: HealthError
+  platform: string
   isMac: boolean
   isWindows: boolean
   isLinux: boolean
@@ -842,6 +863,7 @@ function ErrorGuidance({
             To get started, install the bd command-line tool:
           </p>
           <BdInstallInstructions {...platformFlags} />
+          <BdPathControl variant="onboarding" platform={platform} onApplied={() => void onRetry()} />
         </>
       )
 
@@ -853,6 +875,7 @@ function ErrorGuidance({
           </p>
           <p className="text-sm text-muted-foreground text-center mb-6">Please update bd:</p>
           <BdUpgradeInstructions {...platformFlags} />
+          <BdPathControl variant="onboarding" platform={platform} onApplied={() => void onRetry()} />
         </>
       )
 
@@ -864,6 +887,7 @@ function ErrorGuidance({
             the latest version:
           </p>
           <BdUpgradeInstructions {...platformFlags} />
+          <BdPathControl variant="onboarding" platform={platform} onApplied={() => void onRetry()} />
         </>
       )
 

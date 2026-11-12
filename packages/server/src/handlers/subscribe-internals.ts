@@ -60,6 +60,18 @@ export async function restartWorkspaceSubscriptions(workspacePath: string): Prom
   if (failures.length > 0) throw failures[0]
 }
 
+/** Replace all active change detectors so server-mode poll loops adopt a new bd path. */
+export async function restartAllSubscriptions(): Promise<void> {
+  const uniquePaths = [...new Set(state.paths.values())]
+  for (const workspacePath of uniquePaths) {
+    try {
+      await restartWorkspaceSubscriptions(workspacePath)
+    } catch {
+      // restartWorkspaceSubscriptions already emits polling_error for the failed id
+    }
+  }
+}
+
 /**
  * Stop every subscription watching a workspace that is being removed
  * (beadbox-wja). The client moves its subscription off a removed workspace;

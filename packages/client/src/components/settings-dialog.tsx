@@ -17,9 +17,15 @@ import { clearCache, getAnalyticsEnabled, setAnalyticsEnabled } from "../lib/loc
 //   - actions/diagnostics types come from packages/server/src/handlers/diagnostics
 //     (single source of truth; rpc surface mirrors handler exports)
 //   - dynamic import("@/actions/epics") for getCacheStats → rpc.epics.getCacheStats
+import { subscribeBdPathChange } from "../lib/bd-path-events"
 import { rpc } from "../lib/rpc"
 import type { UpdateInfo } from "../lib/update-checker"
 import { cn } from "../lib/utils"
+import {
+  BdPathControl,
+  type ClientBdPathInfo,
+  formatBdPathSourceLabel,
+} from "./bd-path-control"
 import { CustomStatusesManager } from "./custom-statuses-manager"
 import { Button } from "./ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible"
@@ -161,6 +167,7 @@ export function SettingsDialog({
   onCustomStatusesChanged,
 }: SettingsDialogProps) {
   const [isTauri, setIsTauri] = useState(false)
+  const bdHealth = useBdHealth()
 
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -701,6 +708,16 @@ export function SettingsDialog({
                     </div>
                   </div>
                 </div>
+
+                {/* beads CLI executable path (per-user) */}
+                <div>
+                  <h3 className="text-lg font-semibold mb-1">beads CLI</h3>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Configure which <span className="font-mono text-foreground">bd</span> executable
+                    Beadbox runs across all workspaces on this machine
+                  </p>
+                  <BdPathControl variant="settings" platform={bdHealth.platform} />
+                </div>
               </div>
             )}
             {activeTab === "workflow" && (
@@ -954,6 +971,7 @@ export function SettingsDialog({
                 appLogDir={appLogDir}
                 handleOpenLogDir={handleOpenLogDir}
                 handleClearCache={handleClearCache}
+                onConfigureBdPath={() => setActiveTab("general")}
               />
             )}
           </div>
@@ -1227,13 +1245,16 @@ function HelpTabContent({
   appLogDir,
   handleOpenLogDir,
   handleClearCache,
+  onConfigureBdPath,
 }: {
   databasePath?: string
   appLogDir: string | null
   handleOpenLogDir: () => void
   handleClearCache: () => void
+  onConfigureBdPath: () => void
 }) {
   const [showCacheStats, setShowCacheStats] = useState(false)
+  const [bdPathInfo, setBdPathInfo] = useState<ClientBdPathInfo | null>(null)
   const [cacheStats, setCacheStats] = useState<{
     epicCached: boolean
     epicDbPath: string | null
@@ -1241,6 +1262,18 @@ function HelpTabContent({
     beadDetailCache: { size: number; entries: Array<{ id: string; commentCount: number }> }
   } | null>(null)
   const [loadingStats, setLoadingStats] = useState(false)
+
+  useEffect(() => {
+    const load = () => {
+      if (typeof rpc.health?.getBdPathInfo !== "function") return
+      rpc.health
+        .getBdPathInfo()
+        .then(setBdPathInfo)
+        .catch(() => {})
+    }
+    load()
+    return subscribeBdPathChange(load)
+  }, [])
 
   const handleShowCacheStats = useCallback(async () => {
     setShowCacheStats(true)
@@ -1255,7 +1288,10 @@ function HelpTabContent({
       setLoadingStats(false)
     }
   }, [])
-  const { bdVersion, bdPath, platform } = useBdHealth()
+  const { bdVersion: ctxBdVersion, bdPath: ctxBdPath, platform: ctxPlatform } = useBdHealth()
+  const bdVersion = bdPathInfo?.bdVersion ?? ctxBdVersion
+  const bdPath = bdPathInfo?.effectivePath ?? ctxBdPath
+  const platform = bdPathInfo?.platform ?? ctxPlatform
 
   const bdCheck = getVersionStatus("bd", bdVersion ?? null, platform)
   bdCheck.path = bdPath ?? null
@@ -1315,6 +1351,20 @@ function HelpTabContent({
                             >
                               {row.check.path}
                             </span>
+                          )}
+                          {row.label === "beads CLI" && bdPathInfo && (
+                            <span className="text-[11px] rounded-full border border-border bg-muted/60 px-2 py-0.5 text-muted-foreground">
+                              {formatBdPathSourceLabel(bdPathInfo.source)}
+                            </span>
+                          )}
+                          {row.label === "beads CLI" && (
+                            <button
+                              type="button"
+                              onClick={onConfigureBdPath}
+                              className="text-xs text-primary hover:underline"
+                            >
+                              Configure
+                            </button>
                           )}
                         </div>
                         {row.check.message && (

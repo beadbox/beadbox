@@ -5,17 +5,29 @@
 
 import { homedir } from "os"
 import { isAbsolute, resolve } from "path"
+import { __resetBdVersionCache } from "../lib/bd"
 import { flagArg } from "../lib/bd-argv"
 import {
+  type BdPathSource,
   COMMON_BD_PATHS,
   getCandidateBdPaths,
   resetPathCaches,
   resolveBdPath,
+  resolveBdPathDetail,
 } from "../lib/bd-paths"
+import {
+  type BdValidationErrorCode,
+  probeBdBinary,
+  validateBdBinary,
+  writeSavedBdPath,
+} from "../lib/bd-settings"
+import { invalidateEpicCache } from "../lib/epic-cache"
 import { execFileAsync } from "../lib/exec"
 import { isValidDbPath } from "../lib/path-validation"
+import { resetServeReadsForBdPathChange } from "../lib/serve-reads"
 import type { HealthError } from "../lib/startup-machine"
 import type { Workspace } from "../lib/types"
+import { compareVersions, MIN_BD_VERSION } from "../lib/version-requirements"
 import { checkHealth, resolvePort } from "../lib/workspace-health"
 import type { RegistryEntry, RegistryQuarantine } from "../lib/workspace-registry"
 import {
@@ -27,7 +39,11 @@ import {
   resolveBdDbPath,
 } from "../lib/workspace-registry"
 import { prefetchEpicData } from "./epics"
-import { registeredPaths, stopWorkspaceSubscriptions } from "./subscribe-internals"
+import {
+  registeredPaths,
+  restartAllSubscriptions,
+  stopWorkspaceSubscriptions,
+} from "./subscribe-internals"
 
 // ---------------------------------------------------------------------------
 // checkBdHealth - used by workspaces page, mid-session checks
@@ -297,4 +313,126 @@ export async function runStartupHealth(cookieWorkspaceId?: string): Promise<Star
     bdPath: healthResult.bdPath,
     registryQuarantine,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-user bd path configuration & provenance (beadbox-7vo)
+// ---------------------------------------------------------------------------
+
+export interface BdPathInfo {
+  effectivePath: string
+  source: BdPathSource
+  envPath: string | null
+  savedPath: string | null
+  bdAvailable: boolean
+  bdVersion: string | null
+  minVersion: string
+  platform: string
+  statusError: string | null
+  statusErrorCode: BdValidationErrorCode | null
+}
+
+export type SetBdPathResult =
+  | { ok: true; info: BdPathInfo }
+  | {
+      ok: false
+      code: BdValidationErrorCode
+      error: string
+      currentVersion?: string
+      requiredVersion?: string
+    }
+
+async function applyBdPathRuntimeChange(): Promise<void> {
+  resetPathCaches()
+  __resetBdVersionCache()
+  invalidateEpicCache()
+  await resetServeReadsForBdPathChange()
+  await restartAllSubscriptions()
+}
+
+export async function getBdPathInfo(): Promise<BdPathInfo> {
+  const detail = resolveBdPathDetail()
+  if (detail.effectivePath === "bd") {
+    const probe = await probeBdBinary("bd")
+    if (!probe.ok) {
+      return {
+        ...detail,
+        bdAvailable: false,
+        bdVersion: null,
+        minVersion: MIN_BD_VERSION,
+        platform: process.platform,
+        statusError:
+          probe.kind === "timeout"
+            ? "Timed out probing bd on PATH."
+            : "bd executable was not found in automatic detection locations or PATH.",
+        statusErrorCode: probe.kind === "timeout" ? "probe_timeout" : "not_found",
+      }
+    }
+    if (compareVersions(probe.version, MIN_BD_VERSION) < 0) {
+      return {
+        ...detail,
+        bdAvailable: true,
+        bdVersion: probe.version,
+        minVersion: MIN_BD_VERSION,
+        platform: process.platform,
+        statusError: `bd v${MIN_BD_VERSION} or later is required (found v${probe.version}).`,
+        statusErrorCode: "version_too_old",
+      }
+    }
+    return {
+      ...detail,
+      bdAvailable: true,
+      bdVersion: probe.version,
+      minVersion: MIN_BD_VERSION,
+      platform: process.platform,
+      statusError: null,
+      statusErrorCode: null,
+    }
+  }
+
+  const check = await validateBdBinary(detail.effectivePath)
+  if (check.ok) {
+    return {
+      ...detail,
+      bdAvailable: true,
+      bdVersion: check.version,
+      minVersion: MIN_BD_VERSION,
+      platform: process.platform,
+      statusError: null,
+      statusErrorCode: null,
+    }
+  }
+
+  return {
+    ...detail,
+    bdAvailable: check.code === "version_too_old",
+    bdVersion: check.currentVersion ?? null,
+    minVersion: MIN_BD_VERSION,
+    platform: process.platform,
+    statusError: check.error,
+    statusErrorCode: check.code,
+  }
+}
+
+export async function setBdPath(path: string | null): Promise<SetBdPathResult> {
+  if (path === null) {
+    await writeSavedBdPath(null)
+    await applyBdPathRuntimeChange()
+    return { ok: true, info: await getBdPathInfo() }
+  }
+
+  const check = await validateBdBinary(path)
+  if (!check.ok) {
+    return {
+      ok: false,
+      code: check.code,
+      error: check.error,
+      currentVersion: check.currentVersion,
+      requiredVersion: check.requiredVersion,
+    }
+  }
+
+  await writeSavedBdPath(check.normalizedPath)
+  await applyBdPathRuntimeChange()
+  return { ok: true, info: await getBdPathInfo() }
 }

@@ -169,6 +169,12 @@ export function __serveReadsState(): { managerConstructed: boolean; workspaces: 
   return { managerConstructed: manager !== null, workspaces }
 }
 
+/** Stop live bd serve children and clear cached version state after bd path changes. */
+export async function resetServeReadsForBdPathChange(): Promise<void> {
+  await __settleServeStarts()
+  await __resetServeReads()
+}
+
 /** @internal tests only */
 export async function __resetServeReads(): Promise<void> {
   await manager?.stopAll()

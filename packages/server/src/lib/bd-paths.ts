@@ -2,11 +2,23 @@ import { accessSync, constants, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { isAbsolute, join } from "node:path"
 
+import { getBdSettingsPath, readSavedBdPathSync } from "./bd-settings"
+
+export type BdPathSource = "env" | "saved" | "auto"
+
+export interface BdPathResolution {
+  effectivePath: string
+  source: BdPathSource
+  envPath: string | null
+  savedPath: string | null
+}
+
 export interface BdResolveOptions {
   env?: NodeJS.ProcessEnv
   home?: string
   platform?: NodeJS.Platform
   systemRoot?: string
+  settingsPath?: string
 }
 
 function expandHomeFor(raw: string, home: string): string {
@@ -111,32 +123,68 @@ export const COMMON_BD_PATHS = getCandidateBdPaths()
 
 let cachedBdPath: string | null = null
 
-export function resolveBdPathWithOptions(options: BdResolveOptions): string {
+/**
+ * Resolve the effective bd binary and which tier won:
+ * `BD_PATH` env ("env") > per-user saved path ("saved") > automatic detection ("auto").
+ */
+export function resolveBdPathDetail(options: BdResolveOptions = {}): BdPathResolution {
   const env = options.env ?? process.env
   const home = options.home ?? (env.HOME?.trim() || homedir())
   const platform = options.platform ?? process.platform
+  const settingsPath = options.settingsPath ?? getBdSettingsPath(env)
 
-  const envOverride = env.BD_PATH?.trim()
-  if (envOverride && !envOverride.includes("\0")) {
-    return expandHomeFor(envOverride, home)
+  const rawEnv = env.BD_PATH?.trim()
+  const envPath = rawEnv && !rawEnv.includes("\0") ? expandHomeFor(rawEnv, home) : null
+  const savedPath = readSavedBdPathSync(settingsPath, home)
+
+  if (envPath) {
+    return {
+      effectivePath: envPath,
+      source: "env",
+      envPath,
+      savedPath,
+    }
+  }
+
+  if (savedPath) {
+    return {
+      effectivePath: savedPath,
+      source: "saved",
+      envPath: null,
+      savedPath,
+    }
   }
 
   for (const candidate of getCandidateBdPaths(options)) {
     if (isExecutableFile(candidate, platform)) {
-      return candidate
+      return {
+        effectivePath: candidate,
+        source: "auto",
+        envPath: null,
+        savedPath: null,
+      }
     }
   }
 
-  return "bd"
+  return {
+    effectivePath: "bd",
+    source: "auto",
+    envPath: null,
+    savedPath: null,
+  }
+}
+
+export function resolveBdPathWithOptions(options: BdResolveOptions): string {
+  return resolveBdPathDetail(options).effectivePath
 }
 
 export function resolveBdPath(): string {
   if (cachedBdPath) return cachedBdPath
-  cachedBdPath = resolveBdPathWithOptions({})
+  cachedBdPath = resolveBdPathDetail({}).effectivePath
   return cachedBdPath
 }
 
-/** Reset cached paths so Retry re-probes after user installs a tool. */
+/** Reset cached paths so Retry or settings updates re-resolve immediately. */
 export function resetPathCaches(): void {
   cachedBdPath = null
 }

@@ -151,6 +151,8 @@ import * as m125 from "../routes/activity"
 import * as m126 from "../routes/formulas"
 import * as m127 from "../routes/index"
 import * as m128 from "../routes/workspaces"
+import * as m129 from "../components/bd-path-control"
+import * as m130 from "../lib/bd-path-events"
 
 describe("client source coverage import sweep (bb-ystl.1)", () => {
   test("loads every non-test source module so Bun --coverage instruments them", () => {
@@ -284,8 +286,10 @@ describe("client source coverage import sweep (bb-ystl.1)", () => {
       m126,
       m127,
       m128,
+      m129,
+      m130,
     ]
-    expect(modules).toHaveLength(129)
+    expect(modules).toHaveLength(131)
     for (const m of modules) {
       expect(m).toBeDefined()
     }
