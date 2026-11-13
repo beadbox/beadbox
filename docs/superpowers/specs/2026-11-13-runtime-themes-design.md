@@ -291,10 +291,20 @@ Uninstalling a theme and reinstalling it restores the user's choice.
 Validate the entire file before applying any of it. Reject atomically — never
 half-apply — keep the last good theme, and name the offending key.
 
-Reuse the existing `quarantineUnreadableRegistry()` pattern: the bad file is
-moved aside with a reason and reported in `themes.list()` via its `error` field,
-so the picker shows `Nord — invalid: colors.background is not hex` rather than
-the theme silently disappearing.
+The invalid file is **reported in place, never moved**. `themes.list()` returns
+the entry with its `error` field populated, so the picker shows
+`Nord — invalid: colors.background is not hex` rather than the theme silently
+disappearing. The entry is non-selectable until the file validates.
+
+**Corrected 2026-11-13 during planning.** This section previously said to reuse
+`quarantineUnreadableRegistry()`, which moves a corrupt file aside. That is
+correct for the registry and wrong for themes, because §3 hot-reloads on file
+change: editors save in several steps, so a watcher routinely observes a
+theme file in a transiently invalid state. Quarantining on parse failure would
+move a user's theme file out from under them *while they were editing it* —
+data loss caused by the feature that exists to make editing pleasant. The
+registry is written by the app and never hand-edited, so the same policy is
+safe there and unsafe here.
 
 ### 4.2 Engine cannot resolve tokens
 
@@ -343,7 +353,7 @@ oversight.
 | `theme-engine` | tokens land on `documentElement`; `.dark` toggles with `appearance`; probe-failure path disables cleanly and leaves baked literals |
 | Regression | `theme.test.ts` **rewritten** — see below |
 | Status-colour integration | switching appearance fires the `class` MutationObserver and recomputes `surface` |
-| Sidecar | `themes.list/get` against a temp `BEADBOX_THEMES_PATH`; a corrupt file is quarantined, not fatal |
+| Sidecar | `themes.list/get` against a temp `BEADBOX_THEMES_PATH`; a corrupt file is reported in place, not fatal |
 | E2E | sibling to `e2e/headless/status-colors.spec.ts`: switch to light, assert contrast |
 
 ### `theme.test.ts` must be rewritten
