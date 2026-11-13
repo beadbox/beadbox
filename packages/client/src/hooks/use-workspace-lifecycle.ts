@@ -103,6 +103,23 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const includeSystem = currentWorkspace
     ? (systemIssuesByWorkspace[currentWorkspace.id] ?? modeForWorkspace(currentWorkspace.id))
     : false
+  const refreshDirtyRef = useRef(false)
+  const refreshInFlightRef = useRef<{
+    key: string
+    dirty: boolean
+    promise: Promise<void> | null
+  } | null>(null)
+  const mountedRef = useRef(true)
+  // One trailing timer and one dirty bit bound hidden refresh work.
+  // 30s keeps background data useful at at most two refresh starts per minute.
+  const hiddenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hiddenNextStartRef = useRef<number | null>(null)
+  const clearHiddenRefresh = useCallback(() => {
+    if (hiddenTimerRef.current !== null) clearTimeout(hiddenTimerRef.current)
+    hiddenTimerRef.current = null
+    hiddenNextStartRef.current = null
+    refreshDirtyRef.current = false
+  }, [])
   const setIncludeSystem = useCallback(
     (enabled: boolean) => {
       if (!currentWorkspace) return
@@ -113,6 +130,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       }
       loadGenRef.current++
       refreshInFlightRef.current = null
+      clearHiddenRefresh()
       const cached = sessionEpics.get(treeCacheKey(currentWorkspace.id, enabled))
       epicsWorkspaceIdRef.current = cached
         ? (treeCacheKey(currentWorkspace.id, enabled) ?? null)
@@ -122,9 +140,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       systemIssuesRef.current[currentWorkspace.id] = enabled
       setSystemIssuesByWorkspace((current) => ({ ...current, [currentWorkspace.id]: enabled }))
     },
-    [currentWorkspace?.id],
+    [currentWorkspace?.id, clearHiddenRefresh],
   )
   const [epics, setEpics] = useState<Epic[]>([])
+  const [treeRevision, setTreeRevision] = useState(0)
   const {
     availableTypes,
     typeCatalogReady,
@@ -287,6 +306,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         // publish the wrong tree.
         loadGenRef.current++
         refreshInFlightRef.current = null
+        clearHiddenRefresh()
         setLoadingWorkspaceId(target.id)
         setCurrentWorkspace(target)
         setHealthy()
@@ -311,7 +331,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
           hasExistingDataRef.current = false
         }
       }),
-    [setHealthy],
+    [setHealthy, clearHiddenRefresh],
   )
 
   // Rail renames / icon changes are registry writes; patch the copies this
@@ -533,6 +553,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const handleEpicsSuccess = useCallback(
     (result: { epics: Epic[]; workspaceId?: string; includeSystem: boolean }) => {
       setEpics(result.epics)
+      setTreeRevision((revision) => revision + 1)
       epicsWorkspaceIdRef.current = treeCacheKey(result.workspaceId, result.includeSystem) ?? null
       hasExistingDataRef.current = true
       setHealthy()
@@ -713,21 +734,30 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const refreshKey = JSON.stringify([currentWorkspace?.databasePath, includeSystem])
   const latestFetchRef = useRef({ key: refreshKey, fetch: fetchEpics })
   latestFetchRef.current = { key: refreshKey, fetch: fetchEpics }
-  const refreshDirtyRef = useRef(false)
-  const refreshInFlightRef = useRef<{
-    key: string
-    dirty: boolean
-    promise: Promise<void> | null
-  } | null>(null)
-  const mountedRef = useRef(true)
-  const loadEpics = useCallback((): Promise<void> => {
+  const loadEpics = useCallback((initialLoad = false): Promise<void> => {
     refreshDirtyRef.current = true
-    if (document.visibilityState === "hidden") return Promise.resolve()
+    if (!mountedRef.current) return Promise.resolve()
     const request = latestFetchRef.current
     const current = refreshInFlightRef.current
     if (current?.key === request.key) {
       current.dirty = true
       return current.promise ?? Promise.resolve()
+    }
+    if (document.visibilityState === "hidden") {
+      const delay = (hiddenNextStartRef.current ?? 0) - Date.now()
+      if (delay > 0) {
+        if (hiddenTimerRef.current === null) {
+          hiddenTimerRef.current = setTimeout(() => {
+            hiddenTimerRef.current = null
+            if (mountedRef.current && refreshDirtyRef.current) void loadEpics()
+          }, delay)
+        }
+        return Promise.resolve()
+      }
+    }
+    if (hiddenTimerRef.current !== null) {
+      clearTimeout(hiddenTimerRef.current)
+      hiddenTimerRef.current = null
     }
     const flight = { key: request.key, dirty: true, promise: null as Promise<void> | null }
     refreshInFlightRef.current = flight
@@ -737,8 +767,14 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         refreshInFlightRef.current === flight &&
         latestFetchRef.current.key === flight.key &&
         flight.dirty &&
-        document.visibilityState !== "hidden"
+        (document.visibilityState !== "hidden" || Date.now() >= (hiddenNextStartRef.current ?? 0))
       ) {
+        // Opening a workspace is not a background refresh. The first real
+        // hidden change gets the leading edge; subsequent starts are capped.
+        if (!initialLoad && document.visibilityState === "hidden") {
+          hiddenNextStartRef.current = Date.now() + 30_000
+        }
+        initialLoad = false
         flight.dirty = false
         refreshDirtyRef.current = false
         await latestFetchRef.current.fetch()
@@ -748,12 +784,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       if (refreshInFlightRef.current !== flight) return
       refreshInFlightRef.current = null
       // A notification can land after the loop ends but before this cleanup.
-      if (
-        mountedRef.current &&
-        flight.dirty &&
-        document.visibilityState !== "hidden" &&
-        latestFetchRef.current.key === flight.key
-      )
+      if (mountedRef.current && flight.dirty && latestFetchRef.current.key === flight.key)
         return loadEpics()
     })
     return flight.promise
@@ -762,11 +793,19 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   useEffect(() => {
     mountedRef.current = true
     const catchUp = () => {
-      if (document.visibilityState !== "hidden" && refreshDirtyRef.current) void loadEpics()
+      if (document.visibilityState === "hidden") return
+      if (hiddenTimerRef.current !== null) {
+        clearTimeout(hiddenTimerRef.current)
+        hiddenTimerRef.current = null
+      }
+      hiddenNextStartRef.current = null
+      if (refreshDirtyRef.current) void loadEpics()
     }
     document.addEventListener("visibilitychange", catchUp)
     return () => {
       mountedRef.current = false
+      if (hiddenTimerRef.current !== null) clearTimeout(hiddenTimerRef.current)
+      hiddenTimerRef.current = null
       refreshInFlightRef.current = null
       loadGenRef.current++
       document.removeEventListener("visibilitychange", catchUp)
@@ -855,7 +894,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   useEffect(() => {
     if (currentWorkspace) {
       let active = true
-      loadEpics()
+      clearHiddenRefresh()
+      loadEpics(true)
       // Fetch available statuses for this workspace
       rpc.beads
         .getAvailableStatuses(currentWorkspace.databasePath)
@@ -931,6 +971,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     retryAvailableTypes,
     epics,
     setEpics,
+    treeRevision,
     isLoading,
     isRefreshing,
     loadingWorkspaceId,

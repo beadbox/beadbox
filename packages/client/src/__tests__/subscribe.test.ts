@@ -21,7 +21,7 @@
 // IS_REACT_ACT_ENVIRONMENT is set by _test-globals.ts (the bunfig preload)
 // before React loads — needs to be in place before react-dom/client init.
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { formatLine, type SubscriptionEvent } from "@beadbox/server/subscribe-protocol"
 import posthog from "posthog-js"
 import { act, createElement, type ReactNode } from "react"
@@ -326,6 +326,49 @@ describe("useChangeSubscription", () => {
     expect(_getSubscriptionChangeCount()).toBe(2)
   })
 
+  test("hidden changes defer queries and React signals until one show catch-up", async () => {
+    await act(async () => root.render(createElement(HookHost, { workspacePath: "/ws/a" })))
+    await flushMicrotasks()
+    const invalidations = spyOn(queryClient, "invalidateQueries")
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    try {
+      for (let n = 0; n < 20; n++) {
+        listenMocks.fire(formatLine("test-id-1", { type: "change", timestamp: n }))
+      }
+      expect(invalidations.mock.calls.length).toBe(0)
+      expect(_getSubscriptionChangeCount()).toBe(0)
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      expect(invalidations.mock.calls.length).toBe(1)
+      expect(_getSubscriptionChangeCount()).toBe(1)
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      expect(invalidations.mock.calls.length).toBe(1)
+    } finally {
+      invalidations.mockRestore()
+      Reflect.deleteProperty(document, "visibilityState")
+    }
+  })
+
+  test("workspace switch drops pending hidden query catch-up", async () => {
+    await act(async () => root.render(createElement(HookHost, { workspacePath: "/ws/a" })))
+    await flushMicrotasks()
+    const invalidations = spyOn(queryClient, "invalidateQueries")
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    try {
+      listenMocks.fire(formatLine("test-id-1", { type: "change", timestamp: 1 }))
+      await act(async () => root.render(createElement(HookHost, { workspacePath: "/ws/b" })))
+      await flushMicrotasks()
+      const before = invalidations.mock.calls.length
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      expect(invalidations.mock.calls.length).toBe(before)
+      expect(_getSubscriptionChangeCount()).toBe(0)
+    } finally {
+      invalidations.mockRestore()
+      Reflect.deleteProperty(document, "visibilityState")
+    }
+  })
+
   test("useSubscriptionChangeSignal returns the live counter and updates on bumps", async () => {
     const observed: number[] = []
     function SignalProbe(): ReactNode {
@@ -586,7 +629,9 @@ describe("live-updates liveness (beadbox-01f.2)", () => {
   // detector that isn't healthy, so they arm it too.
   test("a stream that fails from birth (polling_error, never a heartbeat) is paused", async () => {
     await mount()
-    await act(async () => listenMocks.fire(line({ type: "change", timestamp: 1, trigger: "initial" })))
+    await act(async () =>
+      listenMocks.fire(line({ type: "change", timestamp: 1, trigger: "initial" })),
+    )
     await act(async () => listenMocks.fire(line({ type: "polling_error" })))
     await act(async () => {
       await sleep(450)
