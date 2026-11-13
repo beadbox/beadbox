@@ -55,6 +55,30 @@ function recordLoadEpicsPhase(
 // telemetry. Paired with app_workspace_load_succeeded on success, this lets us measure
 // the real load-time distribution instead of conflating "slow but working" with stuck.
 const WORKSPACE_LOAD_TIMEOUT_MS = 15_000
+
+/**
+ * Minimum interval between coalesced tree refreshes while the window is hidden.
+ *
+ * 30s aligns with queryClient's 30s staleTime and the subscription liveness
+ * window: hidden boards run at most 2 non-overlapping refreshes per minute
+ * while staying within 30s of current and within packaged-smoke's budget.
+ */
+export const HIDDEN_REFRESH_INTERVAL_MS = 30_000
+
+function computeHiddenRefreshDelay(
+  last: { key: string; at: number },
+  key: string,
+  now: number,
+  fromInFlight: boolean,
+): number {
+  if (last.key === key && last.at > 0) {
+    const elapsed = now - last.at
+    if (elapsed < HIDDEN_REFRESH_INTERVAL_MS) return HIDDEN_REFRESH_INTERVAL_MS - elapsed
+    if (fromInFlight) return 0
+  }
+  return HIDDEN_REFRESH_INTERVAL_MS
+}
+
 export const systemIssuesKey = (id: string) => `beadbox:system-issues:${id}`
 const treeCacheKey = (id: string | undefined, includeSystem: boolean) =>
   id ? `${id}:${includeSystem ? "all" : "normal"}` : undefined
@@ -103,6 +127,23 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const includeSystem = currentWorkspace
     ? (systemIssuesByWorkspace[currentWorkspace.id] ?? modeForWorkspace(currentWorkspace.id))
     : false
+  const refreshDirtyRef = useRef(false)
+  const refreshInFlightRef = useRef<{
+    key: string
+    dirty: boolean
+    promise: Promise<void> | null
+  } | null>(null)
+  const hiddenTimerRef = useRef<{
+    key: string
+    timer: ReturnType<typeof setTimeout>
+  } | null>(null)
+  const lastRefreshStartRef = useRef<{ key: string; at: number }>({ key: "", at: 0 })
+  const clearHiddenTimer = useCallback(() => {
+    if (hiddenTimerRef.current) {
+      clearTimeout(hiddenTimerRef.current.timer)
+      hiddenTimerRef.current = null
+    }
+  }, [])
   const setIncludeSystem = useCallback(
     (enabled: boolean) => {
       if (!currentWorkspace) return
@@ -113,6 +154,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       }
       loadGenRef.current++
       refreshInFlightRef.current = null
+      clearHiddenTimer()
+      refreshDirtyRef.current = false
       const cached = sessionEpics.get(treeCacheKey(currentWorkspace.id, enabled))
       epicsWorkspaceIdRef.current = cached
         ? (treeCacheKey(currentWorkspace.id, enabled) ?? null)
@@ -122,9 +165,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       systemIssuesRef.current[currentWorkspace.id] = enabled
       setSystemIssuesByWorkspace((current) => ({ ...current, [currentWorkspace.id]: enabled }))
     },
-    [currentWorkspace?.id],
+    [currentWorkspace?.id, clearHiddenTimer],
   )
   const [epics, setEpics] = useState<Epic[]>([])
+  const [treeRevision, setTreeRevision] = useState(0)
   const {
     availableTypes,
     typeCatalogReady,
@@ -287,6 +331,8 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         // publish the wrong tree.
         loadGenRef.current++
         refreshInFlightRef.current = null
+        clearHiddenTimer()
+        refreshDirtyRef.current = false
         setLoadingWorkspaceId(target.id)
         setCurrentWorkspace(target)
         setHealthy()
@@ -533,6 +579,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const handleEpicsSuccess = useCallback(
     (result: { epics: Epic[]; workspaceId?: string; includeSystem: boolean }) => {
       setEpics(result.epics)
+      setTreeRevision((prev) => prev + 1)
       epicsWorkspaceIdRef.current = treeCacheKey(result.workspaceId, result.includeSystem) ?? null
       hasExistingDataRef.current = true
       setHealthy()
@@ -708,70 +755,123 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     setHealthy,
   ])
 
-  // Same-key bursts share one request and one latest-state follow-up. A
-  // workspace/mode switch starts immediately; generations reject old replies.
+  // Same-key bursts share one request and one latest-state follow-up while
+  // visible, and coalesce into one non-overlapping refresh per
+  // HIDDEN_REFRESH_INTERVAL_MS while hidden. A workspace/mode switch detaches
+  // the superseded flight; generations reject old replies.
   const refreshKey = JSON.stringify([currentWorkspace?.databasePath, includeSystem])
   const latestFetchRef = useRef({ key: refreshKey, fetch: fetchEpics })
   latestFetchRef.current = { key: refreshKey, fetch: fetchEpics }
-  const refreshDirtyRef = useRef(false)
-  const refreshInFlightRef = useRef<{
-    key: string
-    dirty: boolean
-    promise: Promise<void> | null
-  } | null>(null)
   const mountedRef = useRef(true)
+  const scheduleHiddenRefreshRef = useRef<(key: string, fromInFlight: boolean) => void>(() => {})
+
+  const startRefreshFlight = useCallback(
+    (key: string): Promise<void> => {
+      clearHiddenTimer()
+      const flight = { key, dirty: true, promise: null as Promise<void> | null }
+      refreshInFlightRef.current = flight
+      const drain = async () => {
+        let iterations = 0
+        while (
+          mountedRef.current &&
+          refreshInFlightRef.current === flight &&
+          latestFetchRef.current.key === flight.key &&
+          flight.dirty
+        ) {
+          if (iterations > 0 && document.visibilityState === "hidden") break
+          iterations += 1
+          flight.dirty = false
+          refreshDirtyRef.current = false
+          lastRefreshStartRef.current = { key: flight.key, at: Date.now() }
+          await latestFetchRef.current.fetch()
+        }
+      }
+      flight.promise = drain().finally(() => {
+        if (refreshInFlightRef.current !== flight) return
+        refreshInFlightRef.current = null
+        if (!mountedRef.current || latestFetchRef.current.key !== flight.key) return
+        if (!flight.dirty && !refreshDirtyRef.current) return
+        refreshDirtyRef.current = true
+        if (document.visibilityState === "hidden") {
+          scheduleHiddenRefreshRef.current(flight.key, true)
+          return
+        }
+        return startRefreshFlight(flight.key)
+      })
+      return flight.promise
+    },
+    [clearHiddenTimer],
+  )
+
+  const scheduleHiddenRefresh = useCallback(
+    (key: string, fromInFlight: boolean) => {
+      if (hiddenTimerRef.current?.key === key) return
+      clearHiddenTimer()
+      const delay = computeHiddenRefreshDelay(
+        lastRefreshStartRef.current,
+        key,
+        Date.now(),
+        fromInFlight,
+      )
+      const timer = setTimeout(() => {
+        hiddenTimerRef.current = null
+        if (!mountedRef.current || latestFetchRef.current.key !== key) return
+        if (!refreshDirtyRef.current) return
+        const current = refreshInFlightRef.current
+        if (current?.key === key) {
+          current.dirty = true
+          return
+        }
+        void startRefreshFlight(key)
+      }, delay)
+      hiddenTimerRef.current = { key, timer }
+    },
+    [clearHiddenTimer, startRefreshFlight],
+  )
+  scheduleHiddenRefreshRef.current = scheduleHiddenRefresh
+
   const loadEpics = useCallback((): Promise<void> => {
     refreshDirtyRef.current = true
-    if (document.visibilityState === "hidden") return Promise.resolve()
     const request = latestFetchRef.current
     const current = refreshInFlightRef.current
+    if (document.visibilityState === "hidden") {
+      if (current?.key === request.key) {
+        current.dirty = true
+        return Promise.resolve()
+      }
+      if (current) refreshInFlightRef.current = null
+      scheduleHiddenRefresh(request.key, false)
+      return Promise.resolve()
+    }
+    clearHiddenTimer()
     if (current?.key === request.key) {
       current.dirty = true
       return current.promise ?? Promise.resolve()
     }
-    const flight = { key: request.key, dirty: true, promise: null as Promise<void> | null }
-    refreshInFlightRef.current = flight
-    const drain = async () => {
-      while (
-        mountedRef.current &&
-        refreshInFlightRef.current === flight &&
-        latestFetchRef.current.key === flight.key &&
-        flight.dirty &&
-        document.visibilityState !== "hidden"
-      ) {
-        flight.dirty = false
-        refreshDirtyRef.current = false
-        await latestFetchRef.current.fetch()
-      }
-    }
-    flight.promise = drain().finally(() => {
-      if (refreshInFlightRef.current !== flight) return
-      refreshInFlightRef.current = null
-      // A notification can land after the loop ends but before this cleanup.
-      if (
-        mountedRef.current &&
-        flight.dirty &&
-        document.visibilityState !== "hidden" &&
-        latestFetchRef.current.key === flight.key
-      )
-        return loadEpics()
-    })
-    return flight.promise
-  }, [])
+    return startRefreshFlight(request.key)
+  }, [clearHiddenTimer, scheduleHiddenRefresh, startRefreshFlight])
 
   useEffect(() => {
     mountedRef.current = true
-    const catchUp = () => {
-      if (document.visibilityState !== "hidden" && refreshDirtyRef.current) void loadEpics()
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "hidden") {
+        clearHiddenTimer()
+        if (refreshDirtyRef.current) void loadEpics()
+        return
+      }
+      if (refreshDirtyRef.current && !refreshInFlightRef.current) {
+        scheduleHiddenRefresh(latestFetchRef.current.key, false)
+      }
     }
-    document.addEventListener("visibilitychange", catchUp)
+    document.addEventListener("visibilitychange", onVisibilityChange)
     return () => {
       mountedRef.current = false
+      clearHiddenTimer()
       refreshInFlightRef.current = null
       loadGenRef.current++
-      document.removeEventListener("visibilitychange", catchUp)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
     }
-  }, [loadEpics])
+  }, [clearHiddenTimer, loadEpics, scheduleHiddenRefresh])
 
   // Clear all auto-retry timers
   const clearAutoRetry = useCallback(() => {
@@ -931,6 +1031,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     retryAvailableTypes,
     epics,
     setEpics,
+    treeRevision,
     isLoading,
     isRefreshing,
     loadingWorkspaceId,

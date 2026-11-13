@@ -5,7 +5,7 @@
 // authoritative refresh for field edits — so it needs a test of its own
 // (beadbox-01f.9).
 
-import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, jest, mock, test } from "bun:test"
 import { QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
@@ -18,6 +18,7 @@ import {
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 
 import { StartupGate } from "../components/startup-gate"
+import * as lifecycleModule from "../hooks/use-workspace-lifecycle"
 import { queryClient } from "../lib/query-client"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import { _emitChangeForTests, _resetSubscriptionChangeCount } from "../lib/subscribe"
@@ -56,14 +57,18 @@ function tree(): Epic[] {
 // every test; call counts are cleared between tests instead.
 let HomePage: typeof import("../components/home-page").HomePage
 let getEpics: ReturnType<typeof installRpc>["getEpics"]
+let getBlocksDependencies: ReturnType<typeof installRpc>["getBlocksDependencies"]
 
 beforeAll(async () => {
-  getEpics = installRpc().getEpics
+  const installed = installRpc()
+  getEpics = installed.getEpics
+  getBlocksDependencies = installed.getBlocksDependencies
   HomePage = (await import("../components/home-page")).HomePage
 })
 
 function installRpc() {
   const getEpics = mock(() => Promise.resolve({ success: true as const, epics: tree() }))
+  const getBlocksDependencies = mock(() => Promise.resolve({ blockedBy: {} }))
   // Anything the page calls that this test does not assert on resolves to an
   // empty-but-valid result.
   const benign = (): RemoteApi[keyof RemoteApi] =>
@@ -86,7 +91,7 @@ function installRpc() {
       ),
     },
     epics: new Proxy(
-      { getEpics, getBlocksDependencies: mock(() => Promise.resolve({ blockedBy: {} })) },
+      { getEpics, getBlocksDependencies },
       {
         get: (t, k) =>
           k in t
@@ -119,7 +124,7 @@ function installRpc() {
       get: (t, k) => (k in t ? t[k as keyof typeof t] : benign()),
     }) as unknown as RemoteApi,
   )
-  return { getEpics }
+  return { getEpics, getBlocksDependencies }
 }
 
 function mountHome() {
@@ -146,9 +151,19 @@ function mountHome() {
   )
 }
 
+interface FakeTimerControls {
+  useFakeTimers: () => void
+  useRealTimers: () => void
+  advanceTimersByTime: (ms: number) => void
+}
+const timers = jest as unknown as FakeTimerControls
+
 afterEach(() => {
+  timers.useRealTimers()
+  Reflect.deleteProperty(document, "visibilityState")
   cleanup()
   getEpics.mockClear()
+  getBlocksDependencies.mockClear()
   queryClient.clear()
   _resetSubscriptionChangeCount()
   _resetWorkspaceSessions()
@@ -187,6 +202,49 @@ describe("home page: a subscription change rebuilds the tree (beadbox-s5z)", () 
     const settled = getEpics.mock.calls.length
     await new Promise((r) => setTimeout(r, 1_000))
     expect(getEpics.mock.calls.length).toBe(settled)
+  }, 20_000)
+
+  test("hidden subscription changes coalesce into the capped refresh without firing uncached blocked-by reads", async () => {
+    const intervalMs =
+      (lifecycleModule as { HIDDEN_REFRESH_INTERVAL_MS?: number }).HIDDEN_REFRESH_INTERVAL_MS ??
+      30_000
+
+    setWorkspaceCookie(ws.id)
+    mountHome()
+    await waitFor(() => expect(screen.getByText("Title before")).toBeTruthy(), { timeout: 5_000 })
+    await waitFor(() => expect(getBlocksDependencies.mock.calls.length).toBeGreaterThan(0), {
+      timeout: 5_000,
+    })
+
+    timers.useFakeTimers()
+    const epicsBefore = getEpics.mock.calls.length
+    const blocksBefore = getBlocksDependencies.mock.calls.length
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"))
+    })
+
+    treeTitle = "Title updated while hidden"
+    for (let i = 0; i < 10; i++) {
+      await act(async () => {
+        _emitChangeForTests()
+        await Promise.resolve()
+      })
+    }
+
+    // Suppressed events must neither refetch epics early nor fire uncached getBlocksDependencies reads.
+    expect(getEpics.mock.calls.length).toBe(epicsBefore)
+    expect(getBlocksDependencies.mock.calls.length).toBe(blocksBefore)
+
+    await act(async () => {
+      timers.advanceTimersByTime(intervalMs)
+      for (let i = 0; i < 6; i++) await Promise.resolve()
+    })
+
+    expect(getEpics.mock.calls.length).toBe(epicsBefore + 1)
+    expect(getBlocksDependencies.mock.calls.length).toBe(blocksBefore + 1)
+    expect(screen.getByText("Title updated while hidden")).toBeTruthy()
   }, 20_000)
 })
 

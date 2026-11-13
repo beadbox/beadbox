@@ -8,7 +8,7 @@
 //      its cached tree immediately — hasExistingDataRef stays true, which is
 //      what suppresses home-page's skeleton while the refresh runs.
 
-import { afterEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, describe, expect, jest, mock, test } from "bun:test"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -20,6 +20,7 @@ import {
 import { act, cleanup, render, waitFor } from "@testing-library/react"
 
 import type { AppHealth } from "../hooks/use-app-health"
+import * as lifecycleModule from "../hooks/use-workspace-lifecycle"
 import { systemIssuesKey, useWorkspaceLifecycle } from "../hooks/use-workspace-lifecycle"
 import { ERROR_CATEGORY_TITLES } from "../lib/epic-tree-utils"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
@@ -160,7 +161,16 @@ function mountLifecycle(
   return { seen, health, getEpics, release: () => pendingResolve?.() }
 }
 
+interface FakeTimerControls {
+  useFakeTimers: () => void
+  useRealTimers: () => void
+  advanceTimersByTime: (ms: number) => void
+}
+const timers = jest as unknown as FakeTimerControls
+
 afterEach(() => {
+  timers.useRealTimers()
+  Reflect.deleteProperty(document, "visibilityState")
   cleanup()
   _resetRpc()
   _resetWorkspaceSessions()
@@ -514,4 +524,291 @@ test("a refresh arriving as the current drain settles is not lost", async () => 
   await waitFor(() => expect(getEpics.mock.calls.length).toBe(2))
   await act(async () => pending[1]({ success: true, epics: [epic("latest")] }))
   await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("latest"))
+})
+
+describe("capped hidden refresh (beadbox-1jq)", () => {
+  const getHiddenIntervalMs = () =>
+    (lifecycleModule as { HIDDEN_REFRESH_INTERVAL_MS?: number }).HIDDEN_REFRESH_INTERVAL_MS ??
+    30_000
+
+  const flushMicrotasks = async () => {
+    for (let i = 0; i < 6; i++) await Promise.resolve()
+  }
+
+  test("hidden burst over 2 minutes runs at most ceil(120/interval)+1 non-overlapping refreshes and delivers latest data within one interval", async () => {
+    const intervalMs = getHiddenIntervalMs()
+    expect(intervalMs).toBeGreaterThanOrEqual(30_000)
+    expect(intervalMs).toBeLessThanOrEqual(60_000)
+
+    let latestEpicId = "alpha-initial"
+    let inFlight = 0
+    let maxInFlight = 0
+
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle({
+      treeRequest: () => {
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        const snapshot = latestEpicId
+        return Promise.resolve({ success: true as const, epics: [epic(snapshot)] }).finally(() => {
+          inFlight -= 1
+        })
+      },
+    })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
+
+    timers.useFakeTimers()
+    // Advance past initial mount so the 2-minute hidden window starts from steady state.
+    await act(async () => {
+      timers.advanceTimersByTime(intervalMs * 2)
+      await flushMicrotasks()
+    })
+    const callsBeforeHidden = getEpics.mock.calls.length
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"))
+    })
+
+    // 240 changes across 120s (every 500ms).
+    const totalChanges = 240
+    for (let i = 1; i <= totalChanges; i++) {
+      latestEpicId = `hidden-change-${i}`
+      await act(async () => {
+        void seen.current?.loadEpics()
+        if (i < totalChanges) {
+          timers.advanceTimersByTime(500)
+        }
+        await flushMicrotasks()
+      })
+    }
+
+    // Latest data must arrive within at most one hidden interval of the final change.
+    await act(async () => {
+      timers.advanceTimersByTime(intervalMs)
+      await flushMicrotasks()
+    })
+
+    const hiddenRefreshes = getEpics.mock.calls.length - callsBeforeHidden
+    const maxAllowed = Math.ceil(120 / (intervalMs / 1_000)) + 1
+    expect(maxInFlight).toBe(1)
+    expect(hiddenRefreshes).toBeGreaterThanOrEqual(1)
+    expect(hiddenRefreshes).toBeLessThanOrEqual(maxAllowed)
+    expect(seen.current?.epics[0]?.id).toBe(`hidden-change-${totalChanges}`)
+  })
+
+  test("slow hidden refreshes never overlap even when requests take several seconds", async () => {
+    const intervalMs = getHiddenIntervalMs()
+    let latestEpicId = "alpha-initial"
+    let inFlight = 0
+    let maxInFlight = 0
+
+    setWorkspaceCookie(alpha.id)
+    let mounted = false
+    const { seen, getEpics } = mountLifecycle({
+      treeRequest: () => {
+        const snapshot = latestEpicId
+        if (!mounted) {
+          return Promise.resolve({ success: true as const, epics: [epic(snapshot)] })
+        }
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            inFlight -= 1
+            resolve({ success: true as const, epics: [epic(snapshot)] })
+          }, 8_000)
+        })
+      },
+    })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
+    mounted = true
+
+    timers.useFakeTimers()
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"))
+    })
+    const callsBeforeHidden = getEpics.mock.calls.length
+
+    // 60 changes over 120s (every 2s) while each RPC takes 8s.
+    for (let i = 1; i <= 60; i++) {
+      latestEpicId = `slow-change-${i}`
+      await act(async () => {
+        void seen.current?.loadEpics()
+        if (i < 60) {
+          timers.advanceTimersByTime(2_000)
+        }
+        await flushMicrotasks()
+      })
+    }
+
+    // Advance one interval + the 8s RPC duration so the final scheduled load settles.
+    await act(async () => {
+      timers.advanceTimersByTime(intervalMs + 8_000)
+      await flushMicrotasks()
+    })
+
+    const hiddenRefreshes = getEpics.mock.calls.length - callsBeforeHidden
+    const maxAllowed = Math.ceil(120 / (intervalMs / 1_000)) + 1
+    expect(maxInFlight).toBe(1)
+    expect(inFlight).toBe(0)
+    expect(hiddenRefreshes).toBeGreaterThanOrEqual(1)
+    expect(hiddenRefreshes).toBeLessThanOrEqual(maxAllowed)
+    expect(seen.current?.epics[0]?.id).toBe("slow-change-60")
+  })
+
+  test("showing the window cancels any pending hidden timer and runs exactly one catch-up", async () => {
+    const intervalMs = getHiddenIntervalMs()
+    let latestEpicId = "alpha-initial"
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle({
+      treeRequest: () => Promise.resolve({ success: true as const, epics: [epic(latestEpicId)] }),
+    })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
+
+    timers.useFakeTimers()
+    const callsBefore = getEpics.mock.calls.length
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"))
+      latestEpicId = "caught-up-on-show"
+      for (let i = 0; i < 15; i++) void seen.current?.loadEpics()
+    })
+    expect(getEpics.mock.calls.length).toBe(callsBefore)
+
+    // Advance part-way through the hidden window, then show the window.
+    await act(async () => {
+      timers.advanceTimersByTime(Math.floor(intervalMs / 3))
+      await flushMicrotasks()
+    })
+    expect(getEpics.mock.calls.length).toBe(callsBefore)
+
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"))
+      await flushMicrotasks()
+    })
+    expect(getEpics.mock.calls.length).toBe(callsBefore + 1)
+    expect(seen.current?.epics[0]?.id).toBe("caught-up-on-show")
+
+    // Advancing well past the original hidden deadline must not fire a leftover timer.
+    await act(async () => {
+      timers.advanceTimersByTime(intervalMs * 2)
+      await flushMicrotasks()
+    })
+    expect(getEpics.mock.calls.length).toBe(callsBefore + 1)
+  })
+
+  test("switching workspaces while hidden discards the stale in-flight result and loads the new workspace", async () => {
+    const intervalMs = getHiddenIntervalMs()
+    const pending: Array<{ db?: string; resolve: (value: unknown) => void }> = []
+    let mounted = false
+
+    setWorkspaceCookie(alpha.id)
+    const { seen } = mountLifecycle({
+      treeRequest: (db) => {
+        if (!mounted) {
+          return Promise.resolve({ success: true as const, epics: [epic("alpha-initial")] })
+        }
+        return new Promise((resolve) => pending.push({ db, resolve }))
+      },
+    })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
+    mounted = true
+
+    timers.useFakeTimers()
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"))
+      void seen.current?.loadEpics()
+    })
+
+    // Advance one hidden interval so alpha's background refresh is actively in flight.
+    await act(async () => {
+      timers.advanceTimersByTime(intervalMs)
+      await flushMicrotasks()
+    })
+    expect(pending.some((p) => p.db?.includes("alpha"))).toBe(true)
+
+    // Switch to beta while still hidden, then resolve alpha's stale request.
+    await act(async () => {
+      setWorkspaceCookie(beta.id)
+      await flushMicrotasks()
+    })
+    expect(seen.current?.currentWorkspace?.id).toBe(beta.id)
+
+    await act(async () => {
+      pending
+        .find((p) => p.db?.includes("alpha"))
+        ?.resolve({ success: true, epics: [epic("stale-alpha")] })
+      await flushMicrotasks()
+    })
+    expect(seen.current?.epics.some((e) => e.id === "stale-alpha")).toBe(false)
+
+    // Beta refreshes within one hidden interval without touching alpha again.
+    await act(async () => {
+      timers.advanceTimersByTime(intervalMs)
+      await flushMicrotasks()
+    })
+    const betaReq = pending.find((p) => p.db?.includes("beta"))
+    expect(betaReq).toBeDefined()
+    await act(async () => {
+      betaReq?.resolve({ success: true, epics: [epic("latest-beta")] })
+      await flushMicrotasks()
+    })
+    expect(seen.current?.epics.map((e) => e.id)).toEqual(["latest-beta"])
+  })
+
+  test("a visible refresh that finishes after the window hides defers its dirty follow-up to the hidden interval", async () => {
+    const intervalMs = getHiddenIntervalMs()
+    const pending: Array<(value: unknown) => void> = []
+    let mounted = false
+
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle({
+      treeRequest: () => {
+        if (!mounted) {
+          return Promise.resolve({ success: true as const, epics: [epic("alpha-initial")] })
+        }
+        return new Promise((resolve) => pending.push(resolve))
+      },
+    })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
+    mounted = true
+
+    timers.useFakeTimers()
+    const callsBefore = getEpics.mock.calls.length
+
+    // Start a visible refresh; while it is in flight, hide the window and mark dirty.
+    act(() => {
+      void seen.current?.loadEpics()
+    })
+    expect(pending.length).toBe(1)
+
+    await act(async () => {
+      timers.advanceTimersByTime(2_000)
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+      document.dispatchEvent(new Event("visibilitychange"))
+      void seen.current?.loadEpics()
+      pending[0]?.({ success: true, epics: [epic("mid-flight")] })
+      await flushMicrotasks()
+    })
+
+    // Must not start a second fetch immediately after settling while hidden.
+    expect(getEpics.mock.calls.length).toBe(callsBefore + 1)
+    expect(seen.current?.epics[0]?.id).toBe("mid-flight")
+
+    // Advancing the remaining hidden interval starts the single coalesced follow-up.
+    await act(async () => {
+      timers.advanceTimersByTime(intervalMs - 2_000)
+      await flushMicrotasks()
+    })
+    expect(pending.length).toBe(2)
+    await act(async () => {
+      pending[1]?.({ success: true, epics: [epic("deferred-follow-up")] })
+      await flushMicrotasks()
+    })
+    expect(seen.current?.epics[0]?.id).toBe("deferred-follow-up")
+  })
 })

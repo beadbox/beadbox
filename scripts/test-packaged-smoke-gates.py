@@ -22,14 +22,30 @@ WS=$PWD
 LOG=$PWD/sidecar.log
 TASK_B=sm-task
 : > "$LOG"
-bd() { return 0; }
+bd() { : > "$WS/.changed"; return 0; }
 sleep() { :; }
-count_log() { echo 0; }
+count_log() {
+  case "$1" in
+    *'trigger":"initial'*) echo 0 ;;
+    *SUBSCRIPTION*)
+      if [ "$FAILED_GATE" = "live-update" ] || [ ! -e "$WS/.changed" ]; then echo 0; else echo 1; fi
+      ;;
+    *'list completed'*) echo 1 ;;
+    *) echo 0 ;;
+  esac
+}
 wait_log() {
   case "$1" in
     *beadbox-sidecar*) gate=sidecar ;;
     *ws:health*) gate=handshake ;;
-    *'list completed'*) gate=tree ;;
+    *'list completed'*)
+      if [ "$2" -ge 2 ]; then
+        gate=live-update
+        [ "${3:-0}" -ge 60 ] || return 1
+      else
+        gate=tree
+      fi
+      ;;
     *change-detector*) gate=subscription ;;
     *) return 1 ;;
   esac
@@ -46,25 +62,29 @@ wait_log() {
                                      reporting + setup + checks + other_checks + '\n' + finish],
                                     cwd=tmp, env=dict(os.environ, FAILED_GATE=failed_gate),
                                     text=True, capture_output=True, timeout=10)
-        print(f"gate={failed_gate or 'live-update-only'} missing={missing_check}: exit={result.returncode}\n{result.stdout}")
+        print(f"gate={failed_gate or 'all-pass'} missing={missing_check}: exit={result.returncode}\n{result.stdout}")
         return result
 
-    def test_hidden_live_update_warns_but_does_not_fail_smoke(self):
+    def test_all_gates_pass_when_live_update_allows_hidden_interval(self):
         result = self.smoke()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("::warning::live update:", result.stdout)
-        self.assertIn("harness defect", result.stdout)
-        self.assertIn("not on the console", result.stdout)
-        self.assertIn("beadbox-l6u", result.stdout)
+        self.assertIn("PASS  live update:", result.stdout)
+        self.assertNotIn("::warning::live update:", result.stdout)
         self.assertIn("0 failure(s)", result.stdout)
 
-    def test_still_gating_failures_remain_red_with_live_update_warning(self):
+    def test_live_update_failure_fails_smoke_without_warning_bypass(self):
+        result = self.smoke("live-update")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FAIL  live update: no change event and refetch within 60s of 'bd update'", result.stdout)
+        self.assertNotIn("::warning::live update:", result.stdout)
+        self.assertIn("1 failure(s)", result.stdout)
+
+    def test_other_gating_failures_remain_red(self):
         for gate in ("sidecar", "handshake", "tree", "subscription"):
             with self.subTest(gate=gate):
                 result = self.smoke(gate)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("FAIL  " + gate + ":", result.stdout)
-                self.assertIn("::warning::live update:", result.stdout)
                 self.assertIn("1 failure(s)", result.stdout)
 
     def test_unreported_check_still_fails_smoke(self):

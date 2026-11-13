@@ -300,6 +300,7 @@ function BeadsEpicsViewer() {
     retryAvailableTypes,
     epics,
     setEpics,
+    treeRevision,
     isLoading,
     isRefreshing,
     loadingWorkspaceId,
@@ -609,8 +610,8 @@ function BeadsEpicsViewer() {
   // Change per pm/systemdesign.md §3.2. home-page.tsx is neither a useQuery
   // consumer nor a useSubscriptionChangeSignal consumer, so external bd writes
   // never triggered loadEpics. Mirror the workspaces-page.tsx / activity-page.tsx
-  // pattern: read the signal, refetch on bump. The bump also drives epicEpoch
-  // forward so the blocked-by health check below re-runs for the new tree.
+  // pattern: read the signal, refetch on bump. Blocked-by health below tracks
+  // treeRevision from useWorkspaceLifecycle so it runs once per committed tree.
   const subscriptionSignal = useSubscriptionChangeSignal()
 
   // Blocked-by health: the tree arrives with its blockedBy (the sidecar builds
@@ -620,20 +621,18 @@ function BeadsEpicsViewer() {
   // into Phase 1 and re-formed on each change (beadbox-kqiv). It still asks
   // the sidecar after each load, only to learn whether blocked-by could be
   // computed, for the banner below. While the data is unchanged the sidecar
-  // answers from the tree's own list. epicEpoch increments on each
-  // subscription refresh so the check runs for every new tree.
+  // answers from the tree's own list. treeRevision increments on each
+  // committed tree load so suppressed hidden events do not fire uncached reads.
   const blocksLoadIdRef = useRef(0)
   // Set when the server could not compute blocked-by for this workspace, so the
   // tree says so instead of reading as "nothing is blocked" (beadbox-01f.5).
   const [blocksDegraded, setBlocksDegraded] = useState<{ dbPath: string; message: string } | null>(null)
   const [blocksRetry, setBlocksRetry] = useState(0)
-  const [epicEpoch, setEpicEpoch] = useState(0)
 
   useEffect(() => {
     if (subscriptionSignal === 0) return
     if (!currentWorkspace?.databasePath) return
     void loadEpics()
-    setEpicEpoch((prev) => prev + 1)
   }, [subscriptionSignal, currentWorkspace?.databasePath, loadEpics])
   useEffect(() => {
     if (isLoading || !currentWorkspace?.databasePath || epics.length === 0) return
@@ -658,7 +657,7 @@ function BeadsEpicsViewer() {
       setBlocksDegraded({ dbPath, message })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- epics.length tracks structural changes; the tree's contents are not read here
-  }, [isLoading, currentWorkspace?.databasePath, epics.length, epicEpoch, blocksRetry])
+  }, [isLoading, currentWorkspace?.databasePath, epics.length, treeRevision, blocksRetry])
 
   // bb-pgb0.1: deleted ~130 lines of dead WebSocket-shim plumbing
   // (handleSSEChange + bdCmdHandlerRef + lifecycleHandlerRef +
