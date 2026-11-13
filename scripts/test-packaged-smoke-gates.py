@@ -10,9 +10,9 @@ SCRIPT = Path(__file__).with_name("packaged-smoke.sh")
 
 
 class SmokeGates(unittest.TestCase):
-    def smoke(self, failed_gate="", missing_check=False, refetch_at=30):
+    def smoke(self, failed_gate="", missing_check=False, refetch_at=30, list_only=False):
         text = SCRIPT.read_text()
-        reporting = text[text.index("failures=0"):text.index("# Wait until `pattern`")]
+        reporting = text[text.index("failures=0"):text.index("# ---------------------------------------------------------------------------\n# Seed:")]
         checks = text[text.index("# (a) The sidecar booted."):text.index('screencapture -x')]
         finish = text[text.index('if [ "$reported" -ne "$EXPECTED_CHECKS" ]'):]
         # No native app, bd workspace or real wait: controlled OS boundaries,
@@ -21,30 +21,35 @@ class SmokeGates(unittest.TestCase):
 WS=$PWD
 LOG=$PWD/sidecar.log
 TASK_B=sm-task
-: > "$LOG"
-bd() { touch "$WS/written"; }
-sleep() { :; }
-count_log() {
-  case "$1" in
-    *SUBSCRIPTION*initial*) echo 0 ;;
-    *SUBSCRIPTION*) if [ -e "$WS/written" ]; then echo 1; else echo 0; fi ;;
-    *) echo 0 ;;
-  esac
-}
-wait_log() {
-  case "$1" in
-    *beadbox-sidecar*) gate=sidecar ;;
-    *ws:health*) gate=handshake ;;
-    *'list completed'*)
-      if [ "$2" -gt 0 ] && [ "$3" -ne 60 ]; then
-        [ "$FAILED_GATE" != live ] && [ "$3" -ge "$REFETCH_AT" ]; return
+echo 0 > "$WS/clock"
+date() { cat "$WS/clock"; }
+bd() { cat "$WS/clock" > "$WS/written"; }
+sleep() {
+  local t=$(cat "$WS/clock")
+  t=$((t + 1))
+  echo "$t" > "$WS/clock"
+  if [ -e "$WS/written" ]; then
+    local since_write=$((t - $(cat "$WS/written")))
+    if [ "$since_write" -eq 1 ] && [ "$FAILED_GATE" != live ]; then
+      echo '[SUBSCRIPTION:sm] {"type":"change","trigger":"manifest"}' >> "$LOG"
+    fi
+    if [ "$since_write" -eq "$REFETCH_AT" ] && [ "$FAILED_GATE" != live ]; then
+      echo '[bd] list completed' >> "$LOG"
+      if [ "$LIST_ONLY" != yes ]; then
+        echo '[debug:cascade9] getEpicsCore N=1 db=smoke-workspace' >> "$LOG"
       fi
-      gate=tree ;;
-    *change-detector*) gate=subscription ;;
-    *) return 1 ;;
-  esac
-  [ "$gate" != "$FAILED_GATE" ]
+    fi
+  fi
 }
+: > "$LOG"
+started=0
+[ "$FAILED_GATE" = sidecar ] || echo '[beadbox-sidecar] starting' >> "$LOG"
+[ "$FAILED_GATE" = handshake ] || echo '[ws:health]' >> "$LOG"
+if [ "$FAILED_GATE" != tree ]; then
+  echo '[bd] list completed' >> "$LOG"
+  echo '[debug:cascade9] getEpicsCore N=1 db=smoke-workspace' >> "$LOG"
+fi
+[ "$FAILED_GATE" = subscription ] || echo '[change-detector] starting for smoke-workspace' >> "$LOG"
 '''
         # The five checks outside this extracted section retain their accounting.
         other_checks = '\n'.join('pass "' + name + '"' for name in
@@ -54,7 +59,7 @@ wait_log() {
         with tempfile.TemporaryDirectory(prefix="smoke-gates-") as tmp:
             result = subprocess.run(["bash", "-uo", "pipefail", "-c",
                                      reporting + setup + checks + other_checks + '\n' + finish],
-                                    cwd=tmp, env=dict(os.environ, FAILED_GATE=failed_gate, REFETCH_AT=str(refetch_at)),
+                                    cwd=tmp, env=dict(os.environ, FAILED_GATE=failed_gate, REFETCH_AT=str(refetch_at), LIST_ONLY="yes" if list_only else "no"),
                                     text=True, capture_output=True, timeout=10)
         print(f"gate={failed_gate or 'live-update-only'} missing={missing_check}: exit={result.returncode}\n{result.stdout}")
         return result
@@ -64,6 +69,13 @@ wait_log() {
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS  live update:", result.stdout)
         self.assertIn("0 failure(s)", result.stdout)
+        self.assertIn("change detected (1s)", result.stdout)
+        self.assertIn("tree refetched in 45s", result.stdout)
+
+    def test_blocked_by_list_alone_cannot_satisfy_tree_refetch(self):
+        result = self.smoke(refetch_at=2, list_only=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FAIL  live update:", result.stdout)
 
     def test_live_update_timeout_is_a_failure_again(self):
         result = self.smoke("live")

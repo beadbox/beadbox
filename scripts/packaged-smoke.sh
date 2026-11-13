@@ -7,8 +7,7 @@
 # attach to it and tauri-driver does not support macOS), so the app is checked
 # from the outside: its sidecar's log, process state, bd on the runner, and the
 # updater endpoint. Checks print PASS or FAIL with evidence; any FAIL exits 1.
-# The live-update check temporarily warns for a runner GUI-session defect
-# (beadbox-l6u); beadbox-zd0 restores its gate in 0.34.1.
+# The live-update gate allows the capped background refresh interval.
 #
 # Shared Macs (beadbox-449.5): the runner may be the QA Mac, with other copies
 # of Beadbox running. The script verifies the bundle's signature and team
@@ -138,11 +137,13 @@ else
   fail "handshake: no startup health call from the UI within 60s"
 fi
 
-# (c) Tree: the UI asked for the tree (bd list) and subscribed to live updates.
-if wait_log '\[bd\] list completed' 1 60; then
-  pass "tree: bd list served to the UI ($(elapsed))"
+# (c) Tree: a completed hierarchy build, not the blocked-by health read's
+# separate bd list. The success marker excludes getEpicsCore THREW lines.
+TREE_PATTERN='\[debug:cascade9\] getEpicsCore N=[0-9]+ db=.*smoke-workspace'
+if wait_log "$TREE_PATTERN" 1 60; then
+  pass "tree: epic hierarchy served to the UI ($(elapsed))"
 else
-  fail "tree: no bd list within 60s of launch"
+  fail "tree: no completed epic hierarchy within 60s of launch"
 fi
 if wait_log "\[change-detector\] starting for .*smoke-workspace" 1 30; then
   pass "subscription: live-update subscription started for the workspace"
@@ -171,14 +172,17 @@ wait_changes() { # count, timeout seconds
 }
 # Hidden windows admit a coalesced refresh every 30s. Allow that interval
 # plus scheduling/RPC margin; every other smoke deadline stays unchanged.
-lists_before=$(count_log '\[bd\] list completed')
+trees_before=$(count_log "$TREE_PATTERN")
 changes_before=$(count_changes)
+live_started=$(date +%s)
 (cd "$WS" && bd update "$TASK_B" --status in_progress >/dev/null)
 if wait_changes $((changes_before + 1)) 30 &&
-  wait_log '\[bd\] list completed' $((lists_before + 1)) 75; then
-  pass "live update: bd update → change detected → the UI refetched ($(elapsed))"
+  change_elapsed="$(($(date +%s) - live_started))s" &&
+  wait_log "$TREE_PATTERN" $((trees_before + 1)) 75; then
+  refetch_elapsed="$(($(date +%s) - live_started))s"
+  pass "live update: bd update → change detected (${change_elapsed}) → tree refetched in ${refetch_elapsed} ($(elapsed))"
 else
-  fail "live update: no change event within 30s or UI refetch within 75s of detection after 'bd update'"
+  fail "live update: no change event within 30s or tree refetch within 75s of detection after 'bd update'"
 fi
 
 screencapture -x "$OUT/app.png" 2>/dev/null || echo "note: screencapture unavailable on this runner"

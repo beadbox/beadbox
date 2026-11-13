@@ -381,8 +381,7 @@ describe("useWorkspaceLifecycle workspace switching", () => {
   })
 })
 
-// Advance long background-admission delays (the first starts just under 30s
-// after the preceding visible request); router/DOM/slow-load timers stay real.
+// Advance background-admission delays; router/DOM/slow-load timers stay real.
 function hiddenClock() {
   let now = Date.now()
   let id = 0
@@ -448,23 +447,27 @@ describe("tree refresh admission", () => {
     expect(getEpics.mock.calls.length).toBe(2)
   })
 
-  test("hidden changes wait for the cap and showing runs one catch-up", async () => {
+  test("the first hidden change after initial load fetches immediately", async () => {
     setWorkspaceCookie(alpha.id)
     const { seen, getEpics } = mountLifecycle()
     await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
     const count = getEpics.mock.calls.length
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    const clock = hiddenClock()
     try {
-      act(() => {
-        document.dispatchEvent(new Event("visibilitychange"))
-        for (let n = 0; n < 20; n++) void seen.current?.loadEpics()
+      act(hide)
+      await act(async () => {
+        void seen.current?.loadEpics()
       })
-      expect(getEpics.mock.calls.length).toBe(count)
-      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
-      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
-      await waitFor(() => expect(getEpics.mock.calls.length).toBe(count + 1))
+      expect(getEpics.mock.calls.length).toBe(count + 1)
+      expect(clock.pending()).toBe(0)
+      await clock.advance(60_000)
+      await act(async () => {
+        void seen.current?.loadEpics()
+      })
+      expect(getEpics.mock.calls.length).toBe(count + 2)
+      expect(clock.pending()).toBe(0)
     } finally {
-      Reflect.deleteProperty(document, "visibilityState")
+      clock.restore()
     }
   })
 
@@ -479,6 +482,10 @@ describe("tree refresh admission", () => {
     const clock = hiddenClock()
     try {
       act(hide)
+      await act(async () => {
+        void seen.current?.loadEpics()
+      })
+      expect(getEpics.mock.calls.length).toBe(count + 1)
       for (let interval = 1; interval <= 4; interval++) {
         act(() => {
           for (let n = 0; n < 50; n++) {
@@ -487,13 +494,13 @@ describe("tree refresh admission", () => {
           }
         })
         expect(clock.pending()).toBe(1)
-        expect(getEpics.mock.calls.length).toBe(count + interval - 1)
+        expect(getEpics.mock.calls.length).toBe(count + interval)
         await clock.advance(30_000)
         expect(seen.current?.epics[0]?.id).toBe(newest)
-        expect(getEpics.mock.calls.length).toBe(count + interval)
+        expect(getEpics.mock.calls.length).toBe(count + interval + 1)
       }
       await clock.advance(30_000)
-      expect(getEpics.mock.calls.length).toBe(count + 4)
+      expect(getEpics.mock.calls.length).toBe(count + 5)
       expect(clock.pending()).toBe(0)
     } finally {
       clock.restore()
@@ -540,7 +547,6 @@ describe("tree refresh admission", () => {
         hide()
         void seen.current?.loadEpics()
       })
-      await clock.advance(30_000)
       expect(getEpics.mock.calls.length).toBe(count + 1)
       act(() => {
         for (let n = 0; n < 50; n++) void seen.current?.loadEpics()
@@ -558,23 +564,26 @@ describe("tree refresh admission", () => {
     }
   })
 
-  test("a workspace opened while hidden loads within the background interval", async () => {
+  test("a workspace opened while hidden loads immediately without consuming the change cap", async () => {
     setWorkspaceCookie(alpha.id)
     const clock = hiddenClock()
     try {
       act(hide)
       const { seen, getEpics } = mountLifecycle()
       await waitFor(() => expect(seen.current?.currentWorkspace?.id).toBe(alpha.id))
-      expect(getEpics.mock.calls.length).toBe(0)
-      await clock.advance(30_000)
+      await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
       expect(getEpics.mock.calls.length).toBe(1)
-      expect(seen.current?.epics[0]?.id).toBe("alpha-1")
+      await act(async () => {
+        void seen.current?.loadEpics()
+      })
+      expect(getEpics.mock.calls.length).toBe(2)
+      expect(clock.pending()).toBe(0)
     } finally {
       clock.restore()
     }
   })
 
-  test("show runs exactly one catch-up even after background data caught up", async () => {
+  test("show does not refetch after background data caught up", async () => {
     setWorkspaceCookie(alpha.id)
     const { seen, getEpics } = mountLifecycle()
     await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
@@ -589,10 +598,10 @@ describe("tree refresh admission", () => {
       expect(getEpics.mock.calls.length).toBe(count + 1)
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
       await act(async () => document.dispatchEvent(new Event("visibilitychange")))
-      expect(getEpics.mock.calls.length).toBe(count + 2)
+      expect(getEpics.mock.calls.length).toBe(count + 1)
       await act(async () => document.dispatchEvent(new Event("visibilitychange")))
       await clock.advance(30_000)
-      expect(getEpics.mock.calls.length).toBe(count + 2)
+      expect(getEpics.mock.calls.length).toBe(count + 1)
     } finally {
       clock.restore()
     }
@@ -609,19 +618,69 @@ describe("tree refresh admission", () => {
         hide()
         void seen.current?.loadEpics()
       })
+      await act(async () => {})
+      act(() => {
+        void seen.current?.loadEpics()
+      })
+      expect(clock.pending()).toBe(1)
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
       await act(async () => document.dispatchEvent(new Event("visibilitychange")))
-      expect(getEpics.mock.calls.length).toBe(count + 1)
+      expect(getEpics.mock.calls.length).toBe(count + 2)
       expect(clock.pending()).toBe(0)
+      act(hide)
+      await act(async () => {
+        void seen.current?.loadEpics()
+      })
       act(() => {
-        hide()
         void seen.current?.loadEpics()
       })
       expect(clock.pending()).toBe(1)
       cleanup()
       expect(clock.pending()).toBe(0)
       await clock.advance(30_000)
-      expect(getEpics.mock.calls.length).toBe(count + 1)
+      expect(getEpics.mock.calls.length).toBe(count + 3)
+    } finally {
+      clock.restore()
+    }
+  })
+
+  test("show without any hidden change does not fetch", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle()
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
+    const count = getEpics.mock.calls.length
+    act(hide)
+    try {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      expect(getEpics.mock.calls.length).toBe(count)
+    } finally {
+      Reflect.deleteProperty(document, "visibilityState")
+    }
+  })
+
+  test("hidden workspace switch clears the old timer and dirty catch-up", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle()
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
+    const clock = hiddenClock()
+    try {
+      act(hide)
+      await act(async () => {
+        void seen.current?.loadEpics()
+      })
+      act(() => {
+        void seen.current?.loadEpics()
+      })
+      expect(clock.pending()).toBe(1)
+      await act(async () => setWorkspaceCookie(beta.id))
+      expect(seen.current?.epics[0]?.id).toBe("beta-1")
+      expect(clock.pending()).toBe(0)
+      const count = getEpics.mock.calls.length
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(count)
     } finally {
       clock.restore()
     }
@@ -652,7 +711,9 @@ describe("tree refresh admission", () => {
       expect(seen.current?.epics.some((e) => e.id === "stale-alpha")).toBe(false)
       await clock.advance(30_000)
       expect(pending.at(-1)?.db).toContain("beta")
-      await act(async () => pending.at(-1)?.resolve({ success: true, epics: [epic("latest-beta")] }))
+      await act(async () =>
+        pending.at(-1)?.resolve({ success: true, epics: [epic("latest-beta")] }),
+      )
       expect(seen.current?.epics[0]?.id).toBe("latest-beta")
     } finally {
       clock.restore()
