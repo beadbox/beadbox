@@ -1,3 +1,3 @@
 ## Fixed
 
-- Keep hidden boards fresh with a capped, non-overlapping background refresh every 30 seconds on live changes, with an immediate catch-up when the window returns to view.
+- Cut live-update refresh latency in backgrounded windows and keep hidden boards fresh with a capped 30-second refresh on ongoing changes, catching up immediately when the window returns to view.

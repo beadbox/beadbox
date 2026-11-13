@@ -36,6 +36,8 @@ import {
   _resetSubscriptionChangeCount,
   _setListenStderr,
   _setRuntimeCheck,
+  getSubscriptionListenerCount,
+  onSubscriptionChange,
   useChangeSubscription,
   useSubscriptionChangeSignal,
 } from "../lib/subscribe"
@@ -360,6 +362,38 @@ describe("useChangeSubscription", () => {
       subRoot.unmount()
     })
     await flushMicrotasks()
+  })
+
+  test("onSubscriptionChange fires synchronously on change events, ignores resets, and cleans up listener count", async () => {
+    await act(async () => {
+      root.render(createElement(HookHost, { workspacePath: "/ws/a" }))
+    })
+    await flushMicrotasks()
+
+    const baselineListeners = getSubscriptionListenerCount()
+    let calls = 0
+    const unsubscribe = onSubscriptionChange(() => {
+      calls += 1
+    })
+    expect(getSubscriptionListenerCount()).toBe(baselineListeners + 1)
+    expect(calls).toBe(0)
+
+    listenMocks.fire(formatLine("test-id-1", { type: "change", timestamp: 1 }))
+    expect(calls).toBe(1)
+
+    listenMocks.fire(formatLine("test-id-1", { type: "polling_error" }))
+    expect(calls).toBe(1)
+
+    _resetSubscriptionChangeCount()
+    expect(calls).toBe(1)
+
+    listenMocks.fire(formatLine("test-id-1", { type: "change", timestamp: 2 }))
+    expect(calls).toBe(2)
+
+    unsubscribe()
+    expect(getSubscriptionListenerCount()).toBe(baselineListeners)
+    listenMocks.fire(formatLine("test-id-1", { type: "change", timestamp: 3 }))
+    expect(calls).toBe(2)
   })
 
   // bb-x878: window.__BEADBOX__.subscription stamp coverage. The stamp is

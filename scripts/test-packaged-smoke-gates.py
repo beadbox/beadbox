@@ -69,6 +69,7 @@ wait_log() {
         result = self.smoke()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS  live update:", result.stdout)
+        self.assertIn("the UI refetched in ", result.stdout)
         self.assertNotIn("::warning::live update:", result.stdout)
         self.assertIn("0 failure(s)", result.stdout)
 

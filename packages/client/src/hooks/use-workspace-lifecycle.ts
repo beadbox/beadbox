@@ -93,12 +93,11 @@ function computeHiddenRefreshDelay(
   last: { key: string; at: number },
   key: string,
   now: number,
-  fromInFlight: boolean,
 ): number {
-  if (last.key === key && last.at > 0) {
+  if (last.at === 0) return 0
+  if (last.key === key) {
     const elapsed = now - last.at
-    if (elapsed < HIDDEN_REFRESH_INTERVAL_MS) return HIDDEN_REFRESH_INTERVAL_MS - elapsed
-    if (fromInFlight) return 0
+    return elapsed < HIDDEN_REFRESH_INTERVAL_MS ? HIDDEN_REFRESH_INTERVAL_MS - elapsed : 0
   }
   return HIDDEN_REFRESH_INTERVAL_MS
 }
@@ -159,6 +158,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   } | null>(null)
   const hiddenTimerRef = useRef<{
     key: string
+    dueAt: number
     timer: ReturnType<typeof setTimeout>
   } | null>(null)
   const lastRefreshStartRef = useRef<{ key: string; at: number }>({ key: "", at: 0 })
@@ -787,7 +787,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const latestFetchRef = useRef({ key: refreshKey, fetch: fetchEpics })
   latestFetchRef.current = { key: refreshKey, fetch: fetchEpics }
   const mountedRef = useRef(true)
-  const scheduleHiddenRefreshRef = useRef<(key: string, fromInFlight: boolean) => void>(() => {})
+  const scheduleHiddenRefreshRef = useRef<(key: string) => void>(() => {})
 
   const startRefreshFlight = useCallback(
     (key: string): Promise<void> => {
@@ -817,7 +817,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         if (!flight.dirty && !refreshDirtyRef.current) return
         refreshDirtyRef.current = true
         if (document.visibilityState === "hidden") {
-          scheduleHiddenRefreshRef.current(flight.key, true)
+          scheduleHiddenRefreshRef.current(flight.key)
           return
         }
         return startRefreshFlight(flight.key)
@@ -828,15 +828,22 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   )
 
   const scheduleHiddenRefresh = useCallback(
-    (key: string, fromInFlight: boolean) => {
-      if (hiddenTimerRef.current?.key === key) return
+    (key: string) => {
+      const now = hiddenRefreshClock.now()
+      if (hiddenTimerRef.current?.key === key) {
+        if (now < hiddenTimerRef.current.dueAt) return
+        // WebKit can hold background timers past their deadline; if a live IPC
+        // event arrives once the window is already due, dispatch immediately.
+        clearHiddenTimer()
+        void startRefreshFlight(key)
+        return
+      }
       clearHiddenTimer()
-      const delay = computeHiddenRefreshDelay(
-        lastRefreshStartRef.current,
-        key,
-        hiddenRefreshClock.now(),
-        fromInFlight,
-      )
+      const delay = computeHiddenRefreshDelay(lastRefreshStartRef.current, key, now)
+      if (delay <= 0) {
+        void startRefreshFlight(key)
+        return
+      }
       const timer = hiddenRefreshClock.schedule(() => {
         hiddenTimerRef.current = null
         if (!mountedRef.current || latestFetchRef.current.key !== key) return
@@ -848,7 +855,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         }
         void startRefreshFlight(key)
       }, delay)
-      hiddenTimerRef.current = { key, timer }
+      hiddenTimerRef.current = { key, dueAt: now + delay, timer }
     },
     [clearHiddenTimer, startRefreshFlight],
   )
@@ -864,7 +871,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         return Promise.resolve()
       }
       if (current) refreshInFlightRef.current = null
-      scheduleHiddenRefresh(request.key, false)
+      scheduleHiddenRefresh(request.key)
       return Promise.resolve()
     }
     clearHiddenTimer()
@@ -884,7 +891,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         return
       }
       if (refreshDirtyRef.current && !refreshInFlightRef.current) {
-        scheduleHiddenRefresh(latestFetchRef.current.key, false)
+        scheduleHiddenRefresh(latestFetchRef.current.key)
       }
     }
     document.addEventListener("visibilitychange", onVisibilityChange)

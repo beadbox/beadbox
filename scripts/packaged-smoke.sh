@@ -175,9 +175,12 @@ LIVE_UPDATE_TIMEOUT=60
 lists_before=$(count_log '\[bd\] list completed')
 changes_before=$(count_changes)
 (cd "$WS" && bd update "$TASK_B" --status in_progress >/dev/null)
+live_started=$(date +%s)
 if wait_changes $((changes_before + 1)) 30 &&
+  change_elapsed="$(($(date +%s) - live_started))s" &&
   wait_log '\[bd\] list completed' $((lists_before + 1)) "$LIVE_UPDATE_TIMEOUT"; then
-  pass "live update: bd update → change detected → the UI refetched ($(elapsed))"
+  refetch_elapsed="$(($(date +%s) - live_started))s"
+  pass "live update: bd update → change detected (${change_elapsed}) → the UI refetched in ${refetch_elapsed} ($(elapsed))"
 else
   fail "live update: no change event and refetch within ${LIVE_UPDATE_TIMEOUT}s of 'bd update'"
 fi

@@ -851,4 +851,45 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
     })
     expect(seen.current?.epics[0]?.id).toBe("deferred-follow-up")
   })
+
+  test("a hidden workspace quiet for at least one interval refreshes immediately on the first change and coalesces follow-ups", async () => {
+    const intervalMs = HIDDEN_REFRESH_INTERVAL_MS
+    const vclock = createVirtualClock()
+    _setHiddenRefreshClockForTests(vclock.clock)
+
+    let latestEpicId = "alpha-initial"
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle({
+      treeRequest: () => Promise.resolve({ success: true as const, epics: [epic(latestEpicId)] }),
+    })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
+
+    // Workspace stays quiet for >= HIDDEN_REFRESH_INTERVAL_MS, then hides.
+    await act(async () => {
+      await vclock.advance(intervalMs, flushMicrotasks)
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+      document.dispatchEvent(new Event("visibilitychange"))
+      await flushMicrotasks()
+    })
+    const callsBefore = getEpics.mock.calls.length
+
+    // First change after a quiet interval starts immediately (0ms timer wait);
+    // rapid follow-ups in the same window coalesce into one trailing refresh.
+    await act(async () => {
+      latestEpicId = "leading-hidden"
+      void seen.current?.loadEpics()
+      latestEpicId = "trailing-hidden"
+      for (let i = 0; i < 9; i++) void seen.current?.loadEpics()
+      await flushMicrotasks()
+    })
+    expect(getEpics.mock.calls.length).toBe(callsBefore + 1)
+    expect(seen.current?.epics[0]?.id).toBe("leading-hidden")
+
+    await act(async () => {
+      await vclock.advance(intervalMs, flushMicrotasks)
+      await flushMicrotasks()
+    })
+    expect(getEpics.mock.calls.length).toBe(callsBefore + 2)
+    expect(seen.current?.epics[0]?.id).toBe("trailing-hidden")
+  })
 })

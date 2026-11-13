@@ -283,6 +283,26 @@ describe("home page: a subscription change rebuilds the tree (beadbox-s5z)", () 
     expect(getBlocksDependencies.mock.calls.length).toBe(blocksBefore + 1)
     expect(screen.getByText("Title updated while hidden")).toBeTruthy()
   }, 20_000)
+
+  test("subscription change starts getEpics synchronously without waiting for passive useEffect scheduling", async () => {
+    setWorkspaceCookie(ws.id)
+    mountHome()
+    await waitFor(() => expect(screen.getByText("Title before")).toBeTruthy(), { timeout: 5_000 })
+    const before = getEpics.mock.calls.length
+
+    // In an off-console or occluded macOS WKWebView, WebKit throttles
+    // MessageChannel/setTimeout (which delays React's passive useEffect flush by
+    // up to 30s) while Tauri's onStderr IPC callback runs synchronously.
+    // Emitting outside act() mirrors onStderr: getEpics must be invoked in the
+    // same synchronous turn, before any scheduler timer fires.
+    treeTitle = "Title dispatched synchronously"
+    _emitChangeForTests()
+    expect(getEpics.mock.calls.length).toBe(before + 1)
+
+    await waitFor(() => expect(screen.getByText("Title dispatched synchronously")).toBeTruthy(), {
+      timeout: 5_000,
+    })
+  })
 })
 
 // Put the default rpc back after this file, so the mock installed above

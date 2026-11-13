@@ -20,7 +20,7 @@ import { safeCapture } from "@/lib/posthog-safe"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import { rpc } from "@/lib/rpc"
 import { sortEpics } from "@/lib/sort"
-import { useSubscriptionChangeSignal } from "@/lib/subscribe"
+import { onSubscriptionChange } from "@/lib/subscribe"
 
 import { DevConsole } from "@/components/dev-console"
 import { useBdHealth, useWorkspaceGate } from "@/components/startup-gate"
@@ -604,15 +604,17 @@ function BeadsEpicsViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.search])
 
-  // beadbox-s5z: bead-list auto-refresh on subscription change.
-  // bb-pgb0.1 (delete useWebSocket shim, commit 5580928) claimed real-time
-  // invalidation flows through queryClient.invalidateQueries + bumpSubscription
-  // Change per pm/systemdesign.md §3.2. home-page.tsx is neither a useQuery
-  // consumer nor a useSubscriptionChangeSignal consumer, so external bd writes
-  // never triggered loadEpics. Mirror the workspaces-page.tsx / activity-page.tsx
-  // pattern: read the signal, refetch on bump. Blocked-by health below tracks
-  // treeRevision from useWorkspaceLifecycle so it runs once per committed tree.
-  const subscriptionSignal = useSubscriptionChangeSignal()
+  // beadbox-s5z / beadbox-1jq: bead-list auto-refresh on subscription change.
+  // Subscribe directly via onSubscriptionChange instead of routing a counter
+  // through useSyncExternalStore + passive useEffect: in off-console or
+  // occluded macOS WKWebViews, WebKit aligns MessageChannel/setTimeout to 30s
+  // background ticks (delaying passive effects by ~24-30s) while Tauri's
+  // stderr IPC callback runs immediately. Direct dispatch starts getEpics in
+  // the same turn and skips re-rendering HomePage on suppressed hidden events.
+  // Blocked-by health below tracks treeRevision from useWorkspaceLifecycle so
+  // it runs once per committed tree.
+  const workspaceDbPathRef = useRef(currentWorkspace?.databasePath)
+  workspaceDbPathRef.current = currentWorkspace?.databasePath
 
   // Blocked-by health: the tree arrives with its blockedBy (the sidecar builds
   // both from one bd list). This effect no longer patches the tree: doing that
@@ -629,11 +631,14 @@ function BeadsEpicsViewer() {
   const [blocksDegraded, setBlocksDegraded] = useState<{ dbPath: string; message: string } | null>(null)
   const [blocksRetry, setBlocksRetry] = useState(0)
 
-  useEffect(() => {
-    if (subscriptionSignal === 0) return
-    if (!currentWorkspace?.databasePath) return
-    void loadEpics()
-  }, [subscriptionSignal, currentWorkspace?.databasePath, loadEpics])
+  useEffect(
+    () =>
+      onSubscriptionChange(() => {
+        if (!workspaceDbPathRef.current) return
+        void loadEpics()
+      }),
+    [loadEpics],
+  )
   useEffect(() => {
     if (isLoading || !currentWorkspace?.databasePath || epics.length === 0) return
 

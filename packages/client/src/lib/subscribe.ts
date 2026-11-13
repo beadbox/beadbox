@@ -115,6 +115,26 @@ export function useSubscriptionChangeSignal(): number {
   return useSyncExternalStore(subscribeChangeListener, getChangeSnapshot, getChangeSnapshot)
 }
 
+/**
+ * Subscribe directly to live `change` notifications without routing through
+ * React's passive `useEffect` scheduler. In off-console or occluded macOS
+ * WKWebViews, WebKit throttles `MessageChannel`/`setTimeout` to 30s alignment
+ * ticks while Tauri's `onStderr` IPC callback runs immediately; invoking a
+ * direct listener lets callers start RPC work in the same synchronous turn.
+ */
+export function onSubscriptionChange(listener: () => void): () => void {
+  let seen = subscriptionChangeCount
+  return subscribeChangeListener(() => {
+    const current = subscriptionChangeCount
+    if (current === 0 || current === seen) {
+      seen = current
+      return
+    }
+    seen = current
+    listener()
+  })
+}
+
 // bb-x878: subscription chain observability. Mirrors the bb-x0il
 // watcher / bb-aurr posthog / bb-1mos update stamp pattern. Operators
 // paste `window.__BEADBOX__.subscription` in DevTools and see whether
