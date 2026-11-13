@@ -1,0 +1,26 @@
+{
+  "id": "beadbox-light",
+  "name": "Beadbox Light",
+  "appearance": "light",
+  "colors": {
+    "background": "#ffffff",
+    "foreground": "#0a0a0a",
+    "card": "#ffffff",
+    "cardForeground": "#0a0a0a",
+    "popover": "#ffffff",
+    "popoverForeground": "#0a0a0a",
+    "primary": "#15803d",
+    "primaryForeground": "#ffffff",
+    "secondary": "#f5f5f5",
+    "secondaryForeground": "#171717",
+    "muted": "#f5f5f5",
+    "mutedForeground": "#737373",
+    "accent": "#f5f5f5",
+    "accentForeground": "#171717",
+    "destructive": "#e7000b",
+    "destructiveForeground": "#ffffff",
+    "border": "#e5e5e5",
+    "input": "#e5e5e5",
+    "ring": "#16a34a"
+  }
+}
