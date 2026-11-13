@@ -232,7 +232,7 @@ export function Header({
                   <span
                     className="absolute inset-0 rounded-md pointer-events-none"
                     style={{
-                      boxShadow: "0 0 0 2px var(--primary)",
+                      boxShadow: "0 0 0 2px var(--bb-primary)",
                       animation: "pulse-ring 2s ease-in-out infinite",
                     }}
                     aria-hidden="true"
