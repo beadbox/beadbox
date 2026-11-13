@@ -726,6 +726,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     const request = latestFetchRef.current
     const current = refreshInFlightRef.current
     if (current?.key === request.key) {
+      // The queued refresh may follow a local write. Keep its optimistic
+      // tree visible until the follow-up reads that write; the older reply
+      // must not publish data, errors, or cache entries from before it.
+      loadGenRef.current++
       current.dirty = true
       return current.promise ?? Promise.resolve()
     }

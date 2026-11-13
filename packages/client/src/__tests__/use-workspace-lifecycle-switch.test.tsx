@@ -515,3 +515,28 @@ test("a refresh arriving as the current drain settles is not lost", async () => 
   await act(async () => pending[1]({ success: true, epics: [epic("latest")] }))
   await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("latest"))
 })
+
+test("a local edit survives a superseded read and the coalesced follow-up still applies", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<(value: unknown) => void> = []
+  const { seen, getEpics } = mountLifecycle({
+    treeRequest: () => new Promise((resolve) => pending.push(resolve)),
+  })
+  await waitFor(() => expect(pending.length).toBe(1))
+  await act(async () => pending[0]({ success: true, epics: [epic("original")] }))
+  act(() => { void seen.current?.loadEpics() })
+  await waitFor(() => expect(pending.length).toBe(2))
+  act(() => {
+    seen.current?.setEpics([epic("edited")])
+    for (let n = 0; n < 20; n++) void seen.current?.loadEpics()
+  })
+  expect(getEpics).toHaveBeenCalledTimes(2)
+  await act(async () => pending[1]({ success: true, epics: [epic("original")] }))
+  await waitFor(() => expect(pending.length).toBe(3))
+  expect(seen.current?.epics[0]?.id).toBe("edited")
+  expect(seen.current?.isLoading).toBe(true)
+  await act(async () => pending[2]({ success: true, epics: [epic("persisted-edit")] }))
+  await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("persisted-edit"))
+  expect(seen.current?.isLoading).toBe(false)
+  expect(getEpics).toHaveBeenCalledTimes(3)
+})
