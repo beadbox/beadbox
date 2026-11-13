@@ -208,7 +208,7 @@ function rowContentKey(props: RowContentProps): string {
   return props.source ? projectBeadKey(props.source.id, props.bead.id) : props.bead.id
 }
 
-function sameRowState(bead: Bead, a: RowContentProps, b: RowContentProps): boolean {
+function sameRowState(a: RowContentProps, b: RowContentProps): boolean {
   const key = rowContentKey(a)
   if (key !== rowContentKey(b)) return false
   if (
@@ -217,14 +217,14 @@ function sameRowState(bead: Bead, a: RowContentProps, b: RowContentProps): boole
     (a.focusedItemId === key) !== (b.focusedItemId === key) ||
     (a.selectedBeadId === key) !== (b.selectedBeadId === key) ||
     (a.draggedBeadId === key) !== (b.draggedBeadId === key) ||
-    !!a.readState !== !!b.readState ||
-    !sameValue(a.readState?.[bead.id], b.readState?.[bead.id])
+    a.unreadReason !== b.unreadReason
   )
     return false
   return true
 }
 
-type RowContentProps = Omit<BeadRowProps, "sourceForBead"> & {
+type RowContentProps = Omit<BeadRowProps, "sourceForBead" | "readState"> & {
+  unreadReason: string | null
   getBead: () => Bead
   source?: BeadSource
   sourced: boolean
@@ -253,7 +253,7 @@ function sameRow(a: RowContentProps, b: RowContentProps): boolean {
     a.onToggleSelect === b.onToggleSelect &&
     a.getBead === b.getBead &&
     sameValue(a.bead, b.bead) &&
-    sameRowState(b.bead, a, b)
+    sameRowState(a, b)
   )
 }
 
@@ -324,7 +324,7 @@ const BeadRowContent = memo(function BeadRowContent({
   focusedItemId,
   onFocusItem,
   selectedBeadId,
-  readState,
+  unreadReason,
   selectedIds,
   onToggleSelect,
 }: RowContentProps) {
@@ -520,12 +520,12 @@ const BeadRowContent = memo(function BeadRowContent({
 
         {/* Row 2: title + dependency chip + status + priority + assignee */}
         <div className="bead-row-title flex-1 text-left min-w-0 flex items-center gap-2 overflow-hidden">
-          {readState && isBeadUnread(bead, readState) ? (
+          {unreadReason ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-blue-400" />
               </TooltipTrigger>
-              <TooltipContent>{getUnreadReason(bead, readState) ?? "Unread"}</TooltipContent>
+              <TooltipContent>{unreadReason}</TooltipContent>
             </Tooltip>
           ) : (
             <span className="shrink-0 w-1.5 h-1.5" />
@@ -648,7 +648,11 @@ function BeadRow(props: BeadRowProps) {
   const getBead = useCallback(() => latestBead.current, [])
   // Keep full trees and lookup closures out of memoized snapshots. The latest
   // bead stays in the ref above for click handlers, without retaining history.
-  const { bead, sourceForBead, ...rowProps } = props
+  const { bead, sourceForBead, readState, ...rowProps } = props
+  // A skipped row render keeps its old props. Retain only this row's display
+  // value rather than pinning a whole-board read-state generation per row.
+  const unreadReason =
+    readState && isBeadUnread(bead, readState) ? (getUnreadReason(bead, readState) ?? "Unread") : null
   const { children, ...fields } = bead
   // Refresh-driven clock output must stay outside the controls' memo boundary.
   const due = bead.dueAt ? describeDueAt(bead.dueAt) : null
@@ -663,6 +667,7 @@ function BeadRow(props: BeadRowProps) {
       <BeadRowContent
         {...rowProps}
         bead={fields}
+        unreadReason={unreadReason}
         source={sourceForBead?.(bead)}
         sourced={!!sourceForBead}
         hasChildren={!props.flat && children && children.length > 0}

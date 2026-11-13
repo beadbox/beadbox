@@ -127,3 +127,27 @@ test("aggregate source lookup replacement does not render unchanged project rows
     rowRenders.mockRestore()
   }
 })
+
+test("read-state refreshes update only the row whose unread display changed", () => {
+  const rowRenders = spyOn(badgeConfig, "getStatusConfig")
+  try {
+    const rows = [bead("first", 1), bead("second", 2)]
+    const props = { beads: rows, epicId: "epic", onBeadClick: () => {} }
+    const view = render(<BeadTable {...props} readState={{}} />)
+    const unreadDot = (id: string) =>
+      view.container.querySelector(`[data-item-id="${id}"] .bg-blue-400`)
+    expect(unreadDot("first")).not.toBeNull()
+    expect(unreadDot("second")).not.toBeNull()
+    rowRenders.mockClear()
+    const readState = { first: { viewedAt: "2030-01-01T00:00:00.000Z", commentCount: 0 } }
+    view.rerender(<BeadTable {...props} readState={readState} />)
+    expect(unreadDot("first")).toBeNull()
+    expect(unreadDot("second")).not.toBeNull()
+    expect(rowRenders.mock.calls.map(([status]) => status)).toEqual(["first"])
+    rowRenders.mockClear()
+    view.rerender(<BeadTable {...props} readState={{ first: { ...readState.first } }} />)
+    expect(rowRenders).not.toHaveBeenCalled()
+  } finally {
+    rowRenders.mockRestore()
+  }
+})
