@@ -65,16 +65,84 @@ const WORKSPACE_LOAD_TIMEOUT_MS = 15_000
  */
 export const HIDDEN_REFRESH_INTERVAL_MS = 30_000
 
+export type HiddenRefreshTimerHandle = ReturnType<typeof globalThis.setTimeout> | (() => void)
+
 export interface HiddenRefreshClock {
   now: () => number
-  schedule: (cb: () => void, ms: number) => ReturnType<typeof globalThis.setTimeout>
-  cancel: (id: ReturnType<typeof globalThis.setTimeout>) => void
+  schedule: (cb: () => void, ms: number) => HiddenRefreshTimerHandle
+  cancel: (id: HiddenRefreshTimerHandle) => void
+}
+
+type TauriInvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
+
+function getTauriInvoke(): TauriInvokeFn | null {
+  if (typeof window === "undefined") return null
+  const internals = (window as unknown as { __TAURI_INTERNALS__?: { invoke?: unknown } })
+    .__TAURI_INTERNALS__
+  return typeof internals?.invoke === "function" ? (internals.invoke as TauriInvokeFn) : null
+}
+
+function isHostSleepElapsed(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { slept?: unknown }).slept === true
+  )
 }
 
 const defaultHiddenRefreshClock: HiddenRefreshClock = {
   now: () => Date.now(),
-  schedule: (cb, ms) => globalThis.setTimeout(cb, ms),
-  cancel: (id) => globalThis.clearTimeout(id),
+  schedule: (cb, ms) => {
+    let settled = false
+    const targetAt = Date.now() + Math.max(0, ms)
+    const detachWake = () => {
+      if (typeof document !== "undefined") {
+        document.removeEventListener("beadbox:hidden-wake", onHostWake)
+      }
+    }
+    const finish = () => {
+      if (settled) return
+      settled = true
+      detachWake()
+      globalThis.clearTimeout(domTimer)
+      cb()
+    }
+    function onHostWake() {
+      if (Date.now() + 50 >= targetAt) finish()
+    }
+    const domTimer = globalThis.setTimeout(finish, ms)
+    const invoke = getTauriInvoke()
+    if (invoke) {
+      if (typeof document !== "undefined") {
+        document.addEventListener("beadbox:hidden-wake", onHostWake)
+      }
+      // macOS WebKit suspends WKWebView DOMTimers past 60s when the window is
+      // hidden or off-console; delegate the deadline to the Rust host process.
+      void invoke("sleep_ms", { ms: Math.max(0, Math.ceil(ms)) })
+        .then((res) => {
+          if (isHostSleepElapsed(res)) finish()
+        })
+        .catch(() => {
+          // Non-desktop or partial Tauri test mocks fall back to domTimer.
+        })
+    }
+    return () => {
+      if (settled) return
+      settled = true
+      detachWake()
+      globalThis.clearTimeout(domTimer)
+      if (invoke) {
+        void invoke("cancel_sleep").catch(() => {})
+      }
+    }
+  },
+  cancel: (handle) => {
+    if (typeof handle === "function") {
+      handle()
+      return
+    }
+    globalThis.clearTimeout(handle)
+  },
 }
 
 let hiddenRefreshClock: HiddenRefreshClock = defaultHiddenRefreshClock
@@ -159,7 +227,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const hiddenTimerRef = useRef<{
     key: string
     dueAt: number
-    timer: ReturnType<typeof setTimeout>
+    timer: HiddenRefreshTimerHandle
   } | null>(null)
   const lastRefreshStartRef = useRef<{ key: string; at: number }>({ key: "", at: 0 })
   const clearHiddenTimer = useCallback(() => {

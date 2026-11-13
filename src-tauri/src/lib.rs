@@ -125,6 +125,91 @@ fn log_unified(message: &str) {
     }
 }
 
+// beadbox-1jq: macOS WebKit suspends WKWebView DOMTimers for >60s when the
+// window is hidden or in an off-console GUI session. A single-slot cancellable
+// sleep in the Rust host process keeps hidden-window refresh coalescing
+// punctual without leaving more than one blocking wait alive at a time.
+#[cfg(not(target_os = "ios"))]
+const MAX_HIDDEN_SLEEP_MS: u64 = 60_000;
+
+#[cfg(not(target_os = "ios"))]
+fn clamp_hidden_sleep_ms(ms: u64) -> u64 {
+    ms.min(MAX_HIDDEN_SLEEP_MS)
+}
+
+#[cfg(not(target_os = "ios"))]
+#[derive(Clone, Default)]
+struct HiddenSleepSlot {
+    inner: std::sync::Arc<(std::sync::Mutex<u64>, std::sync::Condvar)>,
+}
+
+#[cfg(not(target_os = "ios"))]
+impl HiddenSleepSlot {
+    fn begin(&self) -> Option<u64> {
+        let mut gen = self.inner.0.lock().ok()?;
+        *gen = gen.wrapping_add(1);
+        self.inner.1.notify_all();
+        Some(*gen)
+    }
+
+    fn wait(&self, my_gen: u64, ms: u64) -> bool {
+        let bounded = clamp_hidden_sleep_ms(ms);
+        if bounded == 0 {
+            return self.inner.0.lock().map(|g| *g == my_gen).unwrap_or(false);
+        }
+        let Ok(guard) = self.inner.0.lock() else {
+            return false;
+        };
+        if *guard != my_gen {
+            return false;
+        }
+        let Ok((guard, timeout)) = self.inner.1.wait_timeout_while(
+            guard,
+            std::time::Duration::from_millis(bounded),
+            |gen| *gen == my_gen,
+        ) else {
+            return false;
+        };
+        timeout.timed_out() && *guard == my_gen
+    }
+
+    fn cancel(&self) {
+        let _ = self.begin();
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+#[derive(serde::Serialize)]
+struct HiddenSleepOutcome {
+    slept: bool,
+}
+
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+async fn sleep_ms(
+    window: tauri::WebviewWindow,
+    slot: tauri::State<'_, HiddenSleepSlot>,
+    ms: u64,
+) -> Result<HiddenSleepOutcome, ()> {
+    let my_gen = slot.begin().ok_or(())?;
+    let slot_clone = slot.inner().clone();
+    let slept = tauri::async_runtime::spawn_blocking(move || slot_clone.wait(my_gen, ms))
+        .await
+        .unwrap_or(false);
+    if slept {
+        // Poke the WebContent XPC runloop via evaluateJavaScript (same path as
+        // Linux's tauri-refresh event) so hidden WKWebViews wake immediately.
+        let _ = window.eval("document.dispatchEvent(new CustomEvent('beadbox:hidden-wake'))");
+    }
+    Ok(HiddenSleepOutcome { slept })
+}
+
+#[cfg(not(target_os = "ios"))]
+#[tauri::command]
+fn cancel_sleep(slot: tauri::State<'_, HiddenSleepSlot>) {
+    slot.cancel();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // ── Desktop: kkrpc bridge to the Bun sidecar via tauri-plugin-js ──
@@ -175,6 +260,7 @@ pub fn run() {
         };
 
         let app = builder
+            .manage(HiddenSleepSlot::default())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_process::init())
             // kkrpc bridge between WebView and the Bun sidecar (P4.1).
@@ -186,6 +272,8 @@ pub fn run() {
             // (hooks/use-update-downloader.ts).
             .plugin(tauri_plugin_updater::Builder::new().build())
             .invoke_handler(tauri::generate_handler![
+                sleep_ms,
+                cancel_sleep,
                 telemetry_id::get_stable_id,
                 telemetry_id::get_username_prefix,
                 credentials::get_credential,
@@ -521,5 +609,49 @@ mod tests {
             stopped_page_url(&u).as_str(),
             "tauri://localhost/index.html?sidecar=1&stopped=1"
         );
+    }
+
+    // ─── HiddenSleepSlot (beadbox-1jq) ───────────────────────────────────
+
+    #[test]
+    fn hidden_sleep_clamps_to_sixty_seconds() {
+        assert_eq!(clamp_hidden_sleep_ms(0), 0);
+        assert_eq!(clamp_hidden_sleep_ms(30_000), 30_000);
+        assert_eq!(clamp_hidden_sleep_ms(60_000), 60_000);
+        assert_eq!(clamp_hidden_sleep_ms(120_000), 60_000);
+    }
+
+    #[test]
+    fn hidden_sleep_slot_elapses_when_uncancelled() {
+        let slot = HiddenSleepSlot::default();
+        let g0 = slot.begin().unwrap();
+        assert!(slot.wait(g0, 0));
+        let g1 = slot.begin().unwrap();
+        assert!(slot.wait(g1, 15));
+    }
+
+    #[test]
+    fn hidden_sleep_slot_cancel_wakes_waiter_immediately() {
+        let slot = HiddenSleepSlot::default();
+        let gen = slot.begin().unwrap();
+        let waiter_slot = slot.clone();
+        let started = Instant::now();
+        let handle = std::thread::spawn(move || waiter_slot.wait(gen, 5_000));
+        std::thread::sleep(Duration::from_millis(15));
+        slot.cancel();
+        assert!(!handle.join().unwrap());
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn hidden_sleep_slot_newer_generation_supersedes_prior_waiter() {
+        let slot = HiddenSleepSlot::default();
+        let first_gen = slot.begin().unwrap();
+        let waiter_slot = slot.clone();
+        let handle = std::thread::spawn(move || waiter_slot.wait(first_gen, 5_000));
+        std::thread::sleep(Duration::from_millis(15));
+        let second_gen = slot.begin().unwrap();
+        assert!(!handle.join().unwrap());
+        assert!(slot.wait(second_gen, 10));
     }
 }

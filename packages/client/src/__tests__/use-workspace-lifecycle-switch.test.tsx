@@ -892,4 +892,102 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
     expect(getEpics.mock.calls.length).toBe(callsBefore + 2)
     expect(seen.current?.epics[0]?.id).toBe("trailing-hidden")
   })
+
+  test("default hidden clock uses Tauri host sleep_ms when WebKit suspends hidden DOMTimers, and cancels on show", async () => {
+    _resetHiddenRefreshClockForTests()
+
+    let latestEpicId = "alpha-initial"
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle({
+      treeRequest: () => Promise.resolve({ success: true as const, epics: [epic(latestEpicId)] }),
+    })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
+
+    const realSetTimeout = globalThis.setTimeout
+    const sleepCalls: Array<{
+      ms: number
+      resolve: (value: { slept: boolean }) => void
+    }> = []
+    let cancelCalls = 0
+    const tauriWin = window as unknown as {
+      __TAURI_INTERNALS__?: {
+        invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
+      }
+    }
+
+    try {
+      tauriWin.__TAURI_INTERNALS__ = {
+        invoke: (cmd: string, args?: Record<string, unknown>) => {
+          if (cmd === "sleep_ms") {
+            return new Promise<{ slept: boolean }>((resolve) => {
+              sleepCalls.push({ ms: Number(args?.ms ?? 0), resolve })
+            })
+          }
+          if (cmd === "cancel_sleep") {
+            cancelCalls += 1
+            return Promise.resolve()
+          }
+          return Promise.resolve(undefined)
+        },
+      }
+
+      // Simulate macOS off-console / hidden WKWebView suspending >=1s DOMTimers.
+      globalThis.setTimeout = ((cb: TimerHandler, ms?: number, ...rest: unknown[]) => {
+        if (document.visibilityState === "hidden" && (ms ?? 0) >= 1_000) {
+          return realSetTimeout(() => {}, 60_000)
+        }
+        return realSetTimeout(cb, ms, ...rest)
+      }) as typeof globalThis.setTimeout
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"))
+      })
+
+      const callsBefore = getEpics.mock.calls.length
+      latestEpicId = "from-tauri-host-sleep"
+      act(() => {
+        void seen.current?.loadEpics()
+      })
+
+      expect(sleepCalls.length).toBe(1)
+      expect(sleepCalls[0]?.ms).toBeGreaterThan(0)
+      expect(sleepCalls[0]?.ms).toBeLessThanOrEqual(HIDDEN_REFRESH_INTERVAL_MS)
+      expect(getEpics.mock.calls.length).toBe(callsBefore)
+
+      // Host timer elapses while WKWebView DOMTimer remains suspended -> refreshes once.
+      await act(async () => {
+        sleepCalls[0]?.resolve({ slept: true })
+        await flushMicrotasks()
+      })
+      expect(getEpics.mock.calls.length).toBe(callsBefore + 1)
+      expect(seen.current?.epics[0]?.id).toBe("from-tauri-host-sleep")
+
+      // Queue another hidden refresh, then show window -> cancels host sleep + 1 catch-up.
+      latestEpicId = "visible-catch-up"
+      act(() => {
+        void seen.current?.loadEpics()
+      })
+      expect(sleepCalls.length).toBe(2)
+
+      await act(async () => {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+        document.dispatchEvent(new Event("visibilitychange"))
+        await flushMicrotasks()
+      })
+      expect(cancelCalls).toBeGreaterThanOrEqual(1)
+      expect(getEpics.mock.calls.length).toBe(callsBefore + 2)
+      expect(seen.current?.epics[0]?.id).toBe("visible-catch-up")
+
+      // Late resolution of cancelled host sleep is a no-op.
+      await act(async () => {
+        sleepCalls[1]?.resolve({ slept: false })
+        await flushMicrotasks()
+      })
+      expect(getEpics.mock.calls.length).toBe(callsBefore + 2)
+    } finally {
+      globalThis.setTimeout = realSetTimeout
+      delete tauriWin.__TAURI_INTERNALS__
+    }
+  })
 })
