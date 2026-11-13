@@ -10,7 +10,7 @@ SCRIPT = Path(__file__).with_name("packaged-smoke.sh")
 
 
 class SmokeGates(unittest.TestCase):
-    def smoke(self, failed_gate="", missing_check=False):
+    def smoke(self, failed_gate="", missing_check=False, refetch_at=30):
         text = SCRIPT.read_text()
         reporting = text[text.index("failures=0"):text.index("# Wait until `pattern`")]
         checks = text[text.index("# (a) The sidecar booted."):text.index('screencapture -x')]
@@ -22,14 +22,24 @@ WS=$PWD
 LOG=$PWD/sidecar.log
 TASK_B=sm-task
 : > "$LOG"
-bd() { return 0; }
+bd() { touch "$WS/written"; }
 sleep() { :; }
-count_log() { echo 0; }
+count_log() {
+  case "$1" in
+    *SUBSCRIPTION*initial*) echo 0 ;;
+    *SUBSCRIPTION*) if [ -e "$WS/written" ]; then echo 1; else echo 0; fi ;;
+    *) echo 0 ;;
+  esac
+}
 wait_log() {
   case "$1" in
     *beadbox-sidecar*) gate=sidecar ;;
     *ws:health*) gate=handshake ;;
-    *'list completed'*) gate=tree ;;
+    *'list completed'*)
+      if [ "$2" -gt 0 ] && [ "$3" -ne 60 ]; then
+        [ "$FAILED_GATE" != live ] && [ "$3" -ge "$REFETCH_AT" ]; return
+      fi
+      gate=tree ;;
     *change-detector*) gate=subscription ;;
     *) return 1 ;;
   esac
@@ -44,27 +54,30 @@ wait_log() {
         with tempfile.TemporaryDirectory(prefix="smoke-gates-") as tmp:
             result = subprocess.run(["bash", "-uo", "pipefail", "-c",
                                      reporting + setup + checks + other_checks + '\n' + finish],
-                                    cwd=tmp, env=dict(os.environ, FAILED_GATE=failed_gate),
+                                    cwd=tmp, env=dict(os.environ, FAILED_GATE=failed_gate, REFETCH_AT=str(refetch_at)),
                                     text=True, capture_output=True, timeout=10)
         print(f"gate={failed_gate or 'live-update-only'} missing={missing_check}: exit={result.returncode}\n{result.stdout}")
         return result
 
-    def test_hidden_live_update_warns_but_does_not_fail_smoke(self):
-        result = self.smoke()
+    def test_hidden_refetch_after_one_interval_passes(self):
+        result = self.smoke(refetch_at=45)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("::warning::live update:", result.stdout)
-        self.assertIn("harness defect", result.stdout)
-        self.assertIn("not on the console", result.stdout)
-        self.assertIn("beadbox-l6u", result.stdout)
+        self.assertIn("PASS  live update:", result.stdout)
         self.assertIn("0 failure(s)", result.stdout)
 
-    def test_still_gating_failures_remain_red_with_live_update_warning(self):
+    def test_live_update_timeout_is_a_failure_again(self):
+        result = self.smoke("live")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FAIL  live update:", result.stdout)
+        self.assertNotIn("::warning::live update:", result.stdout)
+
+    def test_other_gates_still_fail(self):
         for gate in ("sidecar", "handshake", "tree", "subscription"):
             with self.subTest(gate=gate):
                 result = self.smoke(gate)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("FAIL  " + gate + ":", result.stdout)
-                self.assertIn("::warning::live update:", result.stdout)
+                self.assertIn("PASS  live update:", result.stdout)
                 self.assertIn("1 failure(s)", result.stdout)
 
     def test_unreported_check_still_fails_smoke(self):

@@ -169,17 +169,16 @@ wait_changes() { # count, timeout seconds
   done
   return 1
 }
+# Hidden windows admit a coalesced refresh every 30s. Allow that interval
+# plus scheduling/RPC margin; every other smoke deadline stays unchanged.
 lists_before=$(count_log '\[bd\] list completed')
 changes_before=$(count_changes)
 (cd "$WS" && bd update "$TASK_B" --status in_progress >/dev/null)
 if wait_changes $((changes_before + 1)) 30 &&
-  wait_log '\[bd\] list completed' $((lists_before + 1)) 30; then
+  wait_log '\[bd\] list completed' $((lists_before + 1)) 75; then
   pass "live update: bd update → change detected → the UI refetched ($(elapsed))"
 else
-  # Temporary harness exception: the runner GUI session is not on the console.
-  # Hidden windows correctly pause refreshes. Restore the gate in beadbox-zd0.
-  echo "::warning::live update: no change event and refetch within 30s of 'bd update'; harness defect: the runner GUI session is not on the console, so its window is hidden and hidden windows do not refresh (beadbox-l6u; restore gating in beadbox-zd0 / 0.34.1)"
-  reported=$((reported + 1))
+  fail "live update: no change event within 30s or UI refetch within 75s of detection after 'bd update'"
 fi
 
 screencapture -x "$OUT/app.png" 2>/dev/null || echo "note: screencapture unavailable on this runner"

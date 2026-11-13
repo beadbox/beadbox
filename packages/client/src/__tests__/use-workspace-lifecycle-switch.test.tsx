@@ -8,7 +8,7 @@
 //      its cached tree immediately — hasExistingDataRef stays true, which is
 //      what suppresses home-page's skeleton while the refresh runs.
 
-import { afterEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -381,6 +381,54 @@ describe("useWorkspaceLifecycle workspace switching", () => {
   })
 })
 
+// Advance long background-admission delays (the first starts just under 30s
+// after the preceding visible request); router/DOM/slow-load timers stay real.
+function hiddenClock() {
+  let now = Date.now()
+  let id = 0
+  const timers = new Map<number, { due: number; run: () => void }>()
+  const realSet = globalThis.setTimeout
+  const realClear = globalThis.clearTimeout
+  const date = spyOn(Date, "now").mockImplementation(() => now)
+  // Plain wrappers keep Testing Library from mistaking this selective clock
+  // for Jest's fake timers (it inspects setTimeout._isMockFunction).
+  globalThis.setTimeout = ((run: () => void, ms: number, ...args: unknown[]) => {
+    if (ms < 20_000 || ms > 30_000) return realSet(run, ms, ...args)
+    const key = --id
+    timers.set(key, { due: now + ms, run })
+    return key
+  }) as typeof setTimeout
+  globalThis.clearTimeout = ((key: number) => {
+    if (!timers.delete(key)) realClear(key)
+  }) as typeof clearTimeout
+  return {
+    pending: () => timers.size,
+    advance: async (ms: number) => {
+      now += ms
+      await act(async () => {
+        for (const [key, timer] of [...timers]) {
+          if (timer.due <= now) {
+            timers.delete(key)
+            timer.run()
+          }
+        }
+      })
+    },
+    restore: () => {
+      cleanup()
+      globalThis.setTimeout = realSet
+      globalThis.clearTimeout = realClear
+      date.mockRestore()
+      Reflect.deleteProperty(document, "visibilityState")
+    },
+  }
+}
+
+function hide() {
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+  document.dispatchEvent(new Event("visibilitychange"))
+}
+
 describe("tree refresh admission", () => {
   test("a slow refresh burst admits one request and one latest follow-up", async () => {
     setWorkspaceCookie(alpha.id)
@@ -400,7 +448,7 @@ describe("tree refresh admission", () => {
     expect(getEpics.mock.calls.length).toBe(2)
   })
 
-  test("hidden changes fetch nothing and showing runs one catch-up", async () => {
+  test("hidden changes wait for the cap and showing runs one catch-up", async () => {
     setWorkspaceCookie(alpha.id)
     const { seen, getEpics } = mountLifecycle()
     await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
@@ -417,6 +465,197 @@ describe("tree refresh admission", () => {
       await waitFor(() => expect(getEpics.mock.calls.length).toBe(count + 1))
     } finally {
       Reflect.deleteProperty(document, "visibilityState")
+    }
+  })
+
+  test("hidden bursts refresh every 30 seconds with latest data and no idle polling", async () => {
+    setWorkspaceCookie(alpha.id)
+    let newest = "initial"
+    const { seen, getEpics } = mountLifecycle({
+      treeRequest: async () => ({ success: true, epics: [epic(newest)] }),
+    })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("initial"))
+    const count = getEpics.mock.calls.length
+    const clock = hiddenClock()
+    try {
+      act(hide)
+      for (let interval = 1; interval <= 4; interval++) {
+        act(() => {
+          for (let n = 0; n < 50; n++) {
+            newest = `latest-${interval}-${n}`
+            void seen.current?.loadEpics()
+          }
+        })
+        expect(clock.pending()).toBe(1)
+        expect(getEpics.mock.calls.length).toBe(count + interval - 1)
+        await clock.advance(30_000)
+        expect(seen.current?.epics[0]?.id).toBe(newest)
+        expect(getEpics.mock.calls.length).toBe(count + interval)
+      }
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(count + 4)
+      expect(clock.pending()).toBe(0)
+    } finally {
+      clock.restore()
+    }
+  })
+
+  test("a slow hidden request never overlaps and coalesces a latest follow-up", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics, release } = mountLifecycle({ deferAfter: 1 })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
+    const count = getEpics.mock.calls.length
+    const clock = hiddenClock()
+    try {
+      act(() => {
+        hide()
+        void seen.current?.loadEpics()
+      })
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(count + 1)
+      act(() => {
+        for (let n = 0; n < 50; n++) void seen.current?.loadEpics()
+      })
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(count + 1)
+      await act(async () => release())
+      // Already waited an interval: one latest follow-up can now start.
+      expect(getEpics.mock.calls.length).toBe(count + 2)
+      await act(async () => release())
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(count + 2)
+    } finally {
+      clock.restore()
+    }
+  })
+
+  test("a hidden follow-up waits out the cap even when the request finishes early", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics, release } = mountLifecycle({ deferAfter: 1 })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
+    const count = getEpics.mock.calls.length
+    const clock = hiddenClock()
+    try {
+      act(() => {
+        hide()
+        void seen.current?.loadEpics()
+      })
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(count + 1)
+      act(() => {
+        for (let n = 0; n < 50; n++) void seen.current?.loadEpics()
+      })
+      await act(async () => release())
+      expect(getEpics.mock.calls.length).toBe(count + 1)
+      expect(clock.pending()).toBe(1)
+      await clock.advance(29_999)
+      expect(getEpics.mock.calls.length).toBe(count + 1)
+      await clock.advance(1)
+      expect(getEpics.mock.calls.length).toBe(count + 2)
+      await act(async () => release())
+    } finally {
+      clock.restore()
+    }
+  })
+
+  test("a workspace opened while hidden loads within the background interval", async () => {
+    setWorkspaceCookie(alpha.id)
+    const clock = hiddenClock()
+    try {
+      act(hide)
+      const { seen, getEpics } = mountLifecycle()
+      await waitFor(() => expect(seen.current?.currentWorkspace?.id).toBe(alpha.id))
+      expect(getEpics.mock.calls.length).toBe(0)
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(1)
+      expect(seen.current?.epics[0]?.id).toBe("alpha-1")
+    } finally {
+      clock.restore()
+    }
+  })
+
+  test("show runs exactly one catch-up even after background data caught up", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle()
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
+    const count = getEpics.mock.calls.length
+    const clock = hiddenClock()
+    try {
+      act(() => {
+        hide()
+        void seen.current?.loadEpics()
+      })
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(count + 1)
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      expect(getEpics.mock.calls.length).toBe(count + 2)
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(count + 2)
+    } finally {
+      clock.restore()
+    }
+  })
+
+  test("show cancels the hidden timer and unmount leaves no refresh behind", async () => {
+    setWorkspaceCookie(alpha.id)
+    const { seen, getEpics } = mountLifecycle()
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
+    const count = getEpics.mock.calls.length
+    const clock = hiddenClock()
+    try {
+      act(() => {
+        hide()
+        void seen.current?.loadEpics()
+      })
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      expect(getEpics.mock.calls.length).toBe(count + 1)
+      expect(clock.pending()).toBe(0)
+      act(() => {
+        hide()
+        void seen.current?.loadEpics()
+      })
+      expect(clock.pending()).toBe(1)
+      cleanup()
+      expect(clock.pending()).toBe(0)
+      await clock.advance(30_000)
+      expect(getEpics.mock.calls.length).toBe(count + 1)
+    } finally {
+      clock.restore()
+    }
+  })
+
+  test("a hidden workspace switch rejects an old background reply", async () => {
+    setWorkspaceCookie(alpha.id)
+    const pending: Array<{ db?: string; resolve: (value: unknown) => void }> = []
+    let defer = false
+    const { seen } = mountLifecycle({
+      treeRequest: (db) =>
+        defer
+          ? new Promise((resolve) => pending.push({ db, resolve }))
+          : Promise.resolve({ success: true, epics: [epic("alpha-1")] }),
+    })
+    await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-1"))
+    const clock = hiddenClock()
+    try {
+      defer = true
+      act(() => {
+        hide()
+        void seen.current?.loadEpics()
+      })
+      await clock.advance(30_000)
+      expect(pending.length).toBe(1)
+      await act(async () => setWorkspaceCookie(beta.id))
+      await act(async () => pending[0].resolve({ success: true, epics: [epic("stale-alpha")] }))
+      expect(seen.current?.epics.some((e) => e.id === "stale-alpha")).toBe(false)
+      await clock.advance(30_000)
+      expect(pending.at(-1)?.db).toContain("beta")
+      await act(async () => pending.at(-1)?.resolve({ success: true, epics: [epic("latest-beta")] }))
+      expect(seen.current?.epics[0]?.id).toBe("latest-beta")
+    } finally {
+      clock.restore()
     }
   })
 

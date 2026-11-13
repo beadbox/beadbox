@@ -720,14 +720,36 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     promise: Promise<void> | null
   } | null>(null)
   const mountedRef = useRef(true)
+  // One trailing timer and one dirty bit bound hidden work, including startup.
+  // 30s keeps background data useful at at most two refresh starts per minute.
+  const hiddenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hiddenNextStartRef = useRef<number | null>(null)
+  const wasHiddenRef = useRef(document.visibilityState === "hidden")
   const loadEpics = useCallback((): Promise<void> => {
     refreshDirtyRef.current = true
-    if (document.visibilityState === "hidden") return Promise.resolve()
+    if (!mountedRef.current) return Promise.resolve()
     const request = latestFetchRef.current
     const current = refreshInFlightRef.current
     if (current?.key === request.key) {
       current.dirty = true
       return current.promise ?? Promise.resolve()
+    }
+    if (document.visibilityState === "hidden") {
+      hiddenNextStartRef.current ??= Date.now() + 30_000
+      const delay = hiddenNextStartRef.current - Date.now()
+      if (delay > 0) {
+        if (hiddenTimerRef.current === null) {
+          hiddenTimerRef.current = setTimeout(() => {
+            hiddenTimerRef.current = null
+            if (mountedRef.current && refreshDirtyRef.current) void loadEpics()
+          }, delay)
+        }
+        return Promise.resolve()
+      }
+    }
+    if (hiddenTimerRef.current !== null) {
+      clearTimeout(hiddenTimerRef.current)
+      hiddenTimerRef.current = null
     }
     const flight = { key: request.key, dirty: true, promise: null as Promise<void> | null }
     refreshInFlightRef.current = flight
@@ -737,8 +759,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         refreshInFlightRef.current === flight &&
         latestFetchRef.current.key === flight.key &&
         flight.dirty &&
-        document.visibilityState !== "hidden"
+        (document.visibilityState !== "hidden" ||
+          Date.now() >= (hiddenNextStartRef.current ?? 0))
       ) {
+        hiddenNextStartRef.current = Date.now() + 30_000
         flight.dirty = false
         refreshDirtyRef.current = false
         await latestFetchRef.current.fetch()
@@ -748,12 +772,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       if (refreshInFlightRef.current !== flight) return
       refreshInFlightRef.current = null
       // A notification can land after the loop ends but before this cleanup.
-      if (
-        mountedRef.current &&
-        flight.dirty &&
-        document.visibilityState !== "hidden" &&
-        latestFetchRef.current.key === flight.key
-      )
+      if (mountedRef.current && flight.dirty && latestFetchRef.current.key === flight.key)
         return loadEpics()
     })
     return flight.promise
@@ -762,11 +781,24 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   useEffect(() => {
     mountedRef.current = true
     const catchUp = () => {
-      if (document.visibilityState !== "hidden" && refreshDirtyRef.current) void loadEpics()
+      if (document.visibilityState === "hidden") {
+        wasHiddenRef.current = true
+        return
+      }
+      const shown = wasHiddenRef.current
+      wasHiddenRef.current = false
+      if (hiddenTimerRef.current !== null) {
+        clearTimeout(hiddenTimerRef.current)
+        hiddenTimerRef.current = null
+      }
+      hiddenNextStartRef.current = null
+      if (shown || refreshDirtyRef.current) void loadEpics()
     }
     document.addEventListener("visibilitychange", catchUp)
     return () => {
       mountedRef.current = false
+      if (hiddenTimerRef.current !== null) clearTimeout(hiddenTimerRef.current)
+      hiddenTimerRef.current = null
       refreshInFlightRef.current = null
       loadGenRef.current++
       document.removeEventListener("visibilitychange", catchUp)
