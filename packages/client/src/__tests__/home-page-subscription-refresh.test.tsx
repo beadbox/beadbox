@@ -5,7 +5,7 @@
 // authoritative refresh for field edits — so it needs a test of its own
 // (beadbox-01f.9).
 
-import { afterAll, afterEach, beforeAll, describe, expect, jest, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
 import { QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
@@ -18,7 +18,12 @@ import {
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 
 import { StartupGate } from "../components/startup-gate"
-import * as lifecycleModule from "../hooks/use-workspace-lifecycle"
+import {
+  _resetHiddenRefreshClockForTests,
+  _setHiddenRefreshClockForTests,
+  HIDDEN_REFRESH_INTERVAL_MS,
+  type HiddenRefreshClock,
+} from "../hooks/use-workspace-lifecycle"
 import { queryClient } from "../lib/query-client"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import { _emitChangeForTests, _resetSubscriptionChangeCount } from "../lib/subscribe"
@@ -151,15 +156,48 @@ function mountHome() {
   )
 }
 
-interface FakeTimerControls {
-  useFakeTimers: () => void
-  useRealTimers: () => void
-  advanceTimersByTime: (ms: number) => void
+function createVirtualClock(initialNow = 1_000) {
+  let currentNow = initialNow
+  let nextId = 1
+  const tasks = new Map<number, { due: number; id: number; cb: () => void }>()
+  const clock: HiddenRefreshClock = {
+    now: () => currentNow,
+    schedule: (cb, ms) => {
+      const id = nextId++
+      tasks.set(id, { due: currentNow + Math.max(0, ms), id, cb })
+      return id as unknown as ReturnType<typeof globalThis.setTimeout>
+    },
+    cancel: (handle) => {
+      tasks.delete(handle as unknown as number)
+    },
+  }
+  const advance = async (ms: number, onStep?: () => Promise<void>) => {
+    const target = currentNow + ms
+    while (true) {
+      let earliest: { due: number; id: number; cb: () => void } | null = null
+      for (const entry of tasks.values()) {
+        if (
+          entry.due <= target &&
+          (!earliest ||
+            entry.due < earliest.due ||
+            (entry.due === earliest.due && entry.id < earliest.id))
+        ) {
+          earliest = entry
+        }
+      }
+      if (!earliest) break
+      tasks.delete(earliest.id)
+      currentNow = earliest.due
+      earliest.cb()
+      if (onStep) await onStep()
+    }
+    currentNow = target
+  }
+  return { clock, advance }
 }
-const timers = jest as unknown as FakeTimerControls
 
 afterEach(() => {
-  timers.useRealTimers()
+  _resetHiddenRefreshClockForTests()
   Reflect.deleteProperty(document, "visibilityState")
   cleanup()
   getEpics.mockClear()
@@ -205,9 +243,12 @@ describe("home page: a subscription change rebuilds the tree (beadbox-s5z)", () 
   }, 20_000)
 
   test("hidden subscription changes coalesce into the capped refresh without firing uncached blocked-by reads", async () => {
-    const intervalMs =
-      (lifecycleModule as { HIDDEN_REFRESH_INTERVAL_MS?: number }).HIDDEN_REFRESH_INTERVAL_MS ??
-      30_000
+    const intervalMs = HIDDEN_REFRESH_INTERVAL_MS
+    const vclock = createVirtualClock()
+    _setHiddenRefreshClockForTests(vclock.clock)
+    const flushMicrotasks = async () => {
+      for (let i = 0; i < 10; i++) await Promise.resolve()
+    }
 
     setWorkspaceCookie(ws.id)
     mountHome()
@@ -216,30 +257,26 @@ describe("home page: a subscription change rebuilds the tree (beadbox-s5z)", () 
       timeout: 5_000,
     })
 
-    timers.useFakeTimers()
     const epicsBefore = getEpics.mock.calls.length
     const blocksBefore = getBlocksDependencies.mock.calls.length
 
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
-    act(() => {
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
       document.dispatchEvent(new Event("visibilitychange"))
-    })
-
-    treeTitle = "Title updated while hidden"
-    for (let i = 0; i < 10; i++) {
-      await act(async () => {
+      treeTitle = "Title updated while hidden"
+      for (let i = 0; i < 10; i++) {
         _emitChangeForTests()
         await Promise.resolve()
-      })
-    }
+      }
+    })
 
     // Suppressed events must neither refetch epics early nor fire uncached getBlocksDependencies reads.
     expect(getEpics.mock.calls.length).toBe(epicsBefore)
     expect(getBlocksDependencies.mock.calls.length).toBe(blocksBefore)
 
     await act(async () => {
-      timers.advanceTimersByTime(intervalMs)
-      for (let i = 0; i < 6; i++) await Promise.resolve()
+      await vclock.advance(intervalMs, flushMicrotasks)
+      await flushMicrotasks()
     })
 
     expect(getEpics.mock.calls.length).toBe(epicsBefore + 1)

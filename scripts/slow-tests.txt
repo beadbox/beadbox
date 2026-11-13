@@ -63,7 +63,6 @@ packages/client/src/__tests__/chart-view.test.tsx                    timeout>=10
 # fast: packages/client/src/__tests__/startup-gate-registry-quarantine.test.tsx timeout>=10s    0.0     the long timeout is a ceiling for slow CI runners, not a wait
 # fast: packages/client/src/__tests__/test-transport.test.ts                 spawn           0.2     spawns short-lived processes (sh, bun or the sidecar for a moment); under the 5 s line
 # fast: packages/client/src/__tests__/trains-view-switch.test.tsx            timeout>=10s    0.1     the long timeout is a ceiling for slow CI runners, not a wait
-# fast: packages/client/src/__tests__/use-workspace-lifecycle-switch.test.tsx setTimeout>=1s  1.8     8 s simulated RPC delay runs under fake timers (78 ms wall time); whole file under the 5 s line
 # fast: packages/client/src/__tests__/view-switch-chart.test.tsx             timeout>=10s    0.9     the long timeout is a ceiling for slow CI runners, not a wait
 # fast: packages/client/src/__tests__/waiting-page.test.tsx                  timeout>=10s    1.4     the long timeout is a ceiling for slow CI runners, not a wait
 # fast: packages/server/src/__tests__/dolt-write-marker-mode.test.ts         setTimeout>=1s  1.5     one real wait of 1-1.5 s; the whole file is under the 5 s line

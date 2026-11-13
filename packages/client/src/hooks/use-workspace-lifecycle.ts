@@ -65,6 +65,30 @@ const WORKSPACE_LOAD_TIMEOUT_MS = 15_000
  */
 export const HIDDEN_REFRESH_INTERVAL_MS = 30_000
 
+export interface HiddenRefreshClock {
+  now: () => number
+  schedule: (cb: () => void, ms: number) => ReturnType<typeof globalThis.setTimeout>
+  cancel: (id: ReturnType<typeof globalThis.setTimeout>) => void
+}
+
+const defaultHiddenRefreshClock: HiddenRefreshClock = {
+  now: () => Date.now(),
+  schedule: (cb, ms) => globalThis.setTimeout(cb, ms),
+  cancel: (id) => globalThis.clearTimeout(id),
+}
+
+let hiddenRefreshClock: HiddenRefreshClock = defaultHiddenRefreshClock
+
+/** Test-only seam for deterministic hidden-refresh timing without mutating DOM timers. */
+export function _setHiddenRefreshClockForTests(clock: HiddenRefreshClock): void {
+  hiddenRefreshClock = clock
+}
+
+/** Test-only reset back to wall-clock timers. */
+export function _resetHiddenRefreshClockForTests(): void {
+  hiddenRefreshClock = defaultHiddenRefreshClock
+}
+
 function computeHiddenRefreshDelay(
   last: { key: string; at: number },
   key: string,
@@ -140,7 +164,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const lastRefreshStartRef = useRef<{ key: string; at: number }>({ key: "", at: 0 })
   const clearHiddenTimer = useCallback(() => {
     if (hiddenTimerRef.current) {
-      clearTimeout(hiddenTimerRef.current.timer)
+      hiddenRefreshClock.cancel(hiddenTimerRef.current.timer)
       hiddenTimerRef.current = null
     }
   }, [])
@@ -782,7 +806,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
           iterations += 1
           flight.dirty = false
           refreshDirtyRef.current = false
-          lastRefreshStartRef.current = { key: flight.key, at: Date.now() }
+          lastRefreshStartRef.current = { key: flight.key, at: hiddenRefreshClock.now() }
           await latestFetchRef.current.fetch()
         }
       }
@@ -810,10 +834,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       const delay = computeHiddenRefreshDelay(
         lastRefreshStartRef.current,
         key,
-        Date.now(),
+        hiddenRefreshClock.now(),
         fromInFlight,
       )
-      const timer = setTimeout(() => {
+      const timer = hiddenRefreshClock.schedule(() => {
         hiddenTimerRef.current = null
         if (!mountedRef.current || latestFetchRef.current.key !== key) return
         if (!refreshDirtyRef.current) return

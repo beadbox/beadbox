@@ -8,7 +8,7 @@
 //      its cached tree immediately — hasExistingDataRef stays true, which is
 //      what suppresses home-page's skeleton while the refresh runs.
 
-import { afterEach, describe, expect, jest, mock, test } from "bun:test"
+import { afterEach, describe, expect, mock, test } from "bun:test"
 import {
   createMemoryHistory,
   createRootRoute,
@@ -20,8 +20,14 @@ import {
 import { act, cleanup, render, waitFor } from "@testing-library/react"
 
 import type { AppHealth } from "../hooks/use-app-health"
-import * as lifecycleModule from "../hooks/use-workspace-lifecycle"
-import { systemIssuesKey, useWorkspaceLifecycle } from "../hooks/use-workspace-lifecycle"
+import {
+  _resetHiddenRefreshClockForTests,
+  _setHiddenRefreshClockForTests,
+  HIDDEN_REFRESH_INTERVAL_MS,
+  type HiddenRefreshClock,
+  systemIssuesKey,
+  useWorkspaceLifecycle,
+} from "../hooks/use-workspace-lifecycle"
 import { ERROR_CATEGORY_TITLES } from "../lib/epic-tree-utils"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import type { Epic, Workspace } from "../lib/types"
@@ -161,15 +167,8 @@ function mountLifecycle(
   return { seen, health, getEpics, release: () => pendingResolve?.() }
 }
 
-interface FakeTimerControls {
-  useFakeTimers: () => void
-  useRealTimers: () => void
-  advanceTimersByTime: (ms: number) => void
-}
-const timers = jest as unknown as FakeTimerControls
-
 afterEach(() => {
-  timers.useRealTimers()
+  _resetHiddenRefreshClockForTests()
   Reflect.deleteProperty(document, "visibilityState")
   cleanup()
   _resetRpc()
@@ -527,18 +526,57 @@ test("a refresh arriving as the current drain settles is not lost", async () => 
 })
 
 describe("capped hidden refresh (beadbox-1jq)", () => {
-  const getHiddenIntervalMs = () =>
-    (lifecycleModule as { HIDDEN_REFRESH_INTERVAL_MS?: number }).HIDDEN_REFRESH_INTERVAL_MS ??
-    30_000
-
   const flushMicrotasks = async () => {
-    for (let i = 0; i < 6; i++) await Promise.resolve()
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+  }
+
+  function createVirtualClock(initialNow = 1_000) {
+    let currentNow = initialNow
+    let nextId = 1
+    const tasks = new Map<number, { due: number; id: number; cb: () => void }>()
+    const clock: HiddenRefreshClock = {
+      now: () => currentNow,
+      schedule: (cb, ms) => {
+        const id = nextId++
+        tasks.set(id, { due: currentNow + Math.max(0, ms), id, cb })
+        return id as unknown as ReturnType<typeof globalThis.setTimeout>
+      },
+      cancel: (handle) => {
+        tasks.delete(handle as unknown as number)
+      },
+    }
+    const advance = async (ms: number, onStep?: () => Promise<void>) => {
+      const target = currentNow + ms
+      while (true) {
+        let earliest: { due: number; id: number; cb: () => void } | null = null
+        for (const entry of tasks.values()) {
+          if (
+            entry.due <= target &&
+            (!earliest ||
+              entry.due < earliest.due ||
+              (entry.due === earliest.due && entry.id < earliest.id))
+          ) {
+            earliest = entry
+          }
+        }
+        if (!earliest) break
+        tasks.delete(earliest.id)
+        currentNow = earliest.due
+        earliest.cb()
+        if (onStep) await onStep()
+      }
+      currentNow = target
+    }
+    return { clock, advance }
   }
 
   test("hidden burst over 2 minutes runs at most ceil(120/interval)+1 non-overlapping refreshes and delivers latest data within one interval", async () => {
-    const intervalMs = getHiddenIntervalMs()
+    const intervalMs = HIDDEN_REFRESH_INTERVAL_MS
     expect(intervalMs).toBeGreaterThanOrEqual(30_000)
     expect(intervalMs).toBeLessThanOrEqual(60_000)
+
+    const vclock = createVirtualClock()
+    _setHiddenRefreshClockForTests(vclock.clock)
 
     let latestEpicId = "alpha-initial"
     let inFlight = 0
@@ -557,35 +595,31 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
     })
     await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
 
-    timers.useFakeTimers()
     // Advance past initial mount so the 2-minute hidden window starts from steady state.
     await act(async () => {
-      timers.advanceTimersByTime(intervalMs * 2)
+      await vclock.advance(intervalMs * 2, flushMicrotasks)
       await flushMicrotasks()
     })
     const callsBeforeHidden = getEpics.mock.calls.length
 
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"))
-    })
-
-    // 240 changes across 120s (every 500ms).
+    // 240 changes across 120s (every 500ms) inside a single act batch so CI shards finish in <50ms.
     const totalChanges = 240
-    for (let i = 1; i <= totalChanges; i++) {
-      latestEpicId = `hidden-change-${i}`
-      await act(async () => {
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+      document.dispatchEvent(new Event("visibilitychange"))
+      for (let i = 1; i <= totalChanges; i++) {
+        latestEpicId = `hidden-change-${i}`
         void seen.current?.loadEpics()
         if (i < totalChanges) {
-          timers.advanceTimersByTime(500)
+          await vclock.advance(500, flushMicrotasks)
         }
-        await flushMicrotasks()
-      })
-    }
+      }
+      await flushMicrotasks()
+    })
 
     // Latest data must arrive within at most one hidden interval of the final change.
     await act(async () => {
-      timers.advanceTimersByTime(intervalMs)
+      await vclock.advance(intervalMs, flushMicrotasks)
       await flushMicrotasks()
     })
 
@@ -598,7 +632,10 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
   })
 
   test("slow hidden refreshes never overlap even when requests take several seconds", async () => {
-    const intervalMs = getHiddenIntervalMs()
+    const intervalMs = HIDDEN_REFRESH_INTERVAL_MS
+    const vclock = createVirtualClock()
+    _setHiddenRefreshClockForTests(vclock.clock)
+
     let latestEpicId = "alpha-initial"
     let inFlight = 0
     let maxInFlight = 0
@@ -614,7 +651,7 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
         inFlight += 1
         maxInFlight = Math.max(maxInFlight, inFlight)
         return new Promise((resolve) => {
-          setTimeout(() => {
+          vclock.clock.schedule(() => {
             inFlight -= 1
             resolve({ success: true as const, epics: [epic(snapshot)] })
           }, 8_000)
@@ -624,28 +661,25 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
     await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
     mounted = true
 
-    timers.useFakeTimers()
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
-    act(() => {
-      document.dispatchEvent(new Event("visibilitychange"))
-    })
     const callsBeforeHidden = getEpics.mock.calls.length
 
     // 60 changes over 120s (every 2s) while each RPC takes 8s.
-    for (let i = 1; i <= 60; i++) {
-      latestEpicId = `slow-change-${i}`
-      await act(async () => {
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+      document.dispatchEvent(new Event("visibilitychange"))
+      for (let i = 1; i <= 60; i++) {
+        latestEpicId = `slow-change-${i}`
         void seen.current?.loadEpics()
         if (i < 60) {
-          timers.advanceTimersByTime(2_000)
+          await vclock.advance(2_000, flushMicrotasks)
         }
-        await flushMicrotasks()
-      })
-    }
+      }
+      await flushMicrotasks()
+    })
 
     // Advance one interval + the 8s RPC duration so the final scheduled load settles.
     await act(async () => {
-      timers.advanceTimersByTime(intervalMs + 8_000)
+      await vclock.advance(intervalMs + 8_000, flushMicrotasks)
       await flushMicrotasks()
     })
 
@@ -659,7 +693,10 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
   })
 
   test("showing the window cancels any pending hidden timer and runs exactly one catch-up", async () => {
-    const intervalMs = getHiddenIntervalMs()
+    const intervalMs = HIDDEN_REFRESH_INTERVAL_MS
+    const vclock = createVirtualClock()
+    _setHiddenRefreshClockForTests(vclock.clock)
+
     let latestEpicId = "alpha-initial"
     setWorkspaceCookie(alpha.id)
     const { seen, getEpics } = mountLifecycle({
@@ -667,7 +704,6 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
     })
     await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
 
-    timers.useFakeTimers()
     const callsBefore = getEpics.mock.calls.length
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
     act(() => {
@@ -679,7 +715,7 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
 
     // Advance part-way through the hidden window, then show the window.
     await act(async () => {
-      timers.advanceTimersByTime(Math.floor(intervalMs / 3))
+      await vclock.advance(Math.floor(intervalMs / 3), flushMicrotasks)
       await flushMicrotasks()
     })
     expect(getEpics.mock.calls.length).toBe(callsBefore)
@@ -694,14 +730,17 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
 
     // Advancing well past the original hidden deadline must not fire a leftover timer.
     await act(async () => {
-      timers.advanceTimersByTime(intervalMs * 2)
+      await vclock.advance(intervalMs * 2, flushMicrotasks)
       await flushMicrotasks()
     })
     expect(getEpics.mock.calls.length).toBe(callsBefore + 1)
   })
 
   test("switching workspaces while hidden discards the stale in-flight result and loads the new workspace", async () => {
-    const intervalMs = getHiddenIntervalMs()
+    const intervalMs = HIDDEN_REFRESH_INTERVAL_MS
+    const vclock = createVirtualClock()
+    _setHiddenRefreshClockForTests(vclock.clock)
+
     const pending: Array<{ db?: string; resolve: (value: unknown) => void }> = []
     let mounted = false
 
@@ -717,7 +756,6 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
     await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
     mounted = true
 
-    timers.useFakeTimers()
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
     act(() => {
       document.dispatchEvent(new Event("visibilitychange"))
@@ -726,7 +764,7 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
 
     // Advance one hidden interval so alpha's background refresh is actively in flight.
     await act(async () => {
-      timers.advanceTimersByTime(intervalMs)
+      await vclock.advance(intervalMs, flushMicrotasks)
       await flushMicrotasks()
     })
     expect(pending.some((p) => p.db?.includes("alpha"))).toBe(true)
@@ -748,7 +786,7 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
 
     // Beta refreshes within one hidden interval without touching alpha again.
     await act(async () => {
-      timers.advanceTimersByTime(intervalMs)
+      await vclock.advance(intervalMs, flushMicrotasks)
       await flushMicrotasks()
     })
     const betaReq = pending.find((p) => p.db?.includes("beta"))
@@ -761,7 +799,10 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
   })
 
   test("a visible refresh that finishes after the window hides defers its dirty follow-up to the hidden interval", async () => {
-    const intervalMs = getHiddenIntervalMs()
+    const intervalMs = HIDDEN_REFRESH_INTERVAL_MS
+    const vclock = createVirtualClock()
+    _setHiddenRefreshClockForTests(vclock.clock)
+
     const pending: Array<(value: unknown) => void> = []
     let mounted = false
 
@@ -777,7 +818,6 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
     await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("alpha-initial"))
     mounted = true
 
-    timers.useFakeTimers()
     const callsBefore = getEpics.mock.calls.length
 
     // Start a visible refresh; while it is in flight, hide the window and mark dirty.
@@ -787,7 +827,7 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
     expect(pending.length).toBe(1)
 
     await act(async () => {
-      timers.advanceTimersByTime(2_000)
+      await vclock.advance(2_000, flushMicrotasks)
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
       document.dispatchEvent(new Event("visibilitychange"))
       void seen.current?.loadEpics()
@@ -801,7 +841,7 @@ describe("capped hidden refresh (beadbox-1jq)", () => {
 
     // Advancing the remaining hidden interval starts the single coalesced follow-up.
     await act(async () => {
-      timers.advanceTimersByTime(intervalMs - 2_000)
+      await vclock.advance(intervalMs - 2_000, flushMicrotasks)
       await flushMicrotasks()
     })
     expect(pending.length).toBe(2)
