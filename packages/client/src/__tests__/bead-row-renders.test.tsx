@@ -127,3 +127,47 @@ test("aggregate source lookup replacement does not render unchanged project rows
     rowRenders.mockRestore()
   }
 })
+
+test("replacing readState renders only rows whose unread reason changed", () => {
+  const rowRenders = spyOn(badgeConfig, "getStatusConfig")
+  try {
+    const rows = [bead("first", 1), bead("second", 2)]
+    const seenAt = { viewedAt: "2030-01-01T00:00:00.000Z", commentCount: 0 }
+    const view = render(
+      <BeadTable
+        beads={rows}
+        epicId="epic"
+        onBeadClick={() => {}}
+        readState={{ second: { ...seenAt } }}
+      />,
+    )
+    const firstRow = () => view.container.querySelector('[data-item-id="first"]')!
+    const secondRow = () => view.container.querySelector('[data-item-id="second"]')!
+    expect(firstRow().querySelector(".bg-blue-400")).not.toBeNull()
+    expect(secondRow().querySelector(".bg-blue-400")).toBeNull()
+
+    rowRenders.mockClear()
+    view.rerender(
+      <BeadTable
+        beads={rows}
+        epicId="epic"
+        onBeadClick={() => {}}
+        readState={{ second: { ...seenAt } }}
+      />,
+    )
+    expect(rowRenders.mock.calls).toEqual([])
+
+    view.rerender(
+      <BeadTable
+        beads={rows}
+        epicId="epic"
+        onBeadClick={() => {}}
+        readState={{ first: { ...seenAt }, second: { ...seenAt } }}
+      />,
+    )
+    expect(rowRenders.mock.calls.map(([status]) => status)).toEqual(["first"])
+    expect(firstRow().querySelector(".bg-blue-400")).toBeNull()
+  } finally {
+    rowRenders.mockRestore()
+  }
+})

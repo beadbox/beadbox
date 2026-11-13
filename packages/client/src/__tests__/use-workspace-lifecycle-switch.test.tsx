@@ -515,3 +515,55 @@ test("a refresh arriving as the current drain settles is not lost", async () => 
   await act(async () => pending[1]({ success: true, epics: [epic("latest")] }))
   await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("latest"))
 })
+
+test("a local setEpics edit discards an in-flight pre-edit read and still drains its coalesced follow-up", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<(value: unknown) => void> = []
+  const { seen, getEpics } = mountLifecycle({
+    treeRequest: () => new Promise((resolve) => pending.push(resolve)),
+  })
+  await waitFor(() => expect(pending.length).toBe(1))
+  await act(async () => pending[0]({ success: true, epics: [epic("initial")] }))
+  await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("initial"))
+
+  // Background poll starts while the tree still reflects "initial".
+  act(() => void seen.current?.loadEpics())
+  await waitFor(() => expect(pending.length).toBe(2))
+
+  // User saves an edit locally and queues a post-edit refresh behind the in-flight read.
+  act(() => {
+    seen.current?.setEpics([epic("optimistic-edit")])
+    void seen.current?.loadEpics()
+  })
+  expect(getEpics.mock.calls.length).toBe(2)
+
+  // Stale pre-edit read settles: local edit must not snap back, and follow-up must start.
+  await act(async () => pending[1]({ success: true, epics: [epic("pre-edit-stale")] }))
+  expect(seen.current?.epics[0]?.id).toBe("optimistic-edit")
+  await waitFor(() => expect(pending.length).toBe(3))
+  expect(getEpics.mock.calls.length).toBe(3)
+
+  // Post-edit follow-up settles and replaces the optimistic tree cleanly.
+  await act(async () => pending[2]({ success: true, epics: [epic("persisted-edit")] }))
+  await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("persisted-edit"))
+  expect(seen.current?.isLoading).toBe(false)
+})
+
+test("an optimistic setEpics without loadEpics discards an in-flight read and still clears isLoading", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<(value: unknown) => void> = []
+  const { seen } = mountLifecycle({
+    treeRequest: () => new Promise((resolve) => pending.push(resolve)),
+  })
+  await waitFor(() => expect(pending.length).toBe(1))
+  expect(seen.current?.isLoading).toBe(true)
+
+  act(() => {
+    seen.current?.setEpics([epic("optimistic-only")])
+  })
+  expect(seen.current?.epics[0]?.id).toBe("optimistic-only")
+
+  await act(async () => pending[0]({ success: true, epics: [epic("stale-initial")] }))
+  expect(seen.current?.epics[0]?.id).toBe("optimistic-only")
+  expect(seen.current?.isLoading).toBe(false)
+})

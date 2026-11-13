@@ -59,6 +59,20 @@ export const systemIssuesKey = (id: string) => `beadbox:system-issues:${id}`
 const treeCacheKey = (id: string | undefined, includeSystem: boolean) =>
   id ? `${id}:${includeSystem ? "all" : "normal"}` : undefined
 
+function sameReadState(a: ReadState, b: ReadState): boolean {
+  if (Object.is(a, b)) return true
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  for (const key of keys) {
+    const left = a[key]
+    const right = b[key]
+    if (!right || left.viewedAt !== right.viewedAt || left.commentCount !== right.commentCount) {
+      return false
+    }
+  }
+  return true
+}
+
 export function readSystemIssues(id: string | undefined): boolean {
   if (!id || typeof localStorage === "undefined") return false
   try {
@@ -117,14 +131,22 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       epicsWorkspaceIdRef.current = cached
         ? (treeCacheKey(currentWorkspace.id, enabled) ?? null)
         : null
-      setEpics(cached ?? [])
+      setEpicsState(cached ?? [])
       hasExistingDataRef.current = !!cached
       systemIssuesRef.current[currentWorkspace.id] = enabled
       setSystemIssuesByWorkspace((current) => ({ ...current, [currentWorkspace.id]: enabled }))
     },
     [currentWorkspace?.id],
   )
-  const [epics, setEpics] = useState<Epic[]>([])
+  const [epics, setEpicsState] = useState<Epic[]>([])
+  // Monotonic counter bumped on local tree edits via exported setEpics. Any
+  // getEpics read that started before a local edit discards its pre-edit tree
+  // so coalesced refreshes never snap the UI back before the follow-up lands.
+  const editGenRef = useRef(0)
+  const setEpics = useCallback<React.Dispatch<React.SetStateAction<Epic[]>>>((action) => {
+    editGenRef.current++
+    setEpicsState(action)
+  }, [])
   const {
     availableTypes,
     typeCatalogReady,
@@ -245,7 +267,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       // back to the skeleton for a tree it already has.
       const cached = sessionEpics.get(treeCacheKey(selected?.id, modeForWorkspace(selected?.id)))
       if (cached) {
-        setEpics(cached)
+        setEpicsState(cached)
         epicsWorkspaceIdRef.current =
           treeCacheKey(selected?.id, modeForWorkspace(selected?.id)) ?? null
         hasExistingDataRef.current = true
@@ -304,10 +326,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
           ? (treeCacheKey(target.id, modeForWorkspace(target.id)) ?? null)
           : null
         if (cached) {
-          setEpics(cached)
+          setEpicsState(cached)
           hasExistingDataRef.current = true
         } else {
-          setEpics([])
+          setEpicsState([])
           hasExistingDataRef.current = false
         }
       }),
@@ -532,7 +554,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   // Success branch: persist epics, clear flock contention, hydrate read state.
   const handleEpicsSuccess = useCallback(
     (result: { epics: Epic[]; workspaceId?: string; includeSystem: boolean }) => {
-      setEpics(result.epics)
+      setEpicsState(result.epics)
       epicsWorkspaceIdRef.current = treeCacheKey(result.workspaceId, result.includeSystem) ?? null
       hasExistingDataRef.current = true
       setHealthy()
@@ -548,12 +570,11 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       }
       // Initialize or refresh read state
       const existingReadState = getReadState()
-      if (Object.keys(existingReadState).length === 0) {
-        const allBeads = collectAllBeadsFromEpics(result.epics)
-        setReadStateLocal(initializeReadState(allBeads))
-      } else {
-        setReadStateLocal(existingReadState)
-      }
+      const nextReadState =
+        Object.keys(existingReadState).length === 0
+          ? initializeReadState(collectAllBeadsFromEpics(result.epics))
+          : existingReadState
+      setReadStateLocal((prev) => (sameReadState(prev, nextReadState) ? prev : nextReadState))
     },
     [flockContention, setHealthy],
   )
@@ -595,7 +616,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         setHealthError(bdLoadError.message, bdLoadError, true)
       }
 
-      if (!hasExistingDataRef.current) setEpics([])
+      if (!hasExistingDataRef.current) setEpicsState([])
 
       if (source === "manual" && getAnalyticsEnabled()) {
         safeCapture("app_workspace_switch_failed", {
@@ -623,7 +644,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         fixDescription: null,
       }
       setHealthError(msg, unknownError, true)
-      if (!hasExistingDataRef.current) setEpics([])
+      if (!hasExistingDataRef.current) setEpicsState([])
 
       if (source === "manual" && getAnalyticsEnabled()) {
         safeCapture("app_workspace_switch_failed", {
@@ -641,6 +662,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     // Increment generation counter. Any in-flight load from a prior call
     // sees a stale gen and discards its results in the finally block.
     const gen = ++loadGenRef.current
+    const editGen = editGenRef.current
     const source = workspaceSourceRef.current
     // Reset to "auto" after capturing so auto-retries don't fire
     // switch_failed events.
@@ -657,7 +679,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       const dbPath = currentWorkspace?.databasePath
       const getEpicsStart = Date.now()
       const result = await rpc.epics.getEpics(dbPath, includeSystem)
-      if (gen !== loadGenRef.current) {
+      if (gen !== loadGenRef.current || editGen !== editGenRef.current) {
         recordLoadEpicsPhase("stale", gen, dbPathForStamp, {
           epicsLength: result.success ? result.epics.length : undefined,
         })
@@ -678,7 +700,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         handleEpicsError(result.bdLoadError, source, getEpicsStart)
       }
     } catch (error: unknown) {
-      if (gen !== loadGenRef.current) {
+      if (gen !== loadGenRef.current || editGen !== editGenRef.current) {
         recordLoadEpicsPhase("stale", gen, dbPathForStamp, {
           errorMessage: error instanceof Error ? error.message : String(error),
         })
