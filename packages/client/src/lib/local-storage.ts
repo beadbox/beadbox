@@ -1,6 +1,14 @@
-import { ALL_PRIORITIES, DEFAULT_STATUSES, type Bead, type BeadPriority, type Filters, type ReadState, type SortOption } from "./types"
+import {
+  ALL_PRIORITIES,
+  type Bead,
+  type BeadPriority,
+  DEFAULT_STATUSES,
+  type Filters,
+  type ReadState,
+  type SortOption,
+} from "./types"
 
-export type ThemeVariant = "blue" | "gray" | "green"
+export type ThemeId = string
 
 const SORT_KEY = "beads-sort"
 const FILTERS_KEY = "beads-filters"
@@ -95,13 +103,16 @@ export function getFiltersPreference(): Filters {
       // status (e.g. 'open') becomes a single-element whitelist. Existing
       // array form passes through. Anything malformed → canonical default.
       if (typeof parsed.status === "string") {
-        parsed.status =
-          parsed.status === "all" ? [...DEFAULT_STATUSES] : [parsed.status]
+        parsed.status = parsed.status === "all" ? [...DEFAULT_STATUSES] : [parsed.status]
       } else if (!Array.isArray(parsed.status)) {
         parsed.status = [...DEFAULT_STATUSES]
       }
       parsed.labels = Array.isArray(parsed.labels)
-        ? [...new Set(parsed.labels.filter((label: unknown): label is string => typeof label === "string"))]
+        ? [
+            ...new Set(
+              parsed.labels.filter((label: unknown): label is string => typeof label === "string"),
+            ),
+          ]
         : []
       parsed.priority = migratePriority(parsed.priority)
       return { ...DEFAULT_FILTERS, ...parsed }
@@ -122,44 +133,49 @@ export function setFiltersPreference(filters: Filters): void {
   }
 }
 
-const VALID_THEMES: ThemeVariant[] = ["blue", "gray", "green"]
+export const DEFAULT_THEME_ID = "beadbox-dark"
 
-// beadbox-knr: the themes Beadbox can actually render. index.css's @theme
-// block declares the color tokens as gray literals (the v0.25 WKWebView fix),
-// in every runtime, so Blue and Green change nothing on screen. Until
-// beadbox-o37 restores switching, only Gray is offered.
-export const AVAILABLE_THEMES: readonly ThemeVariant[] = ["gray"]
+const THEME_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
 /**
- * The theme to render for a stored preference. A stored Blue or Green is kept
- * as the user set it (o37 will honor it) and renders as Gray meanwhile.
+ * The stored theme id, or the built-in dark theme.
+ *
+ * A syntactically valid id for a theme that is not currently installed is
+ * returned as-is and left in storage: a user who removes a theme file and
+ * puts it back should get their choice returned rather than silently reset.
+ * Whether the id resolves to an installed theme is theme-source's concern.
  */
-export function effectiveTheme(stored: ThemeVariant): ThemeVariant {
-  return AVAILABLE_THEMES.includes(stored) ? stored : "gray"
-}
-
-export function getThemePreference(): ThemeVariant {
-  if (typeof window === "undefined") return "gray"
+export function getThemePreference(): ThemeId {
+  if (typeof window === "undefined") return DEFAULT_THEME_ID
 
   try {
     const stored = localStorage.getItem(THEME_KEY)
-    if (stored && VALID_THEMES.includes(stored as ThemeVariant)) {
-      return stored as ThemeVariant
-    }
+    if (stored && THEME_ID_RE.test(stored)) return stored
   } catch {
-    // Invalid or unavailable
+    // localStorage unavailable (private mode, disabled storage).
   }
-  return "gray"
+  return DEFAULT_THEME_ID
 }
 
-export function setThemePreference(theme: ThemeVariant): void {
+export function setThemePreference(id: ThemeId): void {
   if (typeof window === "undefined") return
+  if (!THEME_ID_RE.test(id)) return
 
   try {
-    localStorage.setItem(THEME_KEY, theme)
+    localStorage.setItem(THEME_KEY, id)
   } catch {
-    // localStorage might be full or disabled
+    // Non-fatal: the theme still applies for this session.
   }
+}
+
+/**
+ * The theme id that actually renders for a stored preference: the stored id if
+ * it is one we can render, else the default. Used for SELECTION DISPLAY only —
+ * the stored preference itself is never rewritten, so a theme the user removes
+ * and later restores comes back as their choice.
+ */
+export function resolveThemeId(stored: ThemeId, availableIds: readonly string[]): ThemeId {
+  return availableIds.includes(stored) ? stored : DEFAULT_THEME_ID
 }
 
 // --- Analytics opt-out ---

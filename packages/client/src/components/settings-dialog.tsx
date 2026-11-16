@@ -1,16 +1,40 @@
 import type * as DiagnosticsHandlers from "@beadbox/server/handlers"
-import { AlertCircle, AlertTriangle, ArrowUpCircle, Check, CheckCircle2, ChevronDown, CircleHelp, CircleX, Copy, ExternalLink, FolderOpen, GitBranch, Keyboard, Loader2, Minus, Plus, RefreshCw, RotateCcw, Settings, Stethoscope, Trash2, X } from "lucide-react"
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowUpCircle,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  CircleHelp,
+  CircleX,
+  Copy,
+  ExternalLink,
+  FolderOpen,
+  GitBranch,
+  Keyboard,
+  Loader2,
+  Minus,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Settings,
+  Stethoscope,
+  Trash2,
+  X,
+} from "lucide-react"
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { safeCapture } from "../lib/posthog-safe"
 import {
-  AVAILABLE_THEMES,
-  effectiveTheme,
-  type ThemeVariant,
+  clearCache,
+  getAnalyticsEnabled,
+  resolveThemeId,
+  setAnalyticsEnabled,
+  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
-import { clearCache, getAnalyticsEnabled, setAnalyticsEnabled } from "../lib/local-storage"
+import { safeCapture } from "../lib/posthog-safe"
 // P3.1 source-divergence:
 //   - actions/system { openInFileManager, getLogDirectory } → rpc.system.*
 //   - actions/diagnostics { runDiagnostics } → rpc.diagnostics.runDiagnostics
@@ -51,7 +75,7 @@ const version = import.meta.env.VITE_APP_VERSION ?? "0.0.0"
 const buildId = import.meta.env.VITE_BUILD_ID
 
 const THEME_OPTIONS: {
-  id: ThemeVariant
+  id: ThemeId
   label: string
   colors: {
     bg: string
@@ -63,20 +87,8 @@ const THEME_OPTIONS: {
   }
 }[] = [
   {
-    id: "blue",
-    label: "Blue",
-    colors: {
-      bg: "#0f172a",
-      card: "#1e293b",
-      primary: "#22c55e",
-      secondary: "#334155",
-      muted: "#94a3b8",
-      fg: "#f1f5f9",
-    },
-  },
-  {
-    id: "gray",
-    label: "Gray",
+    id: "beadbox-dark",
+    label: "Beadbox Dark",
     colors: {
       bg: "#18181b",
       card: "#27272a",
@@ -87,22 +99,18 @@ const THEME_OPTIONS: {
     },
   },
   {
-    id: "green",
-    label: "Green",
+    id: "beadbox-light",
+    label: "Beadbox Light",
     colors: {
-      bg: "#0c1a14",
-      card: "#14291e",
-      primary: "#34d399",
-      secondary: "#1e3a2b",
-      muted: "#6ee7b7",
-      fg: "#ecfdf5",
+      bg: "#ffffff",
+      card: "#ffffff",
+      primary: "#15803d",
+      secondary: "#f5f5f5",
+      muted: "#737373",
+      fg: "#0a0a0a",
     },
   },
 ]
-
-// beadbox-knr: only themes that render are offered (Gray, until beadbox-o37
-// brings Blue and Green back); their definitions above stay for o37.
-const VISIBLE_THEME_OPTIONS = THEME_OPTIONS.filter((t) => AVAILABLE_THEMES.includes(t.id))
 
 const FREQUENCY_OPTIONS: { value: UpdateCheckFrequency; label: string }[] = [
   { value: 1800000, label: "Every 30 minutes" },
@@ -114,8 +122,8 @@ const FREQUENCY_OPTIONS: { value: UpdateCheckFrequency; label: string }[] = [
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  theme: ThemeVariant
-  onThemeChange: (theme: ThemeVariant) => void
+  theme: ThemeId
+  onThemeChange: (theme: ThemeId) => void
   zoomLevel: number
   onZoomChange: (level: number) => void
   databasePath?: string
@@ -229,14 +237,21 @@ export function SettingsDialog({
   // Sync focused index to current theme when dialog opens
   useEffect(() => {
     if (open) {
-      const idx = VISIBLE_THEME_OPTIONS.findIndex((t) => t.id === effectiveTheme(theme))
+      const idx = THEME_OPTIONS.findIndex(
+        (t) =>
+          t.id ===
+          resolveThemeId(
+            theme,
+            THEME_OPTIONS.map((o) => o.id),
+          ),
+      )
       setFocusedThemeIndex(idx >= 0 ? idx : 0)
     }
   }, [open, theme])
 
   const handleThemeKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      const len = VISIBLE_THEME_OPTIONS.length
+      const len = THEME_OPTIONS.length
       let nextIndex = focusedThemeIndex
 
       switch (e.key) {
@@ -257,10 +272,10 @@ export function SettingsDialog({
             safeCapture("app_setting_changed", {
               setting: "theme",
               old_value: theme,
-              new_value: VISIBLE_THEME_OPTIONS[focusedThemeIndex].id,
+              new_value: THEME_OPTIONS[focusedThemeIndex].id,
             })
           }
-          onThemeChange(VISIBLE_THEME_OPTIONS[focusedThemeIndex].id)
+          onThemeChange(THEME_OPTIONS[focusedThemeIndex].id)
           return
         default:
           return
@@ -366,8 +381,12 @@ export function SettingsDialog({
                     className="grid grid-cols-3 gap-3 max-w-lg"
                     onKeyDown={handleThemeKeyDown}
                   >
-                    {VISIBLE_THEME_OPTIONS.map((opt, i) => {
-                      const selected = effectiveTheme(theme) === opt.id
+                    {THEME_OPTIONS.map((opt, i) => {
+                      const selected =
+                        resolveThemeId(
+                          theme,
+                          THEME_OPTIONS.map((o) => o.id),
+                        ) === opt.id
                       return (
                         <button
                           key={opt.id}

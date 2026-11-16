@@ -1,13 +1,16 @@
-// beadbox-knr: Settings > General offers only the theme that can render
-// (Gray), in the packaged runtime and in the browser alike; a stored Blue or
-// Green shows Gray selected; the picker stays keyboard-operable.
+// beadbox-knr: Settings > General offers every built-in theme, in the
+// packaged runtime and in the browser alike; a stored id that isn't
+// currently installed (an uninstalled theme, or a legacy "gray"/"blue"/
+// "green" preference from before runtime themes) shows the default theme
+// selected without the stored preference itself being rewritten; the picker
+// stays keyboard-operable.
 
 import { afterEach, describe, expect, mock, test } from "bun:test"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { SettingsDialog } from "../components/settings-dialog"
-import type { ThemeVariant } from "../lib/local-storage"
+import { getThemePreference, setThemePreference, type ThemeId } from "../lib/local-storage"
 
-function renderDialog(theme: ThemeVariant, onThemeChange = mock(() => {})) {
+function renderDialog(theme: ThemeId, onThemeChange = mock(() => {})) {
   render(
     <SettingsDialog
       open
@@ -31,42 +34,54 @@ function renderDialog(theme: ThemeVariant, onThemeChange = mock(() => {})) {
   return onThemeChange
 }
 
-const themeRadios = () => within(screen.getByRole("radiogroup", { name: "Theme selection" })).getAllByRole("radio")
+const themeRadios = () =>
+  within(screen.getByRole("radiogroup", { name: "Theme selection" })).getAllByRole("radio")
 
 afterEach(() => {
   cleanup()
+  localStorage.clear()
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
 })
 
 for (const runtime of ["packaged", "browser"] as const) {
   describe(`theme picker, ${runtime} runtime`, () => {
     const setRuntime = () => {
-      if (runtime === "packaged") (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+      if (runtime === "packaged")
+        (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
     }
 
-    test("offers exactly one theme, Gray", () => {
+    test("offers both built-in themes", () => {
       setRuntime()
-      renderDialog("gray")
-      expect(themeRadios().map((r) => r.getAttribute("aria-label"))).toEqual(["Gray theme"])
+      renderDialog("beadbox-dark")
+      expect(themeRadios().map((r) => r.getAttribute("aria-label"))).toEqual([
+        "Beadbox Dark theme",
+        "Beadbox Light theme",
+      ])
     })
 
-    test("a stored blue shows Gray selected", () => {
+    test("a stored unknown theme id shows the default selected", () => {
       setRuntime()
-      renderDialog("blue")
-      const [gray] = themeRadios()
-      expect(gray.getAttribute("aria-label")).toBe("Gray theme")
-      expect(gray.getAttribute("aria-checked")).toBe("true")
+      renderDialog("nord")
+      const [dark] = themeRadios()
+      expect(dark.getAttribute("aria-label")).toBe("Beadbox Dark theme")
+      expect(dark.getAttribute("aria-checked")).toBe("true")
     })
 
-    test("keyboard: arrows stay on Gray, Enter chooses Gray", () => {
+    test("an unresolved preference is displayed, not rewritten", () => {
       setRuntime()
-      const onThemeChange = renderDialog("green")
+      setThemePreference("nord")
+      renderDialog("nord")
+      expect(getThemePreference()).toBe("nord")
+    })
+
+    test("keyboard: arrows move focus between themes, Enter chooses the focused one", () => {
+      setRuntime()
+      const onThemeChange = renderDialog("beadbox-dark")
       const group = screen.getByRole("radiogroup", { name: "Theme selection" })
       fireEvent.keyDown(group, { key: "ArrowRight" })
-      fireEvent.keyDown(group, { key: "ArrowLeft" })
       fireEvent.keyDown(group, { key: "Enter" })
       expect(onThemeChange).toHaveBeenCalledTimes(1)
-      expect(onThemeChange).toHaveBeenCalledWith("gray")
+      expect(onThemeChange).toHaveBeenCalledWith("beadbox-light")
     })
   })
 }

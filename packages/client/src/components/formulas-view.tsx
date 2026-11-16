@@ -13,8 +13,6 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
-import { useHasTrains } from "@/hooks/use-has-trains"
-import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import {
   Activity,
   AlertTriangle,
@@ -29,11 +27,13 @@ import {
 } from "lucide-react"
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState, useTransition } from "react"
+import { useHasTrains } from "@/hooks/use-has-trains"
+import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { useActiveWorkspace } from "../hooks/use-active-workspace"
 import { useAppHealth } from "../hooks/use-app-health"
-import { safeCapture } from "../lib/posthog-safe"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import {
+  DEFAULT_THEME_ID,
   getAnalyticsEnabled,
   getFormulaViewMode,
   getSelectedFormula,
@@ -49,10 +49,10 @@ import {
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeVariant,
+  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
-import { applyThemeClass } from "../lib/theme"
+import { safeCapture } from "../lib/posthog-safe"
 import { rpc } from "../lib/rpc"
 import type {
   FormulaDetail,
@@ -64,7 +64,6 @@ import type {
   Workspace,
 } from "../lib/types"
 import { cn } from "../lib/utils"
-import { StepCountsContext } from "./step-count-badge"
 import { setWorkspaceCookie } from "../lib/workspace-cookie"
 import { FormulaDag } from "./formula-dag"
 import { FormulaPourModal } from "./formula-pour-modal"
@@ -74,6 +73,7 @@ import { FormulaTree } from "./formula-tree"
 import { Header } from "./header"
 import { SettingsDialog } from "./settings-dialog"
 import { useWorkspaceGate } from "./startup-gate"
+import { StepCountsContext } from "./step-count-badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
 import { UpdateDialog } from "./update-dialog"
 
@@ -211,7 +211,7 @@ export function FormulasView() {
   // Settings
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
-  const [theme, setTheme] = useState<ThemeVariant>("gray")
+  const [theme, setTheme] = useState<ThemeId>(DEFAULT_THEME_ID)
   const [zoomLevel, setZoomLevelState] = useState(100)
   const isTauriRef = useRef(false)
   const [vimEnabled, setVimEnabledState] = useState(true)
@@ -317,12 +317,6 @@ export function FormulasView() {
       }
     })
   }, [])
-
-  // Apply theme
-  useEffect(() => {
-    const el = document.documentElement
-    applyThemeClass(el, theme)
-  }, [theme])
 
   // Apply zoom (Tauri only)
   useEffect(() => {
@@ -492,7 +486,10 @@ export function FormulasView() {
         setSettingsOpen(true)
         return
       }
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "4" || e.key === "5" || e.key === "6")) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        (e.key === "1" || e.key === "2" || e.key === "4" || e.key === "5" || e.key === "6")
+      ) {
         e.preventDefault()
         if (e.key === "1") router.navigate({ to: "/" as never })
         if (e.key === "2") router.navigate({ to: "/activity" as never })
@@ -515,7 +512,7 @@ export function FormulasView() {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleThemeChange = (next: ThemeVariant) => {
+  const handleThemeChange = (next: ThemeId) => {
     setTheme(next)
     setThemePreference(next)
   }

@@ -1,9 +1,9 @@
 import { useNavigate } from "@tanstack/react-router"
-import { useHasTrains } from "@/hooks/use-has-trains"
-import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { X } from "lucide-react"
 import posthog from "posthog-js"
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
+import { useHasTrains } from "@/hooks/use-has-trains"
+import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { safeCapture } from "@/lib/posthog-safe"
 import { useActiveWorkspace } from "../hooks/use-active-workspace"
 import { useAppHealth } from "../hooks/use-app-health"
@@ -13,6 +13,7 @@ import { useDevConsoleTaps } from "../hooks/use-dev-console-taps"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import { deriveAgentStates, derivePipelineStages, toCanonicalStage } from "../lib/activity-utils"
 import {
+  DEFAULT_THEME_ID,
   getAnalyticsEnabled,
   getThemePreference,
   getUpdateCheckEnabled,
@@ -25,10 +26,9 @@ import {
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeVariant,
+  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
-import { applyThemeClass } from "../lib/theme"
 import { rpc } from "../lib/rpc"
 import { composePipelineChain } from "../lib/status-chain"
 import { useSubscriptionChangeSignal } from "../lib/subscribe"
@@ -109,7 +109,7 @@ function ActivityViewer() {
   // Settings and app-level state
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
-  const [theme, setTheme] = useState<ThemeVariant>("gray")
+  const [theme, setTheme] = useState<ThemeId>(DEFAULT_THEME_ID)
   const [zoomLevel, setZoomLevelState] = useState(100)
   const isTauriRef = useRef(false)
   const [vimEnabled, setVimEnabledState] = useState(true)
@@ -187,19 +187,13 @@ function ActivityViewer() {
     })
   }, [])
 
-  // Apply theme classes to <html>
-  useEffect(() => {
-    const el = document.documentElement
-    applyThemeClass(el, theme)
-  }, [theme])
-
   // Apply zoom level to document (Tauri only)
   useEffect(() => {
     if (!isTauriRef.current) return
     document.documentElement.style.zoom = `${zoomLevel}%`
   }, [zoomLevel])
 
-  const handleThemeChange = (next: ThemeVariant) => {
+  const handleThemeChange = (next: ThemeId) => {
     setTheme(next)
     setThemePreference(next)
   }
@@ -509,7 +503,15 @@ function ActivityViewer() {
       }
 
       // Cmd+1/Cmd+2/Cmd+3: view switching (always active)
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4" || e.key === "5" || e.key === "6")) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        (e.key === "1" ||
+          e.key === "2" ||
+          e.key === "3" ||
+          e.key === "4" ||
+          e.key === "5" ||
+          e.key === "6")
+      ) {
         e.preventDefault()
         if (e.key === "1") {
           navigate({ to: "/" })

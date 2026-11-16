@@ -2,8 +2,8 @@
 
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { safeCapture } from "../lib/posthog-safe"
 import {
+  DEFAULT_THEME_ID,
   getAnalyticsEnabled,
   getFilterBarVisible,
   getFiltersPreference,
@@ -21,14 +21,14 @@ import {
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeVariant,
+  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
-import { applyThemeClass } from "../lib/theme"
+import { safeCapture } from "../lib/posthog-safe"
 import type { Filters, SortOption } from "../lib/types"
 
 export function usePreferences() {
-  const [theme, setTheme] = useState<ThemeVariant>("gray")
+  const [theme, setTheme] = useState<ThemeId>(DEFAULT_THEME_ID)
   const [zoomLevel, setZoomLevelState] = useState(100)
   const [isTauri, setIsTauri] = useState(false)
   const isTauriRef = useRef(false)
@@ -141,19 +141,13 @@ export function usePreferences() {
     }
   }, [])
 
-  // Apply theme classes to <html>
-  useEffect(() => {
-    const el = document.documentElement
-    applyThemeClass(el, theme)
-  }, [theme])
-
   // Apply zoom level to document (Tauri only)
   useEffect(() => {
     if (!isTauriRef.current) return
     document.documentElement.style.zoom = `${zoomLevel}%`
   }, [zoomLevel])
 
-  const handleThemeChange = useCallback((next: ThemeVariant) => {
+  const handleThemeChange = useCallback((next: ThemeId) => {
     setTheme(next)
     setThemePreference(next)
   }, [])

@@ -1,12 +1,10 @@
-// beadbox-knr: only Gray renders (index.css @theme declares the color tokens
-// as gray literals, in every runtime), so a stored Blue or Green loads as
-// Gray, and the stored preference is left as the user set it.
-
+// Rewritten for runtime themes. The previous version asserted gray-only
+// rendering, which was the 0.25.2 limitation this feature removes.
 import { afterEach, describe, expect, test } from "bun:test"
 import {
-  AVAILABLE_THEMES,
-  effectiveTheme,
+  DEFAULT_THEME_ID,
   getThemePreference,
+  resolveThemeId,
   setThemePreference,
 } from "../lib/local-storage"
 import { applyThemeClass } from "../lib/theme"
@@ -16,28 +14,59 @@ afterEach(() => {
   document.documentElement.className = ""
 })
 
-describe("theme availability", () => {
-  test("only Gray is offered", () => {
-    expect([...AVAILABLE_THEMES]).toEqual(["gray"])
+describe("theme preference", () => {
+  test("defaults to the built-in dark theme", () => {
+    expect(getThemePreference()).toBe(DEFAULT_THEME_ID)
   })
 
-  test("a stored blue or green loads as gray; gray stays gray", () => {
-    expect(effectiveTheme("blue")).toBe("gray")
-    expect(effectiveTheme("green")).toBe("gray")
-    expect(effectiveTheme("gray")).toBe("gray")
+  test("round-trips an arbitrary custom theme id", () => {
+    setThemePreference("nord")
+    expect(getThemePreference()).toBe("nord")
   })
 
-  test("applying a stored blue puts the gray theme on <html>", () => {
-    applyThemeClass(document.documentElement, "blue")
-    expect(document.documentElement.className.split(" ").sort()).toEqual(["dark", "theme-gray"])
-    applyThemeClass(document.documentElement, "green")
-    expect(document.documentElement.className.split(" ").sort()).toEqual(["dark", "theme-gray"])
+  test("a preference for a theme that is not installed is preserved, not rewritten", () => {
+    setThemePreference("nord")
+    expect(localStorage.getItem("beads-theme")).toBe("nord")
+    expect(getThemePreference()).toBe("nord")
   })
 
-  test("the stored preference is not rewritten", () => {
-    setThemePreference("blue")
-    applyThemeClass(document.documentElement, getThemePreference())
-    expect(localStorage.getItem("beads-theme")).toBe("blue")
-    expect(getThemePreference()).toBe("blue")
+  test("rejects a syntactically invalid id and falls back", () => {
+    localStorage.setItem("beads-theme", "../../etc/passwd")
+    expect(getThemePreference()).toBe(DEFAULT_THEME_ID)
+  })
+})
+
+describe("resolveThemeId", () => {
+  test("a known id returns itself", () => {
+    expect(resolveThemeId("beadbox-light", ["beadbox-dark", "beadbox-light"])).toBe("beadbox-light")
+  })
+
+  test("an unknown id returns the default", () => {
+    expect(resolveThemeId("nord", ["beadbox-dark", "beadbox-light"])).toBe(DEFAULT_THEME_ID)
+  })
+
+  test("storage is untouched either way", () => {
+    setThemePreference("nord")
+    resolveThemeId("nord", ["beadbox-dark", "beadbox-light"])
+    resolveThemeId("beadbox-dark", ["beadbox-dark", "beadbox-light"])
+    expect(localStorage.getItem("beads-theme")).toBe("nord")
+  })
+})
+
+describe("applyThemeClass", () => {
+  test("dark appearance adds .dark", () => {
+    applyThemeClass(document.documentElement, "dark")
+    expect(document.documentElement.classList.contains("dark")).toBe(true)
+  })
+
+  test("light appearance removes .dark", () => {
+    document.documentElement.classList.add("dark")
+    applyThemeClass(document.documentElement, "light")
+    expect(document.documentElement.classList.contains("dark")).toBe(false)
+  })
+
+  test("no longer writes theme-* classes", () => {
+    applyThemeClass(document.documentElement, "dark")
+    expect(document.documentElement.className).toBe("dark")
   })
 })
