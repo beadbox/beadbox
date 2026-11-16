@@ -246,14 +246,16 @@ function SettingsDialogContent({
   // Sync focused index to current theme when dialog opens
   useEffect(() => {
     if (open) {
-      const idx = themes.findIndex(
-        (t) =>
-          t.id ===
-          resolveThemeId(
-            theme,
-            themes.map((o) => o.id),
-          ),
+      const resolved = resolveThemeId(
+        theme,
+        themes.map((o) => o.id),
       )
+      let idx = themes.findIndex((t) => t.id === resolved)
+      // A roving tabIndex on a disabled card is inert — disabled buttons are
+      // excluded from the tab order regardless of tabIndex — which would leave
+      // the radiogroup with no Tab stop at all. Fall back to the first
+      // selectable entry.
+      if (idx < 0 || themes[idx]?.error) idx = themes.findIndex((t) => !t.error)
       setFocusedThemeIndex(idx >= 0 ? idx : 0)
     }
     // themes is a dependency so the one-time transition from the

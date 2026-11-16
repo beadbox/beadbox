@@ -179,6 +179,41 @@ describe("theme picker, user themes", () => {
       expect(bad?.getAttribute("tabindex")).toBe("-1")
     }
   })
+
+  test("stored theme id is present but errored: radiogroup has a usable tab stop (not on the disabled card)", async () => {
+    stubThemesRpc([
+      {
+        id: "errored-theme",
+        name: "Errored Theme",
+        appearance: "dark",
+        source: "user",
+        error: "invalid color format",
+      },
+    ])
+    renderDialog("errored-theme")
+
+    await waitFor(() => {
+      expect(screen.getByText(/invalid color format/)).toBeDefined()
+    })
+
+    const erroredCard = themeRadios().find(
+      (r) => r.getAttribute("aria-label") === "Errored Theme theme",
+    )
+    expect(erroredCard).toBeDefined()
+    expect((erroredCard as HTMLButtonElement).disabled).toBe(true)
+
+    // The radiogroup must have exactly one card with tabIndex="0" for keyboard
+    // accessibility. That card must NOT be disabled — a disabled button is
+    // excluded from the tab order regardless of tabIndex, leaving the entire
+    // radiogroup with no Tab stop at all.
+    const radios = themeRadios()
+    const focusableCards = radios.filter((r) => r.getAttribute("tabindex") === "0")
+    expect(focusableCards).toHaveLength(1)
+    expect((focusableCards[0] as HTMLButtonElement).disabled).toBe(false)
+
+    // The errored card specifically must not hold the tab stop.
+    expect(erroredCard?.getAttribute("tabindex")).toBe("-1")
+  })
 })
 
 describe("theme picker, theming unavailable", () => {
