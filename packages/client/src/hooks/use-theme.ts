@@ -8,35 +8,27 @@
 // nothing.
 //
 // The preference id itself is NOT local state here: it comes from
-// local-storage.ts's getThemePreference/subscribeThemePreference pair via
-// useSyncExternalStore, so this hook, usePreferences, and any other
-// consumer all read the same single store. A change made through any one
-// of them (e.g. the settings dialog) re-renders every subscriber,
+// use-theme-preference.ts, which subscribes to local-storage.ts's single
+// store via useSyncExternalStore, so this hook, usePreferences, and any
+// other consumer all read the same single store. A change made through
+// any one of them (e.g. the settings dialog) re-renders every subscriber,
 // including this one — see
 // .superpowers/sdd/2026-11-13-runtime-themes/task-11-addendum.md for why a
 // local useState here would silently stop the applied theme from tracking
 // changes made elsewhere.
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useEffect, useState } from "react"
 
-import {
-  getThemePreference,
-  setThemePreference,
-  subscribeThemePreference,
-} from "../lib/local-storage"
 import { applyTheme, isThemingAvailable } from "../lib/theme-engine"
 import { loadTheme } from "../lib/theme-source"
+import { useThemePreference } from "./use-theme-preference"
 
 export function useTheme(): {
   themeId: string
   setTheme: (id: string) => void
   available: boolean
 } {
-  const themeId = useSyncExternalStore(
-    subscribeThemePreference,
-    getThemePreference,
-    getThemePreference,
-  )
+  const { themeId, setTheme } = useThemePreference()
   // Lazy-once: the probe is memoised in theme-engine.ts and must not run per render.
   const [available] = useState(() => isThemingAvailable())
 
@@ -50,13 +42,6 @@ export function useTheme(): {
       cancelled = true
     }
   }, [themeId, available])
-
-  const setTheme = useCallback((id: string) => {
-    // No local state to set: the store notification (dispatched by
-    // setThemePreference) is what re-renders every subscriber, this hook
-    // included.
-    setThemePreference(id)
-  }, [])
 
   return { themeId, setTheme, available }
 }

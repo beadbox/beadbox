@@ -10,7 +10,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react"
 import { usePreferences } from "../hooks/use-preferences"
 import { useTheme } from "../hooks/use-theme"
+import { useThemePreference } from "../hooks/use-theme-preference"
 import {
+  _resetThemePreferenceForTests,
   getThemePreference,
   setThemePreference,
   subscribeThemePreference,
@@ -40,6 +42,11 @@ function PreferencesProbe() {
   return <div data-testid="prefs-out">{theme}</div>
 }
 
+function SubscriptionProbe() {
+  const { themeId } = useThemePreference()
+  return <div data-testid="subscription-out">{themeId}</div>
+}
+
 beforeEach(() => {
   // isThemingAvailable is memoised across calls; without this, whichever
   // test runs first decides the verdict for every test after it.
@@ -51,6 +58,7 @@ afterEach(() => {
   localStorage.clear()
   document.documentElement.className = ""
   document.documentElement.removeAttribute("style")
+  _resetThemePreferenceForTests()
 })
 
 describe("useTheme", () => {
@@ -117,11 +125,13 @@ describe("useTheme", () => {
       <div>
         <Probe />
         <PreferencesProbe />
+        <SubscriptionProbe />
       </div>,
     )
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
       expect(getByTestId("prefs-out").textContent).toBe("beadbox-dark")
+      expect(getByTestId("subscription-out").textContent).toBe("beadbox-dark")
     })
 
     // Change made through the OTHER subscriber's channel (direct storage
@@ -134,6 +144,7 @@ describe("useTheme", () => {
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-light:true")
       expect(getByTestId("prefs-out").textContent).toBe("beadbox-light")
+      expect(getByTestId("subscription-out").textContent).toBe("beadbox-light")
     })
   })
 

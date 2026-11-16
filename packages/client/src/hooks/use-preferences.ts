@@ -1,13 +1,12 @@
 "use client"
 
 import posthog from "posthog-js"
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   getAnalyticsEnabled,
   getFilterBarVisible,
   getFiltersPreference,
   getSortPreference,
-  getThemePreference,
   getUpdateCheckEnabled,
   getUpdateCheckFrequency,
   getVimNavigationEnabled,
@@ -16,28 +15,23 @@ import {
   setZoomLevel as persistZoomLevel,
   setFiltersPreference,
   setSortPreference,
-  setThemePreference,
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  subscribeThemePreference,
-  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { safeCapture } from "../lib/posthog-safe"
 import type { Filters, SortOption } from "../lib/types"
+import { useThemePreference } from "./use-theme-preference"
 
 export function usePreferences() {
   // beadbox-sdd/2026-11-13-runtime-themes task 11: theme preference is a
   // single observable store (local-storage.ts), not local state here —
-  // see use-theme.ts for the hook that owns the apply-to-<html> effect.
-  // This keeps usePreferences's five independent call sites in sync with
-  // any change made through the store, including from use-theme.ts itself.
-  const theme = useSyncExternalStore(
-    subscribeThemePreference,
-    getThemePreference,
-    getThemePreference,
-  )
+  // see use-theme-preference.ts for the subscription-only hook and
+  // use-theme.ts for the hook that owns the apply-to-<html> effect. This
+  // keeps usePreferences's five independent call sites in sync with any
+  // change made through the store, including from use-theme.ts itself.
+  const { themeId: theme, setTheme: handleThemeChange } = useThemePreference()
   const [zoomLevel, setZoomLevelState] = useState(100)
   const [isTauri, setIsTauri] = useState(false)
   const isTauriRef = useRef(false)
@@ -136,8 +130,9 @@ export function usePreferences() {
   const [vimEnabled, setVimEnabledState] = useState(true)
 
   // Load zoom, vim navigation, and update preferences on mount. Theme is
-  // no longer hydrated here: it comes from the useSyncExternalStore call
-  // above, which already reads getThemePreference() on first render.
+  // no longer hydrated here: it comes from use-theme-preference.ts's
+  // useSyncExternalStore call above, which already reads
+  // getThemePreference() on first render.
   useEffect(() => {
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
@@ -156,12 +151,6 @@ export function usePreferences() {
     if (!isTauriRef.current) return
     document.documentElement.style.zoom = `${zoomLevel}%`
   }, [zoomLevel])
-
-  const handleThemeChange = useCallback((next: ThemeId) => {
-    // No local state to set: the store notification re-renders this hook
-    // (and every other subscriber) via the useSyncExternalStore above.
-    setThemePreference(next)
-  }, [])
 
   const handleZoomChange = useCallback((level: number) => {
     const clamped = Math.max(50, Math.min(200, level))

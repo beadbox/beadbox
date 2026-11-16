@@ -10,23 +10,20 @@ import { useAppHealth } from "../hooks/use-app-health"
 import { useCrossFilter } from "../hooks/use-cross-filter"
 import { useDevConsole } from "../hooks/use-dev-console"
 import { useDevConsoleTaps } from "../hooks/use-dev-console-taps"
+import { useThemePreference } from "../hooks/use-theme-preference"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import { deriveAgentStates, derivePipelineStages, toCanonicalStage } from "../lib/activity-utils"
 import {
-  DEFAULT_THEME_ID,
   getAnalyticsEnabled,
-  getThemePreference,
   getUpdateCheckEnabled,
   getUpdateCheckFrequency,
   getVimNavigationEnabled,
   getZoomLevel,
   setZoomLevel as persistZoomLevel,
   setSelectedBead as setStoredSelectedBead,
-  setThemePreference,
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
@@ -109,7 +106,7 @@ function ActivityViewer() {
   // Settings and app-level state
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
-  const [theme, setTheme] = useState<ThemeId>(DEFAULT_THEME_ID)
+  const { themeId: theme, setTheme: handleThemeChange } = useThemePreference()
   const [zoomLevel, setZoomLevelState] = useState(100)
   const isTauriRef = useRef(false)
   const [vimEnabled, setVimEnabledState] = useState(true)
@@ -164,7 +161,6 @@ function ActivityViewer() {
 
   // Load preferences on mount
   useEffect(() => {
-    setTheme(getThemePreference())
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
     setUpdateCheckFrequencyState(getUpdateCheckFrequency())
@@ -192,11 +188,6 @@ function ActivityViewer() {
     if (!isTauriRef.current) return
     document.documentElement.style.zoom = `${zoomLevel}%`
   }, [zoomLevel])
-
-  const handleThemeChange = (next: ThemeId) => {
-    setTheme(next)
-    setThemePreference(next)
-  }
 
   const handleZoomChange = useCallback((level: number) => {
     const clamped = Math.max(50, Math.min(200, level))

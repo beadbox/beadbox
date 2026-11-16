@@ -8,7 +8,12 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { SettingsDialog } from "../components/settings-dialog"
-import { getThemePreference, setThemePreference, type ThemeId } from "../lib/local-storage"
+import {
+  _resetThemePreferenceForTests,
+  getThemePreference,
+  setThemePreference,
+  type ThemeId,
+} from "../lib/local-storage"
 
 function renderDialog(theme: ThemeId, onThemeChange = mock(() => {})) {
   render(
@@ -41,6 +46,7 @@ afterEach(() => {
   cleanup()
   localStorage.clear()
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+  _resetThemePreferenceForTests()
 })
 
 for (const runtime of ["packaged", "browser"] as const) {

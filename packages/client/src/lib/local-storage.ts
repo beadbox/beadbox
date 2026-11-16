@@ -144,6 +144,12 @@ const THEME_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 const themePreferenceEvents = new EventTarget()
 const THEME_PREFERENCE_CHANGE_EVENT = "theme-preference-change"
 
+// In-memory fallback for the current session. getThemePreference prefers
+// this when set, so a write that survives only in memory (localStorage
+// threw) is still visible to every reader this session — see
+// setThemePreference's catch below.
+let currentThemeId: ThemeId | null = null
+
 /**
  * The stored theme id, or the built-in dark theme.
  *
@@ -154,6 +160,7 @@ const THEME_PREFERENCE_CHANGE_EVENT = "theme-preference-change"
  */
 export function getThemePreference(): ThemeId {
   if (typeof window === "undefined") return DEFAULT_THEME_ID
+  if (currentThemeId !== null) return currentThemeId
 
   try {
     const stored = localStorage.getItem(THEME_KEY)
@@ -168,10 +175,13 @@ export function setThemePreference(id: ThemeId): void {
   if (typeof window === "undefined") return
   if (!THEME_ID_RE.test(id)) return
 
+  currentThemeId = id
   try {
     localStorage.setItem(THEME_KEY, id)
   } catch {
-    // Non-fatal: the theme still applies for this session.
+    // Non-fatal: currentThemeId above already holds the new id, so
+    // getThemePreference still returns it and the theme still applies for
+    // this session even though it won't persist across reloads.
   }
   // Dispatched outside the try/catch: subscribers must still be notified
   // when the localStorage write itself fails, so "the theme still applies
@@ -194,6 +204,12 @@ export function subscribeThemePreference(listener: () => void): () => void {
   return () => {
     themePreferenceEvents.removeEventListener(THEME_PREFERENCE_CHANGE_EVENT, listener)
   }
+}
+
+// Clears the in-memory fallback so a test can simulate a fresh module/page
+// load that reads whatever is actually in storage.
+export function _resetThemePreferenceForTests(): void {
+  currentThemeId = null
 }
 
 /**

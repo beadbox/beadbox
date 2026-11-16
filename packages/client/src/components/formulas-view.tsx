@@ -31,13 +31,12 @@ import { useHasTrains } from "@/hooks/use-has-trains"
 import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { useActiveWorkspace } from "../hooks/use-active-workspace"
 import { useAppHealth } from "../hooks/use-app-health"
+import { useThemePreference } from "../hooks/use-theme-preference"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import {
-  DEFAULT_THEME_ID,
   getAnalyticsEnabled,
   getFormulaViewMode,
   getSelectedFormula,
-  getThemePreference,
   getUpdateCheckEnabled,
   getUpdateCheckFrequency,
   getVimNavigationEnabled,
@@ -45,11 +44,9 @@ import {
   setZoomLevel as persistZoomLevel,
   setFormulaViewMode,
   setSelectedFormula,
-  setThemePreference,
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { safeCapture } from "../lib/posthog-safe"
@@ -211,7 +208,7 @@ export function FormulasView() {
   // Settings
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
-  const [theme, setTheme] = useState<ThemeId>(DEFAULT_THEME_ID)
+  const { themeId: theme, setTheme: handleThemeChange } = useThemePreference()
   const [zoomLevel, setZoomLevelState] = useState(100)
   const isTauriRef = useRef(false)
   const [vimEnabled, setVimEnabledState] = useState(true)
@@ -295,7 +292,6 @@ export function FormulasView() {
 
   // Load preferences on mount
   useEffect(() => {
-    setTheme(getThemePreference())
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
     setUpdateCheckFrequencyState(getUpdateCheckFrequency())
@@ -512,10 +508,6 @@ export function FormulasView() {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleThemeChange = (next: ThemeId) => {
-    setTheme(next)
-    setThemePreference(next)
-  }
   const handleZoomChange = useCallback((level: number) => {
     const c = Math.max(50, Math.min(200, level))
     setZoomLevelState(c)
