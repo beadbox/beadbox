@@ -6,7 +6,7 @@
 // stays keyboard-operable.
 
 import { afterEach, describe, expect, mock, test } from "bun:test"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { SettingsDialog } from "../components/settings-dialog"
 import {
   _resetThemePreferenceForTests,
@@ -17,6 +17,7 @@ import {
 import { queryClient } from "../lib/query-client"
 import { _resetRpc, _setRpc } from "../lib/rpc"
 import { __resetProbeCache } from "../lib/theme-engine"
+import { themesQueryKey } from "../lib/theme-source"
 
 function renderDialog(theme: ThemeId, onThemeChange = mock(() => {})) {
   render(
@@ -213,6 +214,68 @@ describe("theme picker, user themes", () => {
 
     // The errored card specifically must not hold the tab stop.
     expect(erroredCard?.getAttribute("tabindex")).toBe("-1")
+  })
+
+  // Task 13: hot reload invalidates themesQueryKey so a changed file's
+  // error (or updated preview) reaches this picker. That refetch must not
+  // yank focus away from a card the user has already arrow-keyed to —
+  // task-12-addendum deferred this exact tradeoff to task 13.
+  test("a themesQueryKey refetch while open does not reset arrow-key focus", async () => {
+    let round = 0
+    const list = mock(async () => {
+      round++
+      return [
+        {
+          id: "aaa",
+          name: "Aaa",
+          appearance: "dark",
+          source: "user",
+          preview: {
+            background: "#000000",
+            card: "#111111",
+            primary: round === 1 ? "#88c0d0" : "#99d1e1",
+            secondary: "#222222",
+            mutedForeground: "#333333",
+            foreground: "#eceff4",
+          },
+        },
+      ]
+    })
+    _setRpc({
+      themes: { list, get: mock(async () => null) },
+      system: { getLogDirectory: mock(async () => null) },
+      bdSettings: { getBdPath: mock(async () => ({ savedPath: null })) },
+    } as never)
+
+    renderDialog("beadbox-dark")
+    await waitFor(() => {
+      expect(screen.getByText("Aaa")).toBeDefined()
+    })
+
+    const group = screen.getByRole("radiogroup", { name: "Theme selection" })
+    // beadbox-dark, beadbox-light, Aaa — arrow right twice lands on Aaa.
+    fireEvent.keyDown(group, { key: "ArrowRight" })
+    fireEvent.keyDown(group, { key: "ArrowRight" })
+    const aaa = themeRadios().find((r) => r.getAttribute("aria-label") === "Aaa theme")
+    expect(aaa?.getAttribute("tabindex")).toBe("0")
+
+    // Simulate the hot-reload invalidation (same id, changed preview
+    // colour) while the dialog stays open and the selected theme (prop
+    // `theme`) is unchanged.
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: themesQueryKey })
+    })
+    await waitFor(() => {
+      expect(list).toHaveBeenCalledTimes(2)
+    })
+
+    // Focus must still be on Aaa, not reset back to beadbox-dark.
+    const aaaAfter = themeRadios().find((r) => r.getAttribute("aria-label") === "Aaa theme")
+    expect(aaaAfter?.getAttribute("tabindex")).toBe("0")
+    const darkAfter = themeRadios().find(
+      (r) => r.getAttribute("aria-label") === "Beadbox Dark theme",
+    )
+    expect(darkAfter?.getAttribute("tabindex")).toBe("-1")
   })
 })
 

@@ -243,9 +243,22 @@ function SettingsDialogContent({
     }
   }, [analyticsEnabled])
 
-  // Sync focused index to current theme when dialog opens
+  // Sync focused index to current theme — but only on the open transition,
+  // or when `theme` itself changes (a deliberate selection, by click or by
+  // keyboard). Task 13 made `themes` refetch while the dialog stays open
+  // (hot reload invalidates themesQueryKey so a changed file's rejection
+  // reason — or updated preview colours — reach the picker; see
+  // task-13-addendum). That refetch gives `themes` a new array identity
+  // with the SAME selected id, which must NOT re-run the sync below: doing
+  // so would reset focusedThemeIndex and yank the user's arrow-key focus
+  // out from under them mid-session (task-12-addendum deferred this exact
+  // tradeoff to task 13). A real theme switch still re-syncs immediately,
+  // same as before; closing and reopening still re-syncs too.
+  const prevSyncRef = useRef<{ open: boolean; theme: ThemeId }>({ open: false, theme })
   useEffect(() => {
-    if (open) {
+    const openedNow = open && !prevSyncRef.current.open
+    const themeChanged = theme !== prevSyncRef.current.theme
+    if (open && (openedNow || themeChanged)) {
       const resolved = resolveThemeId(
         theme,
         themes.map((o) => o.id),
@@ -258,15 +271,7 @@ function SettingsDialogContent({
       if (idx < 0 || themes[idx]?.error) idx = themes.findIndex((t) => !t.error)
       setFocusedThemeIndex(idx >= 0 ? idx : 0)
     }
-    // themes is a dependency so the one-time transition from the
-    // placeholder (built-ins only) to the resolved list re-syncs focus onto
-    // a selected user theme that was not in the placeholder. Nothing
-    // refetches while the dialog stays open today (refetchOnWindowFocus is
-    // off), so this does not re-run mid-session and fight the user's own
-    // arrow-key nav — but a later task invalidating themesQueryKey on
-    // theme-file changes (task-12-addendum's stated reason for exporting it)
-    // WILL re-run this effect while the dialog is open; revisit the
-    // mid-session-refetch tradeoff then if it matters.
+    prevSyncRef.current = { open, theme }
   }, [open, theme, themes])
 
   const handleThemeKeyDown = useCallback(

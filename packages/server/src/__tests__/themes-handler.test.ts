@@ -65,4 +65,47 @@ describe("themes handler", () => {
   test("get returns null for an unknown theme rather than throwing", async () => {
     expect(await themes.get("absent")).toBeNull()
   })
+
+  test("startWatch/stopWatch are registered and emit a stderr line on change", async () => {
+    expect(typeof handlers.themes.startWatch).toBe("function")
+    expect(typeof handlers.themes.stopWatch).toBe("function")
+
+    const chunks: string[] = []
+    const original = process.stderr.write.bind(process.stderr)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(process.stderr as any).write = (chunk: string) => {
+      chunks.push(chunk)
+      return true
+    }
+    try {
+      await themes.startWatch()
+      await writeFile(join(dir, "nord.json"), "{}")
+      await new Promise((r) => setTimeout(r, 500))
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(process.stderr as any).write = original
+      await themes.stopWatch()
+    }
+    expect(chunks.some((c) => c.startsWith("[THEMES:changed]"))).toBe(true)
+  })
+
+  test("stopWatch after startWatch silences further stderr lines", async () => {
+    const chunks: string[] = []
+    const original = process.stderr.write.bind(process.stderr)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(process.stderr as any).write = (chunk: string) => {
+      chunks.push(chunk)
+      return true
+    }
+    try {
+      await themes.startWatch()
+      await themes.stopWatch()
+      await writeFile(join(dir, "nord.json"), "{}")
+      await new Promise((r) => setTimeout(r, 500))
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(process.stderr as any).write = original
+    }
+    expect(chunks.some((c) => c.startsWith("[THEMES:changed]"))).toBe(false)
+  })
 })

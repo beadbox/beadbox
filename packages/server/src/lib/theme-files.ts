@@ -5,11 +5,19 @@
 // Reading happens here, in the sidecar, so no Tauri fs: capability is needed
 // — the webview never touches the filesystem.
 
+import { type FSWatcher, watch } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, join } from "node:path"
 import type { Theme } from "./theme-tokens"
 import { validateTheme } from "./theme-validate"
+
+// Editors write in several steps (temp file, rename, chmod), so a single
+// save still produces several raw fs events. This debounce coalesces them
+// into one onChange() call. 200ms is comfortably larger than the span of a
+// typical multi-step atomic save (observed within tens of ms) while still
+// feeling instant to a user who just hit save.
+const WATCH_DEBOUNCE_MS = 200
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
@@ -110,4 +118,42 @@ export async function readThemeFile(
     return { ok: false, error: `not valid JSON: ${e instanceof Error ? e.message : String(e)}` }
   }
   return validateTheme(parsed, { id })
+}
+
+/**
+ * Watch the themes directory for changes, debouncing bursts into one
+ * onChange() call. Node's FSWatcher emits only "change", "error" and
+ * "close" — the "rename" vs "change" distinction arrives as the FIRST
+ * ARGUMENT to the "change" listener, not as a separate event name, so a
+ * single listener handles a file being created, edited or deleted alike.
+ *
+ * A half-written file mid-save is not a bad file: this watcher only
+ * signals "something changed, go re-read" — it never classifies, moves or
+ * renames anything itself. Reporting bad themes in place is
+ * listThemeFiles()'s job.
+ *
+ * Returns a stop function; a missing directory yields a no-op stop.
+ */
+export function watchThemes(onChange: () => void): () => void {
+  let watcher: FSWatcher
+  try {
+    watcher = watch(getThemesDir(), { persistent: false })
+  } catch {
+    return () => {}
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let stopped = false
+  watcher.on("change", () => {
+    if (stopped) return
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(onChange, WATCH_DEBOUNCE_MS)
+  })
+  watcher.on("error", () => {
+    /* a vanished directory is not fatal */
+  })
+  return () => {
+    stopped = true
+    if (timer) clearTimeout(timer)
+    watcher.close()
+  }
 }
