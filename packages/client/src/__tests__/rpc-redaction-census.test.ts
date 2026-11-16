@@ -105,11 +105,12 @@ function credentialMethods(): string[] {
 describe("Commands-tab redaction census", () => {
   test("the scan reads every handler namespace", () => {
     const files = namespaceFiles()
-    expect(files.size).toBe(18)
+    expect(files.size).toBe(19)
     expect(files.get("bdSettings")).toBe("bd-settings.ts")
     expect(files.get("aggregate")).toBe("aggregate.ts")
     expect(files.get("workspaces")).toBe("workspaces.ts")
     expect(files.get("subscribe")).toBe("subscribe.ts")
+    expect(files.get("themes")).toBe("themes.ts")
   })
 
   test("the scan finds the five known credential-carrying handlers", () => {
