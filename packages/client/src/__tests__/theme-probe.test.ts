@@ -78,6 +78,32 @@ describe("probeTokenSupport", () => {
       }
     })
 
+    test("returns false for four-component no-'a' rgb(0, 0, 0, 0)", () => {
+      const originalGetComputedStyle = window.getComputedStyle
+      window.getComputedStyle = () =>
+        ({
+          backgroundColor: "rgb(0, 0, 0, 0)",
+        }) as CSSStyleDeclaration
+      try {
+        expect(probeTokenSupport()).toBe(false)
+      } finally {
+        window.getComputedStyle = originalGetComputedStyle
+      }
+    })
+
+    test("returns true for opaque black rgb(0, 0, 0)", () => {
+      const originalGetComputedStyle = window.getComputedStyle
+      window.getComputedStyle = () =>
+        ({
+          backgroundColor: "rgb(0, 0, 0)",
+        }) as CSSStyleDeclaration
+      try {
+        expect(probeTokenSupport()).toBe(true)
+      } finally {
+        window.getComputedStyle = originalGetComputedStyle
+      }
+    })
+
     test("returns true for resolved value with alpha (rgba(1, 2, 3, 1))", () => {
       const originalGetComputedStyle = window.getComputedStyle
       window.getComputedStyle = () =>

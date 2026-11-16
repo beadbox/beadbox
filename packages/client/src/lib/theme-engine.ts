@@ -94,12 +94,12 @@ export function probeTokenSupport(el: HTMLElement = document.documentElement): b
     if (!resolved) return false
     // Engine echoed the declaration back without resolving it.
     if (resolved.includes("var(")) return false
-    // Unresolvable var() falls back to the property's initial value. Engines
-    // differ in how they serialise it, so strip whitespace entirely (not just
-    // collapse runs — `rgba(0,0,0,0)` has none to collapse) and compare the
-    // compact form.
+    // Unresolvable var() falls back to the property's initial value, `transparent`.
+    // Engines differ in how they serialise it — spacing varies, and CSS Color 4
+    // unified rgb()/rgba(), so both function names can carry four components.
+    // Match any all-zero rgb/rgba rather than enumerating spellings.
     const compact = resolved.replace(/\s/g, "")
-    if (compact === "rgba(0,0,0,0)" || compact === "rgb(0,0,0)" || resolved === "transparent") {
+    if (/^rgba?\(0,0,0,0\)$/.test(compact) || compact === "transparent") {
       return false
     }
     return true
