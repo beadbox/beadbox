@@ -27,6 +27,10 @@ function allVarNames(): string[] {
 }
 
 export function clearTheme(el: HTMLElement = document.documentElement): void {
+  // Deliberately does NOT reset the .dark class. The :root defaults ARE the
+  // dark palette, and index.html ships class="dark". So the cleared state IS
+  // the dark theme. Removing the class here would leave dark-palette tokens
+  // driving light-mode `dark:` utilities — a state no theme represents.
   for (const name of allVarNames()) el.style.removeProperty(name)
 }
 
@@ -53,4 +57,67 @@ export function applyTheme(theme: Theme, el: HTMLElement = document.documentElem
 
   // Toggle appearance last so observers see a fully-applied theme.
   el.classList.toggle("dark", theme.appearance === "dark")
+}
+
+// --- startup probe -------------------------------------------------------
+//
+// Bounds the risk the 2026-11-13 spike could not clear: it ran on macOS 27
+// only, while tauri.conf.json supports 13.0+.
+//
+// Detects NON-RESOLUTION: a var() the engine cannot walk falls back to the
+// property's initial value — `transparent` for background-color, which
+// getComputedStyle reports as "rgba(0, 0, 0, 0)".
+//
+// It does NOT detect MIS-resolution to a wrong-but-real colour. The spike
+// showed getComputedStyle returns oklch() verbatim, so computed style cannot
+// confirm a resolved value is correct. Hex-only validation guards that case.
+
+const PROBE_VAR = "--bb-probe-sentinel"
+const PROBE_RGB = "rgb(1, 2, 3)"
+
+let cachedProbe: boolean | null = null
+
+export function probeTokenSupport(el: HTMLElement = document.documentElement): boolean {
+  const probe = document.createElement("div")
+  probe.setAttribute("data-bb-probe", "")
+  probe.style.position = "absolute"
+  probe.style.width = "1px"
+  probe.style.height = "1px"
+  probe.style.opacity = "0"
+  probe.style.pointerEvents = "none"
+  probe.style.setProperty(PROBE_VAR, PROBE_RGB)
+  probe.style.backgroundColor = `var(${PROBE_VAR})`
+  el.ownerDocument.body.appendChild(probe)
+  try {
+    const resolved = el.ownerDocument.defaultView
+      ?.getComputedStyle(probe)
+      .backgroundColor.replace(/\s+/g, " ")
+      .trim()
+    // Unresolved var() -> initial value -> transparent.
+    if (!resolved || resolved === "rgba(0, 0, 0, 0)" || resolved === "transparent") {
+      return false
+    }
+    return resolved === PROBE_RGB || resolved === "rgb(1,2,3)"
+  } finally {
+    probe.remove()
+  }
+}
+
+/** Memoised probe result. Theming is disabled for the session when false. */
+export function isThemingAvailable(): boolean {
+  if (cachedProbe === null) {
+    try {
+      cachedProbe = probeTokenSupport()
+    } catch {
+      // A probe failure must never take the app down; assume unavailable
+      // and let the baked :root literals render.
+      cachedProbe = false
+    }
+  }
+  return cachedProbe
+}
+
+/** Test seam. */
+export function __resetProbeCache(): void {
+  cachedProbe = null
 }
