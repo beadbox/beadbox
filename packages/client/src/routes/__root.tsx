@@ -6,6 +6,7 @@ import { StartupGate, useWorkspaceGate } from "../components/startup-gate"
 import { StatusColorsMount } from "../components/status-colors-mount"
 import { Toaster } from "../components/ui/sonner"
 import { WorkspaceRailPanel } from "../components/workspace-rail-panel"
+import { useTheme } from "../hooks/use-theme"
 import { PostHogProvider } from "../lib/posthog-provider"
 import { useChangeSubscription } from "../lib/subscribe"
 import { getWorkspaceCookie, subscribeWorkspaceCookie } from "../lib/workspace-cookie"
@@ -49,6 +50,11 @@ export const Route = createRootRoute({
 })
 
 function RootLayout() {
+  // Applies the stored theme to <html>. Must run before any early return
+  // so a loading or error branch (StartupGate's children swap) is themed
+  // too. Called for its side effect; the return value is unused.
+  useTheme()
+
   const aggregate = useRouterState({ select: (s) => s.location.pathname === "/all-projects" })
   return (
     <PostHogProvider>
@@ -62,13 +68,17 @@ function RootLayout() {
       <div className="flex h-full min-h-0">
         <WorkspaceRailPanel />
         <div className="min-w-0 flex-1">
-          {aggregate ? <Outlet /> : <StartupGate>
-            <ChangeSubscriptionMount />
-            <StatusColorsMount />
-            {/* beadbox-01f.2: visible when the change stream stalls. */}
-            <LiveUpdatesPausedBanner />
+          {aggregate ? (
             <Outlet />
-          </StartupGate>}
+          ) : (
+            <StartupGate>
+              <ChangeSubscriptionMount />
+              <StatusColorsMount />
+              {/* beadbox-01f.2: visible when the change stream stalls. */}
+              <LiveUpdatesPausedBanner />
+              <Outlet />
+            </StartupGate>
+          )}
         </div>
       </div>
       <Toaster position="bottom-right" theme="dark" />

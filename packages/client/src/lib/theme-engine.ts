@@ -17,6 +17,7 @@ import {
   radiusVarName,
   type Theme,
 } from "@beadbox/server/theme-tokens"
+import { applyThemeClass } from "./theme"
 
 function allVarNames(): string[] {
   return [
@@ -56,7 +57,9 @@ export function applyTheme(theme: Theme, el: HTMLElement = document.documentElem
   }
 
   // Toggle appearance last so observers see a fully-applied theme.
-  el.classList.toggle("dark", theme.appearance === "dark")
+  // Delegates to theme.ts's applyThemeClass so exactly one function in
+  // the codebase maps an Appearance to the dark class.
+  applyThemeClass(el, theme.appearance)
 }
 
 // --- startup probe -------------------------------------------------------

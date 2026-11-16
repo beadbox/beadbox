@@ -137,6 +137,13 @@ export const DEFAULT_THEME_ID = "beadbox-dark"
 
 const THEME_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
+// beadbox-sdd/2026-11-13-runtime-themes task 11: the theme preference is
+// observed by multiple independent call sites (use-theme.ts, usePreferences,
+// and whatever else reads it), so a write here must notify all of them —
+// mirrors lib/workspace-cookie.ts's module-scoped EventTarget pub/sub.
+const themePreferenceEvents = new EventTarget()
+const THEME_PREFERENCE_CHANGE_EVENT = "theme-preference-change"
+
 /**
  * The stored theme id, or the built-in dark theme.
  *
@@ -165,6 +172,27 @@ export function setThemePreference(id: ThemeId): void {
     localStorage.setItem(THEME_KEY, id)
   } catch {
     // Non-fatal: the theme still applies for this session.
+  }
+  // Dispatched outside the try/catch: subscribers must still be notified
+  // when the localStorage write itself fails, so "the theme still applies
+  // for this session" (above) is actually true.
+  themePreferenceEvents.dispatchEvent(new Event(THEME_PREFERENCE_CHANGE_EVENT))
+}
+
+/**
+ * Subscribe to theme-preference changes. The listener fires AFTER each
+ * setThemePreference write that passes the id-format guard. Returns an
+ * unsubscribe function. The listener receives no arguments — read
+ * getThemePreference() inside the listener to get the current value.
+ *
+ * Pair with getThemePreference via useSyncExternalStore so every consumer
+ * (use-theme.ts, usePreferences) observes the same single store instead of
+ * holding its own copy.
+ */
+export function subscribeThemePreference(listener: () => void): () => void {
+  themePreferenceEvents.addEventListener(THEME_PREFERENCE_CHANGE_EVENT, listener)
+  return () => {
+    themePreferenceEvents.removeEventListener(THEME_PREFERENCE_CHANGE_EVENT, listener)
   }
 }
 

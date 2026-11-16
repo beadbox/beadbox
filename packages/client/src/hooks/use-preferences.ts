@@ -1,9 +1,8 @@
 "use client"
 
 import posthog from "posthog-js"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import {
-  DEFAULT_THEME_ID,
   getAnalyticsEnabled,
   getFilterBarVisible,
   getFiltersPreference,
@@ -21,6 +20,7 @@ import {
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
+  subscribeThemePreference,
   type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
@@ -28,7 +28,16 @@ import { safeCapture } from "../lib/posthog-safe"
 import type { Filters, SortOption } from "../lib/types"
 
 export function usePreferences() {
-  const [theme, setTheme] = useState<ThemeId>(DEFAULT_THEME_ID)
+  // beadbox-sdd/2026-11-13-runtime-themes task 11: theme preference is a
+  // single observable store (local-storage.ts), not local state here —
+  // see use-theme.ts for the hook that owns the apply-to-<html> effect.
+  // This keeps usePreferences's five independent call sites in sync with
+  // any change made through the store, including from use-theme.ts itself.
+  const theme = useSyncExternalStore(
+    subscribeThemePreference,
+    getThemePreference,
+    getThemePreference,
+  )
   const [zoomLevel, setZoomLevelState] = useState(100)
   const [isTauri, setIsTauri] = useState(false)
   const isTauriRef = useRef(false)
@@ -126,9 +135,10 @@ export function usePreferences() {
   // Vim navigation toggle
   const [vimEnabled, setVimEnabledState] = useState(true)
 
-  // Load theme, zoom, vim navigation, and update preferences on mount
+  // Load zoom, vim navigation, and update preferences on mount. Theme is
+  // no longer hydrated here: it comes from the useSyncExternalStore call
+  // above, which already reads getThemePreference() on first render.
   useEffect(() => {
-    setTheme(getThemePreference())
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
     setUpdateCheckFrequencyState(getUpdateCheckFrequency())
@@ -148,7 +158,8 @@ export function usePreferences() {
   }, [zoomLevel])
 
   const handleThemeChange = useCallback((next: ThemeId) => {
-    setTheme(next)
+    // No local state to set: the store notification re-renders this hook
+    // (and every other subscriber) via the useSyncExternalStore above.
     setThemePreference(next)
   }, [])
 

@@ -60,4 +60,30 @@ describe("applyTheme", () => {
     clearTheme()
     expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe("")
   })
+
+  // Task 11 addendum: applyTheme now delegates the class toggle to
+  // theme.ts's applyThemeClass instead of toggling the class itself, but
+  // the ordering contract (tokens written, THEN class toggled) must be
+  // unchanged — the status-colour MutationObserver is filtered to
+  // attributeFilter: ["class"] and must only fire once tokens exist.
+  test("toggles the class only after every token is written", () => {
+    const el = document.createElement("div")
+    const calls: string[] = []
+    const originalSetProperty = el.style.setProperty.bind(el.style)
+    el.style.setProperty = ((name: string, value: string) => {
+      calls.push(`token:${name}`)
+      return originalSetProperty(name, value)
+    }) as typeof el.style.setProperty
+    const originalToggle = el.classList.toggle.bind(el.classList)
+    el.classList.toggle = ((name: string, force?: boolean) => {
+      calls.push(`class:${name}`)
+      return originalToggle(name, force)
+    }) as typeof el.classList.toggle
+
+    applyTheme(theme(), el)
+
+    expect(calls.length).toBeGreaterThan(1)
+    expect(calls[calls.length - 1]).toBe("class:dark")
+    expect(calls.slice(0, -1).every((c) => c.startsWith("token:"))).toBe(true)
+  })
 })
