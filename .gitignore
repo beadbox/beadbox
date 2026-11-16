@@ -90,3 +90,15 @@ reports/mutation/
 # stages those artifacts straight into the public repo — eng2 confirmed with a
 # `git add -An` dry-run that website/out/404.html and friends would have been.
 website/
+
+# Agent/tool scratch directories, none of which are part of this repository.
+# They are generated in-place by developer tooling and are large: graphify-out/
+# alone holds a ~179k-line graph.json plus a per-file extraction cache, and
+# .docledger/ holds a live sqlite DB that is rewritten on nearly every command.
+# This entry exists because they were committed once: an agent ran a broad
+# `git add` while committing a two-file fix and swept 126 files / 184k
+# insertions onto a feature branch. Same failure mode as the website/ entry
+# above — untracked tool output adjacent to real changes.
+.docledger/
+.serena/
+graphify-out/
