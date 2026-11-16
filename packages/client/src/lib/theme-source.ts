@@ -37,31 +37,32 @@ function entryOf(t: Theme): ThemeEntry {
 export async function listThemes(): Promise<ThemeEntry[]> {
   const builtins = BUILTIN_THEMES.map(entryOf)
   const builtinIds = new Set(builtins.map((e) => e.id))
-  let user: ThemeEntry[] = []
+  let raw: ThemeEntry[] = []
   try {
-    const raw = await rpc.themes.list()
-    user = raw.filter((e) => !builtinIds.has(e.id))
+    raw = await rpc.themes.list()
   } catch {
     // Sidecar unavailable (browser mode, or not yet connected).
-    user = []
+    raw = []
   }
+  const user = raw.filter((e) => !builtinIds.has(e.id))
   return [...builtins, ...user]
 }
 
 export async function loadTheme(id: string): Promise<Theme> {
   const builtin = BUILTIN_THEMES.find((t) => t.id === id)
   if (builtin) return builtin
+  let raw: Theme | null = null
   try {
-    const raw = await rpc.themes.get(id)
-    if (raw) {
-      // The sidecar already validated this theme on read, but it crossed a
-      // process boundary to get here and applyTheme writes it straight into
-      // the DOM, so it is re-validated before being trusted.
-      const result = validateTheme(raw, { id })
-      if (result.ok) return result.theme
-    }
+    raw = await rpc.themes.get(id)
   } catch {
     // Sidecar unavailable — fall through to the fallback theme.
+  }
+  if (raw) {
+    // The sidecar already validated this theme on read, but it crossed a
+    // process boundary to get here and applyTheme writes it straight into
+    // the DOM, so it is re-validated before being trusted.
+    const result = validateTheme(raw, { id })
+    if (result.ok) return result.theme
   }
   return FALLBACK_THEME
 }
