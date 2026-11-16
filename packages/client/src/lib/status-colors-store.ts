@@ -54,7 +54,13 @@ export const statusColorStore = {
   set,
   /** Test hook: back to the empty state. */
   _reset(): void {
-    set({ workspaceId: null, statuses: [], overrides: {}, customs: null, surface: THEME_SURFACES.gray.card })
+    set({
+      workspaceId: null,
+      statuses: [],
+      overrides: {},
+      customs: null,
+      surface: THEME_SURFACES.gray.card,
+    })
   },
 }
 
@@ -66,9 +72,21 @@ export function useStatusColors(): ResolvedStatusColors {
   )
 }
 
-/** The card color of the theme on <html> (theme-gray / theme-green, else blue). */
+/**
+ * The card colour of the active theme.
+ *
+ * Reads the live --bb-card token rather than mapping a theme-* class through
+ * a hardcoded table: those classes were removed once runtime theming
+ * landed, and an arbitrary user theme has no fixed set to map. Inline style
+ * is checked first since that's what applyTheme actually sets; computed
+ * style is the fallback for any other way the token might be reached.
+ * Falls back to THEME_SURFACES.gray.card, matching the store's own default,
+ * so the engine still reports a surface even if theming is unavailable.
+ */
 export function currentThemeSurface(el: Element = document.documentElement): string {
-  if (el.classList.contains("theme-gray")) return THEME_SURFACES.gray.card
-  if (el.classList.contains("theme-green")) return THEME_SURFACES.green.card
-  return THEME_SURFACES.blue.card
+  const inline = (el as HTMLElement).style?.getPropertyValue("--bb-card")?.trim()
+  if (inline) return inline
+  const view = el.ownerDocument?.defaultView
+  const computed = view?.getComputedStyle(el).getPropertyValue("--bb-card").trim()
+  return computed || THEME_SURFACES.gray.card
 }
