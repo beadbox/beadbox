@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
   _resetThemePreferenceForTests,
+  clearCache,
   DEFAULT_THEME_ID,
   getThemePreference,
   resolveThemeId,
@@ -92,6 +93,29 @@ describe("resolveThemeId", () => {
     resolveThemeId("nord", ["beadbox-dark", "beadbox-light"])
     resolveThemeId("beadbox-dark", ["beadbox-dark", "beadbox-light"])
     expect(localStorage.getItem("beads-theme")).toBe("nord")
+  })
+})
+
+describe("clearCache", () => {
+  test("after setThemePreference then clearCache, getThemePreference returns the default without page reload", () => {
+    setThemePreference("nord")
+    expect(getThemePreference()).toBe("nord")
+    clearCache()
+    expect(getThemePreference()).toBe(DEFAULT_THEME_ID)
+  })
+
+  test("a subscriber is notified by clearCache", () => {
+    setThemePreference("nord")
+    let calls = 0
+    const unsubscribe = subscribeThemePreference(() => {
+      calls++
+    })
+    try {
+      clearCache()
+      expect(calls).toBe(1)
+    } finally {
+      unsubscribe()
+    }
   })
 })
 

@@ -674,6 +674,11 @@ export function clearCache(): void {
   } catch {
     // Storage might be disabled
   }
+  // Reset theme preference and notify subscribers outside try/catch, so the
+  // reset and notification happen even when storage clear throws, ensuring
+  // the in-memory value doesn't become stale.
+  currentThemeId = null
+  themePreferenceEvents.dispatchEvent(new Event(THEME_PREFERENCE_CHANGE_EVENT))
 }
 
 // --- Session-scoped UI state (sessionStorage) ---
