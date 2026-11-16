@@ -24,6 +24,86 @@ describe("probeTokenSupport", () => {
     probeTokenSupport()
     expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe("#abcdef")
   })
+
+  describe("detects unresolvable var() across serialization forms", () => {
+    test("returns false for spaced rgba(0, 0, 0, 0)", () => {
+      const originalGetComputedStyle = window.getComputedStyle
+      window.getComputedStyle = () =>
+        ({
+          backgroundColor: "rgba(0, 0, 0, 0)",
+        }) as CSSStyleDeclaration
+      try {
+        expect(probeTokenSupport()).toBe(false)
+      } finally {
+        window.getComputedStyle = originalGetComputedStyle
+      }
+    })
+
+    test("returns false for no-space rgba(0,0,0,0)", () => {
+      const originalGetComputedStyle = window.getComputedStyle
+      window.getComputedStyle = () =>
+        ({
+          backgroundColor: "rgba(0,0,0,0)",
+        }) as CSSStyleDeclaration
+      try {
+        expect(probeTokenSupport()).toBe(false)
+      } finally {
+        window.getComputedStyle = originalGetComputedStyle
+      }
+    })
+
+    test("returns false for mixed whitespace rgba(0,  0,\\t0, 0)", () => {
+      const originalGetComputedStyle = window.getComputedStyle
+      window.getComputedStyle = () =>
+        ({
+          backgroundColor: "rgba(0,  0,\t0, 0)",
+        }) as CSSStyleDeclaration
+      try {
+        expect(probeTokenSupport()).toBe(false)
+      } finally {
+        window.getComputedStyle = originalGetComputedStyle
+      }
+    })
+
+    test("returns false for transparent keyword", () => {
+      const originalGetComputedStyle = window.getComputedStyle
+      window.getComputedStyle = () =>
+        ({
+          backgroundColor: "transparent",
+        }) as CSSStyleDeclaration
+      try {
+        expect(probeTokenSupport()).toBe(false)
+      } finally {
+        window.getComputedStyle = originalGetComputedStyle
+      }
+    })
+
+    test("returns true for resolved value with alpha (rgba(1, 2, 3, 1))", () => {
+      const originalGetComputedStyle = window.getComputedStyle
+      window.getComputedStyle = () =>
+        ({
+          backgroundColor: "rgba(1, 2, 3, 1)",
+        }) as CSSStyleDeclaration
+      try {
+        expect(probeTokenSupport()).toBe(true)
+      } finally {
+        window.getComputedStyle = originalGetComputedStyle
+      }
+    })
+
+    test("returns true for modern space-separated syntax rgb(1 2 3)", () => {
+      const originalGetComputedStyle = window.getComputedStyle
+      window.getComputedStyle = () =>
+        ({
+          backgroundColor: "rgb(1 2 3)",
+        }) as CSSStyleDeclaration
+      try {
+        expect(probeTokenSupport()).toBe(true)
+      } finally {
+        window.getComputedStyle = originalGetComputedStyle
+      }
+    })
+  })
 })
 
 describe("isThemingAvailable", () => {

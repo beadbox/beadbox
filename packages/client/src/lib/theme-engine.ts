@@ -94,11 +94,14 @@ export function probeTokenSupport(el: HTMLElement = document.documentElement): b
     if (!resolved) return false
     // Engine echoed the declaration back without resolving it.
     if (resolved.includes("var(")) return false
-    // Unresolvable var() falls back to the property's initial value.
-    // Normalise whitespace since engines serialise rgba(0, 0, 0, 0) with
-    // varying spaces, tabs, or no spaces between components.
-    const normalised = resolved.replace(/\s+/g, " ")
-    if (normalised === "rgba(0, 0, 0, 0)" || resolved === "transparent") return false
+    // Unresolvable var() falls back to the property's initial value. Engines
+    // differ in how they serialise it, so strip whitespace entirely (not just
+    // collapse runs — `rgba(0,0,0,0)` has none to collapse) and compare the
+    // compact form.
+    const compact = resolved.replace(/\s/g, "")
+    if (compact === "rgba(0,0,0,0)" || compact === "rgb(0,0,0)" || resolved === "transparent") {
+      return false
+    }
     return true
   } finally {
     probe.remove()
