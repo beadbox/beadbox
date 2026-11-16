@@ -49,13 +49,22 @@ describe("listThemeFiles", () => {
     expect(await listThemeFiles()).toEqual([])
   })
 
-  test("lists valid themes with metadata only", async () => {
+  test("lists valid themes with metadata and a six-colour preview, not the full token set", async () => {
     await writeFile(join(dir, "nord.json"), good("nord"))
     const list = await listThemeFiles()
     expect(list).toHaveLength(1)
     expect(list[0].id).toBe("nord")
     expect(list[0].source).toBe("user")
     expect("colors" in list[0]).toBe(false)
+    expect(list[0].preview).toEqual({
+      background: COLORS.background,
+      card: COLORS.card,
+      primary: COLORS.primary,
+      secondary: COLORS.secondary,
+      mutedForeground: COLORS.mutedForeground,
+      foreground: COLORS.foreground,
+    })
+    expect(Object.keys(list[0].preview ?? {})).toHaveLength(6)
   })
 
   test("reports an invalid theme instead of dropping it", async () => {
@@ -63,6 +72,7 @@ describe("listThemeFiles", () => {
     const list = await listThemeFiles()
     expect(list).toHaveLength(1)
     expect(list[0].error).toBeTruthy()
+    expect(list[0].preview).toBeUndefined()
   })
 
   test("a corrupt file is reported, not fatal", async () => {

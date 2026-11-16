@@ -19,6 +19,15 @@ export interface ThemeEntry {
   appearance: "dark" | "light"
   source: "user"
   error?: string
+  /**
+   * Six colours for the picker's mini-UI preview, not the full token set —
+   * metadata and full-token reads stay separate calls (see handlers/themes.ts).
+   * Absent when the theme failed validation: there is nothing to preview.
+   */
+  preview?: Pick<
+    Theme["colors"],
+    "background" | "card" | "primary" | "secondary" | "mutedForeground" | "foreground"
+  >
 }
 
 /** Respects BEADBOX_THEMES_PATH for test isolation. */
@@ -67,12 +76,16 @@ export async function listThemeFiles(): Promise<ThemeEntry[]> {
       entries.push({ id, name: id, appearance: "dark", source: "user", error: result.error })
       continue
     }
-    // Metadata only — the picker should not pay for every theme's tokens.
+    // Metadata plus a six-colour preview — not the full token set, so the
+    // picker still does not pay for every theme's tokens.
+    const { background, card, primary, secondary, mutedForeground, foreground } =
+      result.theme.colors
     entries.push({
       id: result.theme.id,
       name: result.theme.name,
       appearance: result.theme.appearance,
       source: "user",
+      preview: { background, card, primary, secondary, mutedForeground, foreground },
     })
   }
   return entries

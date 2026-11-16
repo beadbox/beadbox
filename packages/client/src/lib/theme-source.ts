@@ -24,19 +24,43 @@ export interface ThemeEntry {
   appearance: "dark" | "light"
   source: "builtin" | "user"
   error?: string
+  /**
+   * Six colours for the picker's mini-UI preview, not the full token set.
+   * Absent when the theme failed validation: there is nothing to preview.
+   */
+  preview?: Pick<
+    Theme["colors"],
+    "background" | "card" | "primary" | "secondary" | "mutedForeground" | "foreground"
+  >
 }
 
 export const BUILTIN_THEMES: readonly Theme[] = [darkJson as Theme, lightJson as Theme]
 
 export const FALLBACK_THEME: Theme = darkJson as Theme
 
+/** Keys listThemes' react-query consumers share, so Task 13 can invalidate it. */
+export const themesQueryKey = ["themes"] as const
+
 function entryOf(t: Theme): ThemeEntry {
-  return { id: t.id, name: t.name, appearance: t.appearance, source: "builtin" }
+  const { background, card, primary, secondary, mutedForeground, foreground } = t.colors
+  return {
+    id: t.id,
+    name: t.name,
+    appearance: t.appearance,
+    source: "builtin",
+    preview: { background, card, primary, secondary, mutedForeground, foreground },
+  }
 }
 
+/**
+ * The built-ins alone, synchronously available (no rpc round trip). The
+ * picker falls back to this while its `listThemes` query is still in
+ * flight, so it renders Beadbox Dark/Light immediately instead of empty.
+ */
+export const BUILTIN_ENTRIES: readonly ThemeEntry[] = BUILTIN_THEMES.map(entryOf)
+
 export async function listThemes(): Promise<ThemeEntry[]> {
-  const builtins = BUILTIN_THEMES.map(entryOf)
-  const builtinIds = new Set(builtins.map((e) => e.id))
+  const builtinIds = new Set(BUILTIN_ENTRIES.map((e) => e.id))
   let raw: ThemeEntry[] = []
   try {
     raw = await rpc.themes.list()
@@ -45,7 +69,7 @@ export async function listThemes(): Promise<ThemeEntry[]> {
     raw = []
   }
   const user = raw.filter((e) => !builtinIds.has(e.id))
-  return [...builtins, ...user]
+  return [...BUILTIN_ENTRIES, ...user]
 }
 
 export async function loadTheme(id: string): Promise<Theme> {

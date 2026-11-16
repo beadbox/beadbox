@@ -1,5 +1,7 @@
-// Themes kkrpc namespace for user-supplied themes. Metadata and full-token reads
-// are separate calls so the picker does not load every theme's tokens.
+// Themes kkrpc namespace for user-supplied themes. `list` returns metadata
+// plus a six-colour preview (not the full token set); `get` is the separate
+// call for the full theme, so the picker does not load every theme's tokens
+// just to render its radiogroup.
 
 import { listThemeFiles, readThemeFile, type ThemeEntry } from "../lib/theme-files"
 import type { Theme } from "../lib/theme-tokens"
