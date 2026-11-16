@@ -16,7 +16,7 @@ import {
   RADIUS_KEYS,
   radiusVarName,
   type Theme,
-} from "./theme-tokens"
+} from "@beadbox/server/theme-tokens"
 
 function allVarNames(): string[] {
   return [

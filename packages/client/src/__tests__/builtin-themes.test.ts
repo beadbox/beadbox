@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { COLOR_KEYS } from "../lib/theme-tokens"
-import { validateTheme } from "../lib/theme-validate"
+import { COLOR_KEYS } from "@beadbox/server/theme-tokens"
+import { validateTheme } from "@beadbox/server/theme-validate"
 import dark from "../themes/beadbox-dark.json"
 import light from "../themes/beadbox-light.json"
 

@@ -18,7 +18,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./handlers": "./src/handlers/index.ts",
-    "./subscribe-protocol": "./src/subscribe-protocol.ts"
+    "./subscribe-protocol": "./src/subscribe-protocol.ts",
+    "./theme-tokens": "./src/lib/theme-tokens.ts",
+    "./theme-validate": "./src/lib/theme-validate.ts"
   },
   "scripts": {
     "dev": "bun run src/index.ts",

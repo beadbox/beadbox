@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { extname, join } from "node:path"
-import { COLOR_KEYS, cssVarName } from "../lib/theme-tokens"
+import { COLOR_KEYS, cssVarName } from "@beadbox/server/theme-tokens"
 
 const css = readFileSync(join(import.meta.dir, "../index.css"), "utf-8")
 const html = readFileSync(join(import.meta.dir, "../../index.html"), "utf-8")

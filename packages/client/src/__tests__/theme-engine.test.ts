@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { COLOR_KEYS, type Theme } from "@beadbox/server/theme-tokens"
 import { applyTheme, clearTheme } from "../lib/theme-engine"
-import { COLOR_KEYS, type Theme } from "../lib/theme-tokens"
 
 const theme = (over: Partial<Theme> = {}): Theme => ({
   id: "t",
