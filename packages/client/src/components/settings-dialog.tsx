@@ -98,6 +98,18 @@ function nextSelectableThemeIndex(
   return from
 }
 
+/**
+ * A signature for "which ids, in which order" — module-level so it's a
+ * stable reference across renders (an inline arrow inside the component
+ * would be a new function every render, making it useless as an effect
+ * dependency). Used to tell a themesQueryKey refetch that only changed
+ * preview colours or error text (same ids — skip the focus resync) apart
+ * from one that added/removed a theme (different ids — resync is correct).
+ */
+function themeIds(list: readonly ThemeEntry[]): string {
+  return list.map((t) => t.id).join("\0")
+}
+
 const FREQUENCY_OPTIONS: { value: UpdateCheckFrequency; label: string }[] = [
   { value: 1800000, label: "Every 30 minutes" },
   { value: 3600000, label: "Every hour" },
@@ -243,22 +255,32 @@ function SettingsDialogContent({
     }
   }, [analyticsEnabled])
 
-  // Sync focused index to current theme — but only on the open transition,
-  // or when `theme` itself changes (a deliberate selection, by click or by
-  // keyboard). Task 13 made `themes` refetch while the dialog stays open
-  // (hot reload invalidates themesQueryKey so a changed file's rejection
-  // reason — or updated preview colours — reach the picker; see
-  // task-13-addendum). That refetch gives `themes` a new array identity
-  // with the SAME selected id, which must NOT re-run the sync below: doing
-  // so would reset focusedThemeIndex and yank the user's arrow-key focus
-  // out from under them mid-session (task-12-addendum deferred this exact
-  // tradeoff to task 13). A real theme switch still re-syncs immediately,
-  // same as before; closing and reopening still re-syncs too.
-  const prevSyncRef = useRef<{ open: boolean; theme: ThemeId }>({ open: false, theme })
+  // Sync focused index to current theme — on the open transition, when
+  // `theme` itself changes (a deliberate selection, by click or by
+  // keyboard), or when the SET of theme ids changes (the one-time
+  // placeholder-to-resolved transition on open — BUILTIN_ENTRIES only,
+  // then the full list — and a theme file being added/removed shift
+  // indices under the user either way, so re-resolving is correct there
+  // too). Deliberately NOT keyed on `themes` array identity alone: task 13
+  // made the list refetch while the dialog stays open (hot reload
+  // invalidates themesQueryKey so a changed file's rejection reason, or
+  // updated preview colours, reach the picker — see task-13-addendum), and
+  // that refetch can produce a new array with the SAME ids. Resyncing on
+  // every such identity change would reset focusedThemeIndex and yank the
+  // user's arrow-key focus out from under them mid-session
+  // (task-12-addendum deferred this exact tradeoff to task 13) — so an
+  // ids-unchanged refetch is the one case that must NOT resync.
+  const prevSyncRef = useRef<{ open: boolean; theme: ThemeId; ids: string }>({
+    open: false,
+    theme,
+    ids: themeIds(themes),
+  })
   useEffect(() => {
+    const ids = themeIds(themes)
     const openedNow = open && !prevSyncRef.current.open
     const themeChanged = theme !== prevSyncRef.current.theme
-    if (open && (openedNow || themeChanged)) {
+    const idsChanged = ids !== prevSyncRef.current.ids
+    if (open && (openedNow || themeChanged || idsChanged)) {
       const resolved = resolveThemeId(
         theme,
         themes.map((o) => o.id),
@@ -271,7 +293,7 @@ function SettingsDialogContent({
       if (idx < 0 || themes[idx]?.error) idx = themes.findIndex((t) => !t.error)
       setFocusedThemeIndex(idx >= 0 ? idx : 0)
     }
-    prevSyncRef.current = { open, theme }
+    prevSyncRef.current = { open, theme, ids }
   }, [open, theme, themes])
 
   const handleThemeKeyDown = useCallback(

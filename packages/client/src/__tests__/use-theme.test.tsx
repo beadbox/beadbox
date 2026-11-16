@@ -374,6 +374,46 @@ describe("useTheme hot reload", () => {
     expect(rpcMock.get.mock.calls.length).toBe(getCallsAfterMount)
   })
 
+  test("keeps the last-good theme on screen when the active theme's file is deleted", async () => {
+    // A missing `.find()` result is `undefined`; `!undefined` is `true`,
+    // so "entry absent" must be checked explicitly rather than folded into
+    // `!entry?.error` alone, or a deleted file would read as "still valid"
+    // and re-trigger loadTheme/applyTheme for an id the sidecar can no
+    // longer serve.
+    localStorage.setItem("beads-theme", "custom1")
+    const rpcMock = installThemesRpcMock()
+    const v1 = { ...lightJson, id: "custom1", name: "Custom 1" }
+    rpcMock.setTheme("custom1", v1)
+    rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "light", source: "user" }])
+    const listen = installThemeChangeListener()
+
+    const { getByTestId } = render(withQuery(<Probe />))
+    await waitFor(() => {
+      expect(getByTestId("out").textContent).toBe("custom1:true")
+      expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
+        v1.colors.background,
+      )
+    })
+    const getCallsAfterMount = rpcMock.get.mock.calls.length
+
+    // The file is deleted: it no longer appears in the list at all.
+    rpcMock.setEntries([])
+
+    act(() => {
+      listen.fire()
+    })
+
+    await waitFor(() => {
+      expect(rpcMock.list).toHaveBeenCalled()
+    })
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
+      v1.colors.background,
+    )
+    expect(rpcMock.get.mock.calls.length).toBe(getCallsAfterMount)
+  })
+
   test("startWatch/stopWatch are not called outside a sidecar transport", async () => {
     localStorage.setItem("beads-theme", "beadbox-dark")
     const rpcMock = installThemesRpcMock()

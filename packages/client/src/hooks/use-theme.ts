@@ -120,10 +120,20 @@ export function useTheme(): {
               .fetchQuery({ queryKey: themesQueryKey, queryFn: listThemes })
               .then((entries) => {
                 if (disposed) return
-                const stillValid = !entries.find((e) => e.id === themeIdRef.current)?.error
+                const entry = entries.find((e) => e.id === themeIdRef.current)
+                // A MISSING entry (file deleted) is not "still valid" — an
+                // absent `.find()` result is `undefined`, and `!undefined`
+                // is true, so this must be spelled out rather than negating
+                // `entry?.error` alone, or a deleted active theme's file
+                // would read as valid and bump the epoch, sending a deleted
+                // theme's id into loadTheme/rpc.themes.get, which would
+                // collapse to FALLBACK_THEME anyway — just via a path that
+                // looks like "still valid" instead of an intentional one.
+                const stillValid = entry !== undefined && !entry.error
                 if (stillValid) setReapplyEpoch((n) => n + 1)
                 // else: leave the applied theme as-is; the failure reason
-                // is already visible via the invalidated list above.
+                // (or the file's absence from the list) is already visible
+                // via the invalidated list above.
               })
               .catch(() => {
                 /* list refresh failed; leave the currently applied theme as-is */

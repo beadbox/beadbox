@@ -147,6 +147,44 @@ describe("theme picker, user themes", () => {
     expect(onThemeChange).toHaveBeenCalledWith("nord")
   })
 
+  // Task 12's placeholder -> resolved-list transition: the picker renders
+  // BUILTIN_ENTRIES synchronously before the sidecar's list resolves, so
+  // the stored theme's own card is not even in the DOM on first render.
+  // The focus-sync fix added in task 13 (resync only on open/theme/id-list
+  // change, not on every themesQueryKey refetch) must still catch THIS
+  // transition — the id list goes from [dark, light] to [dark, light,
+  // nord] — or a stored user-theme preference would be left with the tab
+  // stop stuck on Beadbox Dark despite Nord being the checked radio.
+  test("the tab stop moves onto a stored user theme once the placeholder resolves", async () => {
+    stubThemesRpc([
+      {
+        id: "nord",
+        name: "Nord",
+        appearance: "dark",
+        source: "user",
+        preview: {
+          background: "#2e3440",
+          card: "#3b4252",
+          primary: "#88c0d0",
+          secondary: "#434c5e",
+          mutedForeground: "#d8dee9",
+          foreground: "#eceff4",
+        },
+      },
+    ])
+    renderDialog("nord")
+
+    await waitFor(() => {
+      expect(screen.getByText("Nord")).toBeDefined()
+    })
+
+    const nord = themeRadios().find((r) => r.getAttribute("aria-label") === "Nord theme")
+    expect(nord?.getAttribute("aria-checked")).toBe("true")
+    expect(nord?.getAttribute("tabindex")).toBe("0")
+    const dark = themeRadios().find((r) => r.getAttribute("aria-label") === "Beadbox Dark theme")
+    expect(dark?.getAttribute("tabindex")).toBe("-1")
+  })
+
   test("shows an invalid user theme's error instead of hiding it, and keyboard nav skips it", async () => {
     stubThemesRpc([
       {
