@@ -95,7 +95,10 @@ export function probeTokenSupport(el: HTMLElement = document.documentElement): b
     // Engine echoed the declaration back without resolving it.
     if (resolved.includes("var(")) return false
     // Unresolvable var() falls back to the property's initial value.
-    if (resolved === "rgba(0, 0, 0, 0)" || resolved === "transparent") return false
+    // Normalise whitespace since engines serialise rgba(0, 0, 0, 0) with
+    // varying spaces, tabs, or no spaces between components.
+    const normalised = resolved.replace(/\s+/g, " ")
+    if (normalised === "rgba(0, 0, 0, 0)" || resolved === "transparent") return false
     return true
   } finally {
     probe.remove()

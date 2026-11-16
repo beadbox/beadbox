@@ -41,24 +41,25 @@ describe("isThemingAvailable", () => {
     }
   })
 
-  test("memoises the result (second call does not re-probe)", () => {
-    const probe1 = isThemingAvailable()
-    expect(probe1).toBe(true)
-
-    // Second call should return cached result without re-probing
-    const probe2 = isThemingAvailable()
-    expect(probe2).toBe(probe1)
-  })
-
-  test("__resetProbeCache forces fresh probe on next call", () => {
-    const firstCall = isThemingAvailable()
-    expect(firstCall).toBe(true)
-
-    // Reset the cache
+  test("memoises result and __resetProbeCache forces fresh probe", () => {
+    // Counts real probe invocations, so "memoised" is distinguishable from "re-probed"
     __resetProbeCache()
-
-    // Next call should re-probe (but return same result in happy path)
-    const secondCall = isThemingAvailable()
-    expect(secondCall).toBe(true)
+    let calls = 0
+    const original = window.getComputedStyle
+    window.getComputedStyle = ((el: Element) => {
+      calls++
+      return original(el)
+    }) as typeof window.getComputedStyle
+    try {
+      expect(isThemingAvailable()).toBe(true)
+      expect(calls).toBe(1) // first call probes
+      expect(isThemingAvailable()).toBe(true)
+      expect(calls).toBe(1) // second call is memoised — no new probe
+      __resetProbeCache()
+      expect(isThemingAvailable()).toBe(true)
+      expect(calls).toBe(2) // reset forces a fresh probe
+    } finally {
+      window.getComputedStyle = original
+    }
   })
 })
