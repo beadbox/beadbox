@@ -55,7 +55,7 @@ describe("listThemeFiles", () => {
     expect(list).toHaveLength(1)
     expect(list[0].id).toBe("nord")
     expect(list[0].source).toBe("user")
-    expect((list[0] as Record<string, unknown>).colors).toBeUndefined()
+    expect("colors" in list[0]).toBe(false)
   })
 
   test("reports an invalid theme instead of dropping it", async () => {
@@ -79,6 +79,14 @@ describe("listThemeFiles", () => {
     await mkdir(join(dir, "sub"))
     await writeFile(join(dir, "nord.json"), good("nord"))
     expect(await listThemeFiles()).toHaveLength(1)
+  })
+
+  test("ignores a directory whose name ends in .json", async () => {
+    await mkdir(join(dir, "weird.json"))
+    await writeFile(join(dir, "nord.json"), good("nord"))
+    const list = await listThemeFiles()
+    expect(list).toHaveLength(1)
+    expect(list[0].id).toBe("nord")
   })
 
   test("rejects a file whose id does not match its stem", async () => {
