@@ -68,9 +68,10 @@ export function applyTheme(theme: Theme, el: HTMLElement = document.documentElem
 // property's initial value — `transparent` for background-color, which
 // getComputedStyle reports as "rgba(0, 0, 0, 0)".
 //
-// It does NOT detect MIS-resolution to a wrong-but-real colour. The spike
-// showed getComputedStyle returns oklch() verbatim, so computed style cannot
-// confirm a resolved value is correct. Hex-only validation guards that case.
+// It does NOT confirm the resolved value is *correct*: getComputedStyle
+// echoes whatever colour value the engine resolved to, without validation.
+// Hex-only token format guards against colour mis-resolution. This probe
+// only tests whether the engine walked the indirection at all.
 
 const PROBE_VAR = "--bb-probe-sentinel"
 const PROBE_RGB = "rgb(1, 2, 3)"
@@ -89,15 +90,13 @@ export function probeTokenSupport(el: HTMLElement = document.documentElement): b
   probe.style.backgroundColor = `var(${PROBE_VAR})`
   el.ownerDocument.body.appendChild(probe)
   try {
-    const resolved = el.ownerDocument.defaultView
-      ?.getComputedStyle(probe)
-      .backgroundColor.replace(/\s+/g, " ")
-      .trim()
-    // Unresolved var() -> initial value -> transparent.
-    if (!resolved || resolved === "rgba(0, 0, 0, 0)" || resolved === "transparent") {
-      return false
-    }
-    return resolved === PROBE_RGB || resolved === "rgb(1,2,3)"
+    const resolved = el.ownerDocument.defaultView?.getComputedStyle(probe).backgroundColor.trim()
+    if (!resolved) return false
+    // Engine echoed the declaration back without resolving it.
+    if (resolved.includes("var(")) return false
+    // Unresolvable var() falls back to the property's initial value.
+    if (resolved === "rgba(0, 0, 0, 0)" || resolved === "transparent") return false
+    return true
   } finally {
     probe.remove()
   }
