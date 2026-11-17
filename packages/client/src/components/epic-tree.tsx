@@ -1499,7 +1499,7 @@ export function EpicRow({
         {!isStandalone && (
           <>
             <PillBadge config={getStatusConfig(epic.status)} status={epic.status} />
-            <PillBadge config={priorityConfig[epic.priority]} />
+            <PillBadge config={priorityConfig[epic.priority]} priority={epic.priority} />
           </>
         )}
 

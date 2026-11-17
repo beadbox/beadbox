@@ -92,7 +92,7 @@ export function SchedulingControls({
               className={cn(
                 "inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium transition-colors",
                 due.overdue
-                  ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                  ? "bg-destructive/20 text-destructive-text hover:bg-destructive/30"
                   : "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30",
               )}
             >

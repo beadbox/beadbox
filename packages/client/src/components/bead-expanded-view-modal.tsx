@@ -16,7 +16,7 @@ import {
   formatRelativeTime,
   getAuthorColor,
   getStatusDisplayConfig,
-  typeColors,
+  TYPE_BADGE_CLASS,
 } from "@/components/bead-detail-helpers"
 import { BeadCustomFields } from "@/components/bead-custom-fields"
 import { CopyableId } from "@/components/copyable-id"
@@ -87,9 +87,11 @@ export function BeadExpandedViewModal({
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <span
+                data-type={type}
+                data-type-role="badge"
                 className={cn(
                   "px-2 py-1 text-xs font-medium rounded border capitalize shrink-0",
-                  typeColors[type],
+                  TYPE_BADGE_CLASS,
                 )}
               >
                 {type}
@@ -189,7 +191,7 @@ export function BeadExpandedViewModal({
                 <span
                   className={cn(
                     "inline-flex items-center gap-1",
-                    due.overdue ? "text-red-400" : "text-blue-400",
+                    due.overdue ? "text-destructive-text" : "text-info-text",
                   )}
                 >
                   <CalendarClock className="h-3 w-3" />

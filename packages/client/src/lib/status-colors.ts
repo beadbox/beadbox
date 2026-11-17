@@ -300,6 +300,39 @@ export function cssEscapeIdent(s: string): string {
 }
 
 /**
+ * One colour's worth of rules, for one `data-<attr>` value. Shared by the
+ * status and priority stylesheets so the tint/edge/readable-text arithmetic
+ * exists once: a change to how a colour becomes a badge cannot apply to
+ * statuses and miss priorities.
+ *
+ * `emphasis` scales the fill and border alpha. The hardcoded classes carried
+ * the priority ramp partly in alpha (P0 was `bg-red-500/20`, P2
+ * `bg-yellow-500/10`), so a uniform fill would have flattened it.
+ */
+function colorRules(
+  attr: "status" | "priority" | "type",
+  name: string,
+  hex: string,
+  surface: string,
+  prefix: string,
+  emphasis = 1,
+  edgeEmphasis = emphasis,
+): string[] {
+  const [r, g, b] = toRgb(hex)
+  const text = readableTextColor(hex, surface)
+  const sel = `${prefix}[data-${attr}="${cssEscapeIdent(name)}"]`
+  const role = (n: string) => `${sel}[data-${attr}-role="${n}"]`
+  const tint = `rgb(${r} ${g} ${b} / ${0.2 * emphasis})`
+  const edge = `rgb(${r} ${g} ${b} / ${0.4 * edgeEmphasis})`
+  return [
+    `${role("badge")}{background-color:${tint};border-color:${edge};color:${text}}`,
+    `${role("stage")}{background-color:${tint};border-color:${edge}}`,
+    `${role("text")}{color:${text}}`,
+    `${role("dot")}{background-color:${hex.toLowerCase()}}`,
+  ]
+}
+
+/**
  * The stylesheet for the resolved colors; surface is the theme's card color.
  * With a `scope` (a workspace id), every rule only matches inside elements
  * tagged data-project-id with that id: the All projects view styles each
@@ -310,17 +343,75 @@ export function buildStatusColorCss(css: StatusColorMap, surface: string, scope?
   const prefix = scope === undefined ? "" : `[data-project-id="${cssEscapeIdent(scope)}"] `
   for (const [name, hex] of Object.entries(css)) {
     if (!isHexColor(hex)) continue
-    const [r, g, b] = toRgb(hex)
-    const text = readableTextColor(hex, surface)
-    const sel = `${prefix}[data-status="${cssEscapeIdent(name)}"]`
-    const tint = `rgb(${r} ${g} ${b} / 0.2)`
-    const edge = `rgb(${r} ${g} ${b} / 0.4)`
-    rules.push(
-      `${sel}[data-status-role="badge"]{background-color:${tint};border-color:${edge};color:${text}}`,
-      `${sel}[data-status-role="stage"]{background-color:${tint};border-color:${edge}}`,
-      `${sel}[data-status-role="text"]{color:${text}}`,
-      `${sel}[data-status-role="dot"]{background-color:${hex.toLowerCase()}}`,
-    )
+    rules.push(...colorRules("status", name, hex, surface, prefix))
+  }
+  return rules.join("\n")
+}
+
+/**
+ * Priority colours, the hues the hardcoded classes used: red / orange /
+ * yellow / slate / zinc. Unlike statuses these are not user-configurable and
+ * not per project, so one unscoped stylesheet covers the app.
+ *
+ * They go through the same machinery purely for the per-surface text: as
+ * literals, `text-orange-400` on a white card fails contrast.
+ */
+export const DEFAULT_PRIORITY_HEX: Readonly<Record<string, string>> = {
+  critical: "#ef4444",
+  high: "#f97316",
+  medium: "#eab308",
+  low: "#64748b",
+  backlog: "#71717a",
+}
+
+// Matches the alpha the hardcoded classes used, so the ramp survives:
+// P0/P1/P3 filled at /20 + /40, P2/P4 at /10 + /25.
+const PRIORITY_EMPHASIS: Readonly<Record<string, number>> = {
+  critical: 1,
+  high: 1,
+  medium: 0.5,
+  low: 1,
+  backlog: 0.5,
+}
+
+/**
+ * Bead-type colours, the hues `typeColors` hardcoded. BeadType is an open
+ * vocabulary (a workspace may define its own), so this covers the types
+ * Beadbox has always drawn and a type with no entry keeps a tokenised
+ * neutral fallback rather than a generated hue — matching today's behaviour,
+ * where an unknown type drew slate.
+ */
+export const DEFAULT_TYPE_HEX: Readonly<Record<string, string>> = {
+  bug: "#ef4444",
+  task: "#3b82f6",
+  feature: "#a855f7",
+  epic: "#f59e0b",
+  chore: "#64748b",
+  message: "#06b6d4",
+  gate: "#22c55e",
+  "merge-request": "#14b8a6",
+  molecule: "#ec4899",
+  agent: "#8b5cf6",
+  role: "#0ea5e9",
+  rig: "#f97316",
+  convoy: "#84cc16",
+  event: "#f43f5e",
+}
+
+export function buildTypeColorCss(surface: string): string {
+  const rules: string[] = []
+  for (const [name, hex] of Object.entries(DEFAULT_TYPE_HEX)) {
+    // typeColors tinted at /20 with a /30 edge; 0.75 emphasis reproduces the
+    // slightly softer border those classes used.
+    rules.push(...colorRules("type", name, hex, surface, "", 1, 0.75))
+  }
+  return rules.join("\n")
+}
+
+export function buildPriorityColorCss(surface: string): string {
+  const rules: string[] = []
+  for (const [name, hex] of Object.entries(DEFAULT_PRIORITY_HEX)) {
+    rules.push(...colorRules("priority", name, hex, surface, "", PRIORITY_EMPHASIS[name] ?? 1))
   }
   return rules.join("\n")
 }

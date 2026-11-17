@@ -12,7 +12,11 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { rpc } from "../lib/rpc"
-import { buildStatusColorCss } from "../lib/status-colors"
+import {
+  buildPriorityColorCss,
+  buildStatusColorCss,
+  buildTypeColorCss,
+} from "../lib/status-colors"
 import {
   currentThemeForeground,
   currentThemeSurface,
@@ -91,5 +95,12 @@ export function StatusColorsMount() {
 
 export function StatusColorStyles() {
   const { css, surface } = useStatusColors()
-  return <style data-beadbox-status-colors="">{buildStatusColorCss(css, surface)}</style>
+  // Priorities ride in the same sheet: they are not user-configurable and
+  // not per project, so they only need the surface, but they need the SAME
+  // per-surface text derivation statuses get.
+  return (
+    <style data-beadbox-status-colors="">
+      {`${buildPriorityColorCss(surface)}\n${buildTypeColorCss(surface)}\n${buildStatusColorCss(css, surface)}`}
+    </style>
+  )
 }

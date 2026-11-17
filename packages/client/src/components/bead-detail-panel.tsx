@@ -23,7 +23,7 @@ import {
   formatRelativeTime,
   getStatusDisplayConfig,
   getWorkflowAdvancement,
-  typeColors,
+  TYPE_BADGE_CLASS,
 } from "@/components/bead-detail-helpers"
 import { BeadExpandedViewModal } from "@/components/bead-expanded-view-modal"
 import { MetadataControls } from "@/components/bead-metadata-controls"
@@ -292,10 +292,11 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
+                      data-type={mutations.type}
+                      data-type-role="badge"
                       className={cn(
                         "px-2 py-1 text-xs font-medium rounded border capitalize cursor-pointer hover:opacity-80 transition-opacity shrink-0 flex items-center gap-1.5",
-                        typeColors[mutations.type] ??
-                          "bg-slate-500/20 text-slate-400 border-slate-500/30",
+                        TYPE_BADGE_CLASS,
                         mutations.fieldStates.type.hasError && "ring-2 ring-destructive",
                         isMobile && "min-h-[44px] min-w-[44px]",
                       )}

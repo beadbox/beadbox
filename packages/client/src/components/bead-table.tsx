@@ -35,6 +35,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useViewport } from "@/hooks/use-viewport"
 import { describeDueAt, type DueDisplay } from "@/lib/due-format"
 import { type BadgeConfig, getStatusConfig, PillBadge, priorityConfig } from "@/lib/badge-config"
+import { TYPE_BADGE_CLASS } from "@/components/bead-detail-helpers"
 import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
 import type { Bead, BeadPriority, ReadState } from "@/lib/types"
@@ -415,10 +416,11 @@ const BeadRowContent = memo(function BeadRowContent({
         </div>
         <div className="bead-row-type shrink-0">
           <PillBadge
+            type={bead.type}
             config={
               typeConfig[bead.type] ?? {
                 label: bead.type,
-                className: "bg-slate-500/20 text-slate-400 border-slate-500/40",
+                className: TYPE_BADGE_CLASS,
                 icon: <Hexagon className="h-3 w-3" />,
               }
             }
@@ -438,7 +440,7 @@ const BeadRowContent = memo(function BeadRowContent({
               <CalendarClock
                 className={cn(
                   "h-3.5 w-3.5 shrink-0",
-                  due.overdue ? "text-red-400" : "text-muted-foreground/50",
+                  due.overdue ? "text-destructive-text" : "text-muted-foreground/50",
                 )}
               />
             </TooltipTrigger>
@@ -476,7 +478,7 @@ const BeadRowContent = memo(function BeadRowContent({
                     onArchive(rowKey).finally(() => setIsArchiving(false))
                   }}
                   className={cn(
-                    "p-1.5 rounded hover:bg-amber-500/20 text-muted-foreground hover:text-amber-400 transition-colors opacity-0 group-hover:opacity-100",
+                    "p-1.5 rounded hover:bg-warning/20 text-muted-foreground hover:text-warning-text transition-colors opacity-0 group-hover:opacity-100",
                     isMobile &&
                       "min-h-[44px] min-w-[44px] flex items-center justify-center opacity-100",
                   )}
@@ -505,7 +507,7 @@ const BeadRowContent = memo(function BeadRowContent({
                     onDelete(rowKey)
                   }}
                   className={cn(
-                    "p-1.5 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100",
+                    "p-1.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive-text transition-colors opacity-0 group-hover:opacity-100",
                     isMobile &&
                       "min-h-[44px] min-w-[44px] flex items-center justify-center opacity-100",
                   )}
@@ -523,7 +525,7 @@ const BeadRowContent = memo(function BeadRowContent({
           {readState && isBeadUnread(bead, readState) ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-blue-400" />
+                <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-info" />
               </TooltipTrigger>
               <TooltipContent>{getUnreadReason(bead, readState) ?? "Unread"}</TooltipContent>
             </Tooltip>
@@ -548,8 +550,8 @@ const BeadRowContent = memo(function BeadRowContent({
                   className={cn(
                     "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0",
                     (bead as Bead & { gate?: GateInfo }).gate!.status === "closed"
-                      ? "bg-emerald-500/15 text-emerald-400"
-                      : "bg-amber-500/15 text-amber-400",
+                      ? "bg-success/15 text-success-text"
+                      : "bg-warning/15 text-warning-text",
                   )}
                 >
                   <ShieldCheck className="h-3 w-3" />
@@ -588,7 +590,7 @@ const BeadRowContent = memo(function BeadRowContent({
           {bead.blockedBy && bead.blockedBy.length > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20 min-w-0 max-w-[200px] truncate">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-muted/30 text-muted-foreground border border-border min-w-0 max-w-[200px] truncate">
                   after{" "}
                   {bead.blockedBy
                     .map((dep) => {
@@ -616,7 +618,7 @@ const BeadRowContent = memo(function BeadRowContent({
           <PillBadge config={getStatusConfig(bead.status)} status={bead.status} />
         </div>
         <div className="bead-row-priority shrink-0">
-          <PillBadge config={priorityConfig[bead.priority]} />
+          <PillBadge config={priorityConfig[bead.priority]} priority={bead.priority} />
         </div>
         {bead.rigName && (
           <div className="bead-row-rig shrink-0">
@@ -683,80 +685,84 @@ function BeadRow(props: BeadRowProps) {
   )
 }
 
+// The per-type HUE comes from the type stylesheet via data-type (see
+// DEFAULT_TYPE_HEX). This map previously carried its own copy of those 14
+// hues — the same fact as typeColors in bead-detail-helpers, which could
+// silently disagree with it. Only the icon and label are per-type now.
 const typeConfig: Record<string, BadgeConfig> = {
   bug: {
     label: "Bug",
-    className: "bg-red-500/20 text-red-400 border-red-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Bug className="h-3 w-3" />,
   },
   task: {
     label: "Task",
-    className: "bg-blue-500/20 text-blue-400 border-blue-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <ListTodo className="h-3 w-3" />,
   },
   feature: {
     label: "Feature",
-    className: "bg-purple-500/20 text-purple-400 border-purple-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Sparkles className="h-3 w-3" />,
   },
   epic: {
     label: "Epic",
-    className: "bg-amber-500/20 text-amber-400 border-amber-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Layers className="h-3 w-3" />,
   },
   milestone: {
     label: "Milestone",
-    className: "bg-sky-500/20 text-sky-400 border-sky-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Flag className="h-3 w-3" />,
   },
   chore: {
     label: "Chore",
-    className: "bg-slate-500/20 text-slate-400 border-slate-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Wrench className="h-3 w-3" />,
   },
   message: {
     label: "Message",
-    className: "bg-cyan-500/20 text-cyan-400 border-cyan-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <MessageSquare className="h-3 w-3" />,
   },
   gate: {
     label: "Gate",
-    className: "bg-green-500/20 text-green-400 border-green-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <ShieldCheck className="h-3 w-3" />,
   },
   "merge-request": {
     label: "MR",
-    className: "bg-teal-500/20 text-teal-400 border-teal-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <GitMerge className="h-3 w-3" />,
   },
   molecule: {
     label: "Molecule",
-    className: "bg-pink-500/20 text-pink-400 border-pink-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Hexagon className="h-3 w-3" />,
   },
   agent: {
     label: "Agent",
-    className: "bg-violet-500/20 text-violet-400 border-violet-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Bot className="h-3 w-3" />,
   },
   role: {
     label: "Role",
-    className: "bg-sky-500/20 text-sky-400 border-sky-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <UserCog className="h-3 w-3" />,
   },
   rig: {
     label: "Rig",
-    className: "bg-orange-500/20 text-orange-400 border-orange-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Server className="h-3 w-3" />,
   },
   convoy: {
     label: "Convoy",
-    className: "bg-lime-500/20 text-lime-400 border-lime-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Truck className="h-3 w-3" />,
   },
   event: {
     label: "Event",
-    className: "bg-rose-500/20 text-rose-400 border-rose-500/40",
+    className: TYPE_BADGE_CLASS,
     icon: <Zap className="h-3 w-3" />,
   },
 }
