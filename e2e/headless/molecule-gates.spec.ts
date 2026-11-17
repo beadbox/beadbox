@@ -98,7 +98,10 @@ test("each gate under a molecule is a row in its step, with bd's kind and status
       await expect(row).toContainText(gate.title)
       const chip = row.getByTestId("gate-chip")
       await expect(chip).toHaveText(gate.await_type || "unknown")
-      await expect(chip).toHaveClass(gate.status === "closed" ? /emerald/ : /amber/)
+      // The palette sweep moved this chip from emerald/amber literals onto
+      // the success/warning tone tokens, so it reads correctly in a light
+      // theme; the semantic (closed = success, otherwise pending) is the same.
+      await expect(chip).toHaveClass(gate.status === "closed" ? /success/ : /warning/)
     }
     // An open timer shows its due time (2h from its creation).
     await expect(page.locator(`[data-item-id="${timer.id}"]`).getByTestId("gate-deadline")).toHaveText(/expires in/)

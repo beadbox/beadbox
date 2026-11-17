@@ -2,10 +2,15 @@
 // everywhere a status is drawn, stored in Beadbox's own registry and never in
 // bd. Synthetic fixtures only; run with --workers=1.
 //
-// Computed styles are compared two ways: against an exact rgba for a chosen
-// color, and, for "unchanged" checks, against a clone of the same element
-// with the data-status tags removed (what main renders: the same classes and
-// no injected rule).
+// Computed styles are compared against an exact rgba: the chosen color for a
+// status that has one, and the status's DEFAULT hex for one that does not.
+//
+// "Unchanged" used to mean "renders like a clone with the data-status tags
+// removed" — i.e. the injected stylesheet contributes nothing for a default
+// status. The light-theme palette sweep reversed that: every status emits a
+// rule now, because the Tailwind classes it used to fall back on are
+// dark-only. So a default status has a definite expected colour, which is
+// what expectDefault asserts.
 
 import { createHash } from "node:crypto"
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
@@ -30,21 +35,6 @@ function styleOf(loc: Locator): Promise<Style> {
   })
 }
 
-/** The element's style with its status tags removed: what the classes alone give. */
-function untaggedStyleOf(loc: Locator): Promise<Style> {
-  return loc.evaluate((el) => {
-    const clone = el.cloneNode(false) as HTMLElement
-    clone.removeAttribute("data-status")
-    clone.removeAttribute("data-status-role")
-    clone.style.transition = "none"
-    el.parentElement?.appendChild(clone)
-    const cs = getComputedStyle(clone)
-    const out = { bg: cs.backgroundColor, color: cs.color, border: cs.borderTopColor }
-    clone.remove()
-    return out
-  })
-}
-
 /** Badge transitions colors over 150ms: poll until it settles. */
 async function expectStyle(loc: Locator, want: Partial<Style>): Promise<void> {
   await expect.poll(async () => {
@@ -53,8 +43,42 @@ async function expectStyle(loc: Locator, want: Partial<Style>): Promise<void> {
   }).toEqual(want)
 }
 
+/**
+ * The hex each built-in renders at with nothing chosen. `open` has no colour
+ * of its own — it draws in the body text colour — so its default is the
+ * theme's foreground, which for the default dark theme is #f4f4f5. (As a
+ * baked #ffffff it was invisible on a light card: contrast 1.00.)
+ */
+const DEFAULT_HEX: Record<string, string> = {
+  open: "#f4f4f5",
+  in_progress: "#f59e0b",
+  blocked: "#3b82f6",
+  deferred: "#3b82f6",
+  closed: "#71717a",
+  ready_for_qa: "#a855f7",
+  ready_to_ship: "#10b981",
+}
+
+/** Asserts the element shows its status's DEFAULT colour, not a chosen one. */
 async function expectDefault(loc: Locator): Promise<void> {
-  await expect.poll(async () => JSON.stringify(await styleOf(loc))).toBe(JSON.stringify(await untaggedStyleOf(loc)))
+  const tags = await loc.evaluate((el) => ({
+    status: el.getAttribute("data-status") ?? "",
+    role: el.getAttribute("data-status-role") ?? "",
+  }))
+  const hex = DEFAULT_HEX[tags.status]
+  if (!hex) {
+    throw new Error(`expectDefault: no known default for status "${tags.status}" (role "${tags.role}")`)
+  }
+  const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16))
+  // Matches the roles buildStatusColorCss emits: a dot is the solid hex, a
+  // badge is a 20% tint with a 40% edge, a stage tile just the tint.
+  const want: Partial<Style> =
+    tags.role === "dot"
+      ? { bg: `rgb(${r}, ${g}, ${b})` }
+      : tags.role === "badge"
+        ? { bg: `rgba(${r}, ${g}, ${b}, 0.2)`, border: `rgba(${r}, ${g}, ${b}, 0.4)` }
+        : { bg: `rgba(${r}, ${g}, ${b}, 0.2)` }
+  await expectStyle(loc, want)
 }
 
 async function openWorkflow(page: Page): Promise<void> {
@@ -247,7 +271,12 @@ test.describe("status colors (beadbox-o3h)", () => {
       // Workspace B shows its own (default) colors, not A's.
       await switchTo(fresh, statusesWorkspace)
       await openWorkflow(fresh)
-      await expect(colorRow(fresh, "open").locator('input[type="color"]')).toHaveValue("#ffffff")
+      // DEFAULT_HEX.open, not #ffffff: `open`'s default is the theme's
+      // foreground now, so the swatch shows what the badge will actually
+      // render as rather than a baked white that was invisible on a light card.
+      await expect(colorRow(fresh, "open").locator('input[type="color"]')).toHaveValue(
+        DEFAULT_HEX.open,
+      )
       expect(registryColors(statusesWorkspace)).toBeUndefined()
     } finally {
       await context.close()
