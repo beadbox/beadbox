@@ -73,6 +73,8 @@ describe("listThemeFiles", () => {
     expect(list).toHaveLength(1)
     expect(list[0].error).toBeTruthy()
     expect(list[0].preview).toBeUndefined()
+    // No declared appearance in the file at all — null, not a guess.
+    expect(list[0].appearance).toBeNull()
   })
 
   test("a corrupt file is reported, not fatal", async () => {
@@ -81,7 +83,40 @@ describe("listThemeFiles", () => {
     const list = await listThemeFiles()
     expect(list).toHaveLength(2)
     expect(list.find((e) => e.id === "broken")?.error).toContain("JSON")
+    expect(list.find((e) => e.id === "broken")?.appearance).toBeNull()
     expect(list.find((e) => e.id === "nord")?.error).toBeUndefined()
+  })
+
+  // final whole-plan review, Fix 2: a broken LIGHT theme must not be filed
+  // under "Dark" just because validation failed before fully confirming
+  // the theme — the raw, not-yet-validated JSON already names a usable
+  // appearance, and losing that is exactly what put a light theme's error
+  // under the wrong heading while the Light grid showed nothing wrong.
+  test("preserves a validation-failed theme's own declared appearance", async () => {
+    await writeFile(
+      join(dir, "broken-light.json"),
+      JSON.stringify({ id: "broken-light", name: "Broken Light", appearance: "light" }),
+    )
+    const list = await listThemeFiles()
+    expect(list).toHaveLength(1)
+    expect(list[0].error).toBeTruthy()
+    expect(list[0].appearance).toBe("light")
+  })
+
+  test("an unparseable JSON file reports appearance as null even though it cannot be the wrong-heading bug", async () => {
+    await writeFile(join(dir, "broken.json"), "{ not json")
+    const list = await listThemeFiles()
+    expect(list[0].appearance).toBeNull()
+  })
+
+  test("a declared appearance that isn't dark or light falls back to null, not a guess", async () => {
+    await writeFile(
+      join(dir, "weird.json"),
+      JSON.stringify({ id: "weird", name: "Weird", appearance: "blue" }),
+    )
+    const list = await listThemeFiles()
+    expect(list[0].error).toBeTruthy()
+    expect(list[0].appearance).toBeNull()
   })
 
   test("ignores non-json files and subdirectories", async () => {

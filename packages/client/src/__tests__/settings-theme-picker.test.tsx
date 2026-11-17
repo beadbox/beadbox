@@ -7,7 +7,11 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { SettingsDialog } from "../components/settings-dialog"
-import { _resetThemePreferenceForTests, getThemePrefs } from "../lib/local-storage"
+import {
+  _resetThemePreferenceForTests,
+  getThemePrefs,
+  setThemeForAppearance,
+} from "../lib/local-storage"
 import { queryClient } from "../lib/query-client"
 import { _resetRpc, _setRpc } from "../lib/rpc"
 import { __resetProbeCache } from "../lib/theme-engine"
@@ -264,6 +268,13 @@ describe("theme picker, per-grid behaviour preserved from the single-grid picker
         error: "invalid color format",
       },
     ])
+    // The title's premise ("present but errored") requires the STORED
+    // preference itself to point at the errored theme — otherwise
+    // selectedId resolves to the valid default, which IS present and NOT
+    // errored, and settings-dialog.tsx:179's error-fallback branch never
+    // runs at all (final whole-plan review, Fix 4: this test used to pass
+    // without exercising the branch it names).
+    setThemeForAppearance("dark", "errored-theme")
     renderDialog()
 
     await waitFor(() => {

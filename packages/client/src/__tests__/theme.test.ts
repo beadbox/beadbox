@@ -5,16 +5,15 @@ import {
   _resetThemePreferenceForTests,
   clearCache,
   clearLegacyThemeId,
+  DEFAULT_LIGHT_THEME_ID,
   DEFAULT_THEME_ID,
   DEFAULT_THEME_PREFS,
   getLegacyThemeId,
-  getThemePreference,
   getThemePrefs,
   hasThemePrefs,
   resolveThemeId,
   setThemeForAppearance,
   setThemeMode,
-  setThemePreference,
   subscribeThemePreference,
 } from "../lib/local-storage"
 import { applyThemeClass } from "../lib/theme"
@@ -25,120 +24,40 @@ afterEach(() => {
   _resetThemePreferenceForTests()
 })
 
-describe("theme preference", () => {
-  test("defaults to the built-in dark theme", () => {
-    expect(getThemePreference()).toBe(DEFAULT_THEME_ID)
-  })
-
-  test("round-trips an arbitrary custom theme id", () => {
-    setThemePreference("nord")
-    expect(getThemePreference()).toBe("nord")
-  })
-
-  test("a preference for a theme that is not installed is preserved, not rewritten", () => {
-    setThemePreference("nord")
-    expect(localStorage.getItem("beads-theme")).toBe("nord")
-    expect(getThemePreference()).toBe("nord")
-  })
-
-  test("rejects a syntactically invalid id and falls back", () => {
-    localStorage.setItem("beads-theme", "../../etc/passwd")
-    expect(getThemePreference()).toBe(DEFAULT_THEME_ID)
-  })
-
-  test("a write survives in-memory for the session when the storage write throws", () => {
-    // Plain assignment (`localStorage.setItem = fn`) does NOT override the
-    // method on Bun's Storage implementation: it writes a storage entry
-    // under the literal key "setItem" and the real setItem keeps running
-    // underneath, so the simulated failure below would never actually fire.
-    // Object.defineProperty is the verified way to replace it for the
-    // duration of the test. Restoring via `delete` throws ("Unable to
-    // delete property") on Bun's Storage object, so the restore must
-    // redefine the property back to the real, bound original instead.
-    const original = localStorage.setItem.bind(localStorage)
-    Object.defineProperty(localStorage, "setItem", {
-      value: () => {
-        throw new Error("Simulated quota/private-mode failure")
-      },
-      configurable: true,
-      writable: true,
-    })
-    try {
-      setThemePreference("nord")
-      expect(getThemePreference()).toBe("nord")
-      expect(localStorage.getItem("beads-theme")).toBeNull()
-    } finally {
-      Object.defineProperty(localStorage, "setItem", {
-        value: original,
-        configurable: true,
-        writable: true,
-      })
-    }
-  })
-
-  test("subscribers are still notified when the storage write throws", () => {
-    const original = localStorage.setItem.bind(localStorage)
-    Object.defineProperty(localStorage, "setItem", {
-      value: () => {
-        throw new Error("Simulated quota/private-mode failure")
-      },
-      configurable: true,
-      writable: true,
-    })
-    let calls = 0
-    const unsubscribe = subscribeThemePreference(() => {
-      calls++
-    })
-    try {
-      setThemePreference("nord")
-      expect(calls).toBe(1)
-      expect(localStorage.getItem("beads-theme")).toBeNull()
-    } finally {
-      unsubscribe()
-      Object.defineProperty(localStorage, "setItem", {
-        value: original,
-        configurable: true,
-        writable: true,
-      })
-    }
-  })
-
-  test("a normal write still persists and is readable after a fresh module/page load", () => {
-    setThemePreference("nord")
-    // Simulate a fresh module/page load: nothing held in memory, only
-    // whatever got written to storage.
-    _resetThemePreferenceForTests()
-    expect(getThemePreference()).toBe("nord")
-  })
-})
-
 describe("resolveThemeId", () => {
   test("a known id returns itself", () => {
-    expect(resolveThemeId("beadbox-light", ["beadbox-dark", "beadbox-light"])).toBe("beadbox-light")
+    expect(resolveThemeId("beadbox-light", ["beadbox-dark", "beadbox-light"], "light")).toBe(
+      "beadbox-light",
+    )
   })
 
-  test("an unknown id returns the default", () => {
-    expect(resolveThemeId("nord", ["beadbox-dark", "beadbox-light"])).toBe(DEFAULT_THEME_ID)
+  test("an unknown id falls back to the default for its own appearance", () => {
+    // final whole-plan review, Fix 1: the fallback must land inside the
+    // grid being rendered — an unresolvable id in the light grid must
+    // resolve to the LIGHT default, not always the dark one, or no card
+    // in that grid would ever show as selected.
+    expect(resolveThemeId("nord", ["beadbox-dark", "beadbox-light"], "dark")).toBe(DEFAULT_THEME_ID)
+    expect(resolveThemeId("nord", ["beadbox-light"], "light")).toBe(DEFAULT_LIGHT_THEME_ID)
   })
 
   test("storage is untouched either way", () => {
-    setThemePreference("nord")
-    resolveThemeId("nord", ["beadbox-dark", "beadbox-light"])
-    resolveThemeId("beadbox-dark", ["beadbox-dark", "beadbox-light"])
-    expect(localStorage.getItem("beads-theme")).toBe("nord")
+    setThemeForAppearance("dark", "nord")
+    resolveThemeId("nord", ["beadbox-dark", "beadbox-light"], "dark")
+    resolveThemeId("beadbox-dark", ["beadbox-dark", "beadbox-light"], "dark")
+    expect(getThemePrefs().darkThemeId).toBe("nord")
   })
 })
 
 describe("clearCache", () => {
-  test("after setThemePreference then clearCache, getThemePreference returns the default without page reload", () => {
-    setThemePreference("nord")
-    expect(getThemePreference()).toBe("nord")
+  test("after setThemeMode then clearCache, getThemePrefs returns the default without page reload", () => {
+    setThemeMode("light")
+    expect(getThemePrefs().mode).toBe("light")
     clearCache()
-    expect(getThemePreference()).toBe(DEFAULT_THEME_ID)
+    expect(getThemePrefs()).toEqual(DEFAULT_THEME_PREFS)
   })
 
   test("a subscriber is notified by clearCache", () => {
-    setThemePreference("nord")
+    setThemeMode("light")
     let calls = 0
     const unsubscribe = subscribeThemePreference(() => {
       calls++
@@ -261,10 +180,10 @@ describe("theme prefs (appearance mode)", () => {
   })
 
   test("writes still apply for the session when localStorage throws, and nothing lands in storage", () => {
-    // See the comment on the legacy write-throws test above: plain
-    // assignment does not override Storage.setItem in Bun, and `delete`
-    // cannot restore it afterwards either, so the restore redefines the
-    // property back to the real, bound original.
+    // Plain assignment (`localStorage.setItem = fn`) does NOT override the
+    // method on Bun's Storage implementation, and `delete` cannot restore
+    // it afterwards either ("Unable to delete property"), so the restore
+    // redefines the property back to the real, bound original.
     const original = localStorage.setItem.bind(localStorage)
     Object.defineProperty(localStorage, "setItem", {
       value: () => {

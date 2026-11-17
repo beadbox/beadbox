@@ -423,15 +423,49 @@ describe("useTheme legacy migration", () => {
   })
 
   test("a legacy id whose theme is no longer installed falls back to defaults", async () => {
+    // A working (non-throwing) themes list that just doesn't contain
+    // "uninstalled" — this test is about a successful read that genuinely
+    // lacks the id, not a degraded sidecar read (see the next test for
+    // that; final whole-plan review, Fix 3 distinguishes the two).
+    installThemesRpcMock()
     localStorage.setItem("beads-theme", "uninstalled")
     _resetThemePreferenceForTests()
 
     renderProbe()
 
-    await waitFor(() => {
-      expect(getThemePrefs()).toEqual(DEFAULT_THEME_PREFS)
-    })
+    // Real delay, then a synchronous assert — NOT waitFor. waitFor would
+    // pass trivially here: DEFAULT_THEME_PREFS is already the state at
+    // t=0, before the migration's listThemesWithStatus() call has even had
+    // a chance to resolve, and waitFor runs its callback synchronously on
+    // the first pass. A migration that wrongly adopted an uninstalled id
+    // would write, then clear the key, and a waitFor-based assert here
+    // would stay green throughout. See "migration does not run when prefs
+    // already exist" below for the same pattern.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(getThemePrefs()).toEqual(DEFAULT_THEME_PREFS)
     expect(localStorage.getItem("beads-theme")).toBeNull()
+  })
+
+  // final whole-plan review, Fix 3: a legacy id naming a real USER theme
+  // (not a built-in, which is always resolvable regardless of the sidecar)
+  // must survive a degraded read — the sidecar failing on this exact launch
+  // is not proof the theme is uninstalled, and clearing the legacy key here
+  // would discard the user's preference permanently with nothing to retry.
+  test("a legacy id naming a user theme is preserved, not discarded, when the themes read degrades", async () => {
+    // No installThemesRpcMock() here: the default stub throws
+    // RpcUnavailableError for every call, standing in for the sidecar
+    // having failed on this exact launch.
+    localStorage.setItem("beads-theme", "nord")
+    _resetThemePreferenceForTests()
+
+    renderProbe()
+
+    // Real delay, not waitFor: there is nothing to wait FOR here — the bug
+    // this guards against is a silent, immediate loss of the user's
+    // preference, with no observable change to wait on.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(getThemePrefs()).toEqual(DEFAULT_THEME_PREFS)
+    expect(localStorage.getItem("beads-theme")).toBe("nord")
   })
 
   // The guard this test protects: migration must key off "has the new
@@ -488,10 +522,20 @@ describe("useTheme hot reload", () => {
       )
     })
 
-    // Simulate the file being edited: still valid, different colours.
-    const v2 = { ...darkJson, id: "custom1", name: "Custom 1" }
+    // Simulate the file being edited: still valid, different colours, SAME
+    // appearance ("light", matching the slot) — a flipped appearance on an
+    // otherwise-valid edit is its own scenario, covered separately below
+    // (final whole-plan review, Fix 1's appearance-mismatch guard would
+    // otherwise refuse this edit too, which is not what this test is
+    // about).
+    const v2 = {
+      ...lightJson,
+      id: "custom1",
+      name: "Custom 1",
+      colors: { ...lightJson.colors, background: "#001122" },
+    }
     rpcMock.setTheme("custom1", v2)
-    rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "dark", source: "user" }])
+    rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "light", source: "user" }])
 
     act(() => {
       listen.fire()
@@ -503,6 +547,63 @@ describe("useTheme hot reload", () => {
       )
     })
     expect(rpcMock.startWatch).toHaveBeenCalled()
+  })
+
+  // final whole-plan review, Fix 1: the appearance-coherence cluster. A hot
+  // reload must not paint the wrong-appearance theme's tokens under the
+  // slot's own resolved appearance class — editing custom1's `appearance`
+  // field from "dark" to "light" in place (same id, so the id-based guard
+  // above does not fire) must not leave the dark slot painted with light
+  // tokens under .dark.
+  test("refuses a hot-reloaded theme whose appearance no longer matches its slot", async () => {
+    setThemeMode("dark")
+    setThemeForAppearance("dark", "custom1")
+    const rpcMock = installThemesRpcMock()
+    // v1's background is deliberately NOT the dark built-in's own value: a
+    // distinct custom colour so that "the dark built-in got applied after
+    // hot reload" (the correct, guarded outcome) cannot be confused with
+    // "the hot reload never fired and v1 is still on screen" (ambiguous
+    // with the built-in only because v1 happens to be a copy of it).
+    const v1 = {
+      ...darkJson,
+      id: "custom1",
+      name: "Custom 1",
+      colors: { ...darkJson.colors, background: "#123456" },
+    }
+    rpcMock.setTheme("custom1", v1)
+    rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "dark", source: "user" }])
+    const listen = installThemeChangeListener()
+
+    const { getByTestId } = renderProbe()
+    await waitFor(() => {
+      expect(getByTestId("out").textContent).toBe("custom1:true")
+      expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
+        v1.colors.background,
+      )
+    })
+    expect(document.documentElement.classList.contains("dark")).toBe(true)
+
+    // Same id, flipped appearance: still validates (appearance is a legal
+    // value, just the wrong one for the dark slot it is assigned to).
+    const v2 = { ...lightJson, id: "custom1", name: "Custom 1" }
+    rpcMock.setTheme("custom1", v2)
+    rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "light", source: "user" }])
+
+    act(() => {
+      listen.fire()
+    })
+
+    await waitFor(() => {
+      // Refused, and replaced with the dark slot's own built-in — not the
+      // mis-slotted theme's light tokens, and not a no-op that leaves v1
+      // on screen either: v1's tokens no longer reflect what the slot's
+      // assigned theme file actually contains once the file itself has
+      // changed appearance.
+      expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
+        darkJson.colors.background,
+      )
+    })
+    expect(document.documentElement.classList.contains("dark")).toBe(true)
   })
 
   test("keeps the last-good theme on screen when the changed file no longer validates", async () => {
