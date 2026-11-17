@@ -9,7 +9,7 @@ import { type FSWatcher, watch } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, join } from "node:path"
-import type { Theme } from "./theme-tokens"
+import type { Appearance, Theme } from "./theme-tokens"
 import { validateTheme } from "./theme-validate"
 
 // Editors write in several steps (temp file, rename, chmod), so a single
@@ -29,7 +29,16 @@ const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 export interface ThemeEntry {
   id: string
   name: string
-  appearance: "dark" | "light"
+  /**
+   * Null when the file's own declared appearance could not be recovered
+   * (final whole-plan review, Fix 2) — unparseable JSON, or any other shape
+   * that never reached the point where `appearance` could be read. Always
+   * paired with `error` set: a null-appearance entry can never be slotted,
+   * only shown with its error outside both the dark and light grids, so the
+   * symptom (an invalid light theme) and the diagnosis never end up filed
+   * under the wrong heading.
+   */
+  appearance: Appearance | null
   source: "user"
   error?: string
   /**
@@ -41,6 +50,19 @@ export interface ThemeEntry {
     Theme["colors"],
     "background" | "card" | "primary" | "secondary" | "mutedForeground" | "foreground"
   >
+}
+
+/**
+ * The file's own declared `appearance`, read directly off the still-unvalidated
+ * parsed JSON — used when full validation fails for some OTHER reason (bad
+ * colours, wrong id, ...) but the appearance field itself is a usable value.
+ * Returns null for anything that isn't exactly "dark" or "light", including
+ * a non-object or an absent field — never a guess.
+ */
+function declaredAppearance(parsed: unknown): Appearance | null {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null
+  const appearance = (parsed as Record<string, unknown>).appearance
+  return appearance === "dark" || appearance === "light" ? appearance : null
 }
 
 /** Respects BEADBOX_THEMES_PATH for test isolation. */
@@ -77,7 +99,11 @@ export async function listThemeFiles(): Promise<ThemeEntry[]> {
       entries.push({
         id,
         name: id,
-        appearance: "dark",
+        // Unparseable text has no recoverable appearance to read — null,
+        // not a guess (final whole-plan review, Fix 2): guessing "dark"
+        // here is exactly what put a broken light theme's error under the
+        // Dark heading while the Light grid showed nothing wrong.
+        appearance: null,
         source: "user",
         error: `not valid JSON: ${e instanceof Error ? e.message : String(e)}`,
       })
@@ -86,7 +112,17 @@ export async function listThemeFiles(): Promise<ThemeEntry[]> {
 
     const result = validateTheme(parsed, { id })
     if (!result.ok) {
-      entries.push({ id, name: id, appearance: "dark", source: "user", error: result.error })
+      entries.push({
+        id,
+        name: id,
+        // Validation can fail on anything (id, name, colours, ...) without
+        // the declared appearance itself being wrong, so preserve it when
+        // the raw (not-yet-validated) JSON names a usable one — the error
+        // then lands in the grid for the slot it actually claims.
+        appearance: declaredAppearance(parsed),
+        source: "user",
+        error: result.error,
+      })
       continue
     }
     // Metadata plus a six-colour preview — not the full token set, so the
