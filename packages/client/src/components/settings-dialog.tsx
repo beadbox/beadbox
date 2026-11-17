@@ -1,4 +1,5 @@
 import type * as DiagnosticsHandlers from "@beadbox/server/handlers"
+import type { Appearance } from "@beadbox/server/theme-tokens"
 import { QueryClientProvider, useQuery } from "@tanstack/react-query"
 import {
   AlertCircle,
@@ -126,12 +127,15 @@ function themeIds(list: readonly ThemeEntry[]): string {
  */
 function ThemeSlotGrid({
   label,
+  appearance,
   themes,
   selectedId,
   onSelect,
   open,
 }: {
+  /** The grid's full visible caption AND accessible name, e.g. "Dark theme". */
   label: string
+  appearance: Appearance
   themes: readonly ThemeEntry[]
   selectedId: ThemeId
   onSelect: (id: ThemeId) => void
@@ -170,6 +174,7 @@ function ThemeSlotGrid({
       const resolved = resolveThemeId(
         selectedId,
         themes.map((o) => o.id),
+        appearance,
       )
       let idx = themes.findIndex((t) => t.id === resolved)
       // A roving tabIndex on a disabled card is inert — disabled buttons are
@@ -180,7 +185,7 @@ function ThemeSlotGrid({
       setFocusedIndex(idx >= 0 ? idx : 0)
     }
     prevSyncRef.current = { open, selectedId, ids }
-  }, [open, selectedId, themes])
+  }, [open, selectedId, themes, appearance])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -235,7 +240,7 @@ function ThemeSlotGrid({
       <p className="text-xs font-medium text-muted-foreground mb-2">{label}</p>
       <div
         role="radiogroup"
-        aria-label={`${label} theme`}
+        aria-label={label}
         className="grid grid-cols-3 gap-3 max-w-lg"
         onKeyDown={handleKeyDown}
       >
@@ -245,6 +250,7 @@ function ThemeSlotGrid({
             resolveThemeId(
               selectedId,
               themes.map((o) => o.id),
+              appearance,
             ) === t.id
           return (
             <button
@@ -474,32 +480,42 @@ function AppearanceModeSelector({
   )
 
   return (
-    <div
-      role="radiogroup"
-      aria-label="Appearance mode"
-      className="flex gap-2 mb-6"
-      onKeyDown={handleKeyDown}
-    >
-      {MODE_OPTIONS.map((m, i) => (
-        <button
-          key={m}
-          ref={(el) => {
-            buttonRefs.current[i] = el
-          }}
-          type="button"
-          role="radio"
-          aria-checked={mode === m}
-          aria-label={m === "system" ? "Follow system appearance" : `${m} mode`}
-          tabIndex={focusedIndex === i ? 0 : -1}
-          onClick={() => select(m)}
-          className={cn(
-            "rounded-md border px-3 py-1.5 text-sm capitalize transition-colors",
-            mode === m ? "border-primary bg-primary/10" : "border-border hover:bg-accent",
-          )}
-        >
-          {m === "system" ? "System" : m}
-        </button>
-      ))}
+    <div className="mb-6">
+      {/* Visible caption (final whole-plan review, Fix 5): without this,
+          nothing distinguishes this row (WHEN to render dark/light) from
+          the Dark/Light theme grids below it (WHICH theme per slot) except
+          an aria-label a sighted user never sees — reading the three
+          buttons as filtering the two grids below was the natural, wrong
+          conclusion. Accessible names on the buttons themselves (below)
+          are unchanged. */}
+      <p className="text-xs font-medium text-muted-foreground mb-2">Appearance mode</p>
+      <div
+        role="radiogroup"
+        aria-label="Appearance mode"
+        className="flex gap-2"
+        onKeyDown={handleKeyDown}
+      >
+        {MODE_OPTIONS.map((m, i) => (
+          <button
+            key={m}
+            ref={(el) => {
+              buttonRefs.current[i] = el
+            }}
+            type="button"
+            role="radio"
+            aria-checked={mode === m}
+            aria-label={m === "system" ? "Follow system appearance" : `${m} mode`}
+            tabIndex={focusedIndex === i ? 0 : -1}
+            onClick={() => select(m)}
+            className={cn(
+              "rounded-md border px-3 py-1.5 text-sm capitalize transition-colors",
+              mode === m ? "border-primary bg-primary/10" : "border-border hover:bg-accent",
+            )}
+          >
+            {m === "system" ? "System" : m}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -589,6 +605,13 @@ function SettingsDialogContent({
   const themes: readonly ThemeEntry[] = themesData ?? BUILTIN_ENTRIES
   const darkThemes = themes.filter((t) => t.appearance === "dark")
   const lightThemes = themes.filter((t) => t.appearance === "light")
+  // A theme whose own appearance could not be recovered (final whole-plan
+  // review, Fix 2) — e.g. unparseable JSON — belongs in neither grid: filing
+  // it under "Dark" by default is exactly the bug that put a broken light
+  // theme's error under the wrong heading. Shown in its own section below
+  // instead, errored and unselectable (every entry here always has
+  // `.error` set).
+  const unresolvedAppearanceThemes = themes.filter((t) => t.appearance === null)
   const { mode, darkThemeId, lightThemeId, setMode, setThemeForAppearance } = useThemePreference()
   const [analyticsEnabled, setAnalyticsEnabledState] = useState(true)
 
@@ -750,19 +773,36 @@ function SettingsDialogContent({
                     <>
                       <AppearanceModeSelector mode={mode} setMode={setMode} open={open} />
                       <ThemeSlotGrid
-                        label="Dark"
+                        label="Dark theme"
+                        appearance="dark"
                         themes={darkThemes}
                         selectedId={darkThemeId}
                         onSelect={(id) => setThemeForAppearance("dark", id)}
                         open={open}
                       />
                       <ThemeSlotGrid
-                        label="Light"
+                        label="Light theme"
+                        appearance="light"
                         themes={lightThemes}
                         selectedId={lightThemeId}
                         onSelect={(id) => setThemeForAppearance("light", id)}
                         open={open}
                       />
+                      {unresolvedAppearanceThemes.length > 0 && (
+                        <ThemeSlotGrid
+                          label="Unknown appearance"
+                          // Every entry here is already errored (the only
+                          // way appearance ever becomes null) and therefore
+                          // unselectable, so no id in this slot's default
+                          // ever applies — "dark" is an arbitrary, inert
+                          // choice, not a claim about these themes.
+                          appearance="dark"
+                          themes={unresolvedAppearanceThemes}
+                          selectedId=""
+                          onSelect={() => {}}
+                          open={open}
+                        />
+                      )}
                     </>
                   )}
                 </div>

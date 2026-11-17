@@ -133,9 +133,11 @@ export function usePreferences() {
   const [vimEnabled, setVimEnabledState] = useState(true)
 
   // Load zoom, vim navigation, and update preferences on mount. Theme is
-  // no longer hydrated here: it comes from use-theme-preference.ts's
-  // useSyncExternalStore call above, which already reads
-  // getThemePreference() on first render.
+  // not hydrated here at all: usePreferences no longer derives or exposes
+  // theme state (beadbox-sdd/2026-11-17-appearance-mode task 5) — a
+  // component that needs it calls use-theme-preference.ts's
+  // useThemePreference() directly, which owns its own
+  // useSyncExternalStore subscription to local-storage.ts's getThemePrefs.
   useEffect(() => {
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
