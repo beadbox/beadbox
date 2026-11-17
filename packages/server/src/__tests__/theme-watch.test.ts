@@ -13,6 +13,7 @@ import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { watchThemes } from "../lib/theme-files"
+import { waitFor } from "./wait-for"
 
 let dir: string
 beforeEach(async () => {
@@ -31,7 +32,9 @@ describe("watchThemes", () => {
       fired++
     })
     await writeFile(join(dir, "nord.json"), "{}")
-    await new Promise((r) => setTimeout(r, 500))
+    await waitFor(() => fired > 0, {
+      description: "watchThemes callback to fire after writing a theme file",
+    })
     stop()
     expect(fired).toBeGreaterThan(0)
   })
@@ -43,9 +46,14 @@ describe("watchThemes", () => {
     })
     const file = join(dir, "temp.json")
     await writeFile(file, "{}")
-    await new Promise((r) => setTimeout(r, 500))
+    await waitFor(() => fired > 0, {
+      description: "watchThemes callback to fire after creating a theme file",
+    })
+    const firedAfterCreate = fired
     await unlink(file)
-    await new Promise((r) => setTimeout(r, 500))
+    await waitFor(() => fired > firedAfterCreate, {
+      description: "watchThemes callback to fire again after deleting a theme file",
+    })
     stop()
     expect(fired).toBeGreaterThan(0)
   })
@@ -75,7 +83,9 @@ describe("watchThemes", () => {
     for (let i = 0; i < 10; i++) {
       await writeFile(join(dir, "nord.json"), JSON.stringify({ i }))
     }
-    await new Promise((r) => setTimeout(r, 500))
+    await waitFor(() => fired > 0, {
+      description: "watchThemes callback to fire after a burst of writes",
+    })
     stop()
     // Not asserting an exact count — the debounce makes the count
     // timing-dependent — only that coalescing actually happened.

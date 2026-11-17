@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { handlers } from "../handlers"
 import * as themes from "../handlers/themes"
+import { waitFor } from "./wait-for"
 
 let dir: string
 const COLORS = {
@@ -80,7 +81,9 @@ describe("themes handler", () => {
     try {
       await themes.startWatch()
       await writeFile(join(dir, "nord.json"), "{}")
-      await new Promise((r) => setTimeout(r, 500))
+      await waitFor(() => chunks.some((c) => c.startsWith("[THEMES:changed]")), {
+        description: "a [THEMES:changed] stderr line after writing a theme file",
+      })
     } finally {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(process.stderr as any).write = original
