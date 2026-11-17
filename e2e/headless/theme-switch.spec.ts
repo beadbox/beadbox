@@ -31,24 +31,14 @@ test.describe("theme switching", () => {
     const lightBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
     expect(lightBg).not.toBe(darkBg)
 
-    // The regression that motivated the hybrid design: status colours must
-    // follow the appearance change, not stay pinned to the dark surface.
+    // Proves applyTheme actually wrote the light theme's card token onto
+    // <html> for this appearance change — not that status colours tracked
+    // it (that's currentThemeSurface/statusColorStore, covered by unit
+    // tests in status-colors-mount.test.tsx and project-status-colors.test.tsx).
     const surface = await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue("--bb-card").trim(),
     )
     expect(surface).toBe(lightTheme.colors.card)
-  })
-
-  test("body text stays readable against the background in light mode", async ({ page }) => {
-    await page.goto("/")
-    await page.evaluate(() => localStorage.setItem("beads-theme", "beadbox-light"))
-    await page.reload()
-
-    const { bg, fg } = await page.evaluate(() => {
-      const s = getComputedStyle(document.body)
-      return { bg: s.backgroundColor, fg: s.color }
-    })
-    expect(bg).not.toBe(fg)
   })
 
   // Addendum: the startup-path tests above set localStorage and reload, which

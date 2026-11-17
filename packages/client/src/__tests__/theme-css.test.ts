@@ -41,11 +41,14 @@ describe("index.html", () => {
 
 describe("regression: no bare --token var() references survive in client source", () => {
   // Deleting `.dark.theme-gray` orphans any consumer still dereferencing a
-  // bare colour token (no `bb-` prefix) instead of its `--bb-*` form —
-  // those fall back to the dormant light-mode `:root` oklch block instead of
-  // the active theme. This walks every .ts/.tsx/.css file under src/ and
-  // fails if any of the 19 colour token names is referenced bare (without
-  // the `bb-` prefix), guarding against reintroduction.
+  // bare colour token (no `bb-` prefix) instead of its `--bb-*` form. The
+  // dormant `:root` oklch block and the slate-palette `.dark` block that
+  // used to catch such a reference are themselves gone (Fix 7, final
+  // whole-branch review): a bare token now resolves to nothing (an unset
+  // custom property), not to some other palette. This walks every
+  // .ts/.tsx/.css file under src/ and fails if any of the 19 colour token
+  // names is referenced bare (without the `bb-` prefix), guarding against
+  // reintroduction.
   const srcDir = join(import.meta.dir, "..")
   const scannedExtensions = new Set([".ts", ".tsx", ".css"])
   const tokenAlternation = COLOR_KEYS.map((key) =>

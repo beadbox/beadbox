@@ -6,12 +6,23 @@
 // restriction is cheap to relax later and impossible to tighten once
 // users' theme files depend on it.
 
-import { type Appearance, COLOR_KEYS, FONT_KEYS, RADIUS_KEYS, type Theme } from "./theme-tokens"
+import {
+  type Appearance,
+  COLOR_KEYS,
+  FONT_KEYS,
+  RADIUS_KEYS,
+  THEME_ID_RE,
+  type Theme,
+} from "./theme-tokens"
 
 const HEX = /^#[0-9a-fA-F]{6}$/
 const RGB = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\)$/
-// Lengths and calc() only: digits, units, arithmetic, spaces. Excludes ; } and
-// url( so a theme file can never terminate a declaration and inject CSS.
+// Lengths and calc() only: digits, units, arithmetic, spaces. Excludes ; } { :
+// quotes and backslash — it does NOT exclude url( (it admits u, r, l and "(").
+// That's fine: these values only ever reach --bb-radius-*, consumed as
+// border-radius (which doesn't accept url()), and every write goes through
+// el.style.setProperty rather than string concatenation into a stylesheet, so
+// there is no CSSOM sink for a url(...) value to inject through.
 const LENGTH = /^[0-9a-zA-Z.%+\-*/() ]{1,64}$/
 const FONT_STACK = /^[0-9a-zA-Z.,'"_\- ]{1,200}$/
 
@@ -31,7 +42,7 @@ export function validateTheme(input: unknown, opts: { id?: string } = {}): Valid
   }
   const t = input as Record<string, unknown>
 
-  if (typeof t.id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(t.id)) {
+  if (typeof t.id !== "string" || !THEME_ID_RE.test(t.id)) {
     return fail("id must be a lowercase slug of 1-64 chars ([a-z0-9_-])")
   }
   if (opts.id !== undefined && t.id !== opts.id) {

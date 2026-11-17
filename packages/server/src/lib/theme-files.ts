@@ -19,6 +19,11 @@ import { validateTheme } from "./theme-validate"
 // feeling instant to a user who just hit save.
 const WATCH_DEBOUNCE_MS = 200
 
+// Deliberately NOT theme-tokens.ts's THEME_ID_RE: this copy gates a
+// filesystem path (readThemeFile builds `${id}.json` from it before ever
+// touching disk), and stays independent as defence-in-depth. Do not "DRY"
+// it away into the shared constant — a future relaxation of the shared
+// format must not silently widen what this one lets through to a path.
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
 export interface ThemeEntry {

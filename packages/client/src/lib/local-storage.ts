@@ -1,3 +1,4 @@
+import { THEME_ID_RE } from "@beadbox/server/theme-tokens"
 import {
   ALL_PRIORITIES,
   type Bead,
@@ -135,7 +136,11 @@ export function setFiltersPreference(filters: Filters): void {
 
 export const DEFAULT_THEME_ID = "beadbox-dark"
 
-const THEME_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
+// THEME_ID_RE itself now lives in @beadbox/server/theme-tokens (Fix 8, final
+// whole-branch review): theme-validate.ts's validateTheme() shares this
+// exact pattern, so a format relaxed on one side can no longer silently
+// mismatch the other and make setThemePreference below reject an id that
+// validates and lists fine.
 
 // beadbox-sdd/2026-11-13-runtime-themes task 11: the theme preference is
 // observed by multiple independent call sites (use-theme.ts, usePreferences,

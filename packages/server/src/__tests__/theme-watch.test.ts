@@ -80,15 +80,25 @@ describe("watchThemes", () => {
     const stop = watchThemes(() => {
       fired++
     })
-    for (let i = 0; i < 10; i++) {
-      await writeFile(join(dir, "nord.json"), JSON.stringify({ i }))
-    }
+    // Fire the whole burst without awaiting each write in turn, so it is
+    // actually a burst (all 10 fs events land close together) rather than
+    // a slow drip whose inter-write spacing depends on filesystem and
+    // event-loop contention under the full suite's load — under that load,
+    // a serially-awaited drip can space writes more than WATCH_DEBOUNCE_MS
+    // apart and let `fired` reach 10, failing this assertion for a reason
+    // that has nothing to do with coalescing itself.
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        writeFile(join(dir, "nord.json"), JSON.stringify({ i })),
+      ),
+    )
     await waitFor(() => fired > 0, {
       description: "watchThemes callback to fire after a burst of writes",
     })
     stop()
     // Not asserting an exact count — the debounce makes the count
-    // timing-dependent — only that coalescing actually happened.
+    // timing-dependent — only that a burst issued close together produced
+    // fewer callbacks than writes, i.e. that coalescing actually happened.
     expect(fired).toBeGreaterThan(0)
     expect(fired).toBeLessThan(10)
   })

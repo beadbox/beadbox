@@ -81,7 +81,7 @@ function RootLayout() {
           )}
         </div>
       </div>
-      <Toaster position="bottom-right" theme="dark" />
+      <Toaster position="bottom-right" />
       <DevBadge />
     </PostHogProvider>
   )
