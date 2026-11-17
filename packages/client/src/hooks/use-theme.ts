@@ -32,7 +32,13 @@ import {
 import { rpc } from "../lib/rpc"
 import { hasSidecarTransport, onStderr } from "../lib/sidecar-transport"
 import { applyTheme, isThemingAvailable } from "../lib/theme-engine"
-import { builtinThemeFor, listThemes, loadTheme, themesQueryKey } from "../lib/theme-source"
+import {
+  builtinThemeFor,
+  listThemes,
+  listThemesWithStatus,
+  loadTheme,
+  themesQueryKey,
+} from "../lib/theme-source"
 import { useThemePreference } from "./use-theme-preference"
 
 // Task 13 hot reload: the sidecar's themes.startWatch() emits this line on
@@ -93,38 +99,64 @@ export function useTheme(): {
   // resolves would make StrictMode's double-invoke a permanent no-op: the
   // first pass's result is cancelled, and the second pass would see the
   // ref already set and skip entirely, so the migration would never
-  // actually land in dev (main.tsx wraps the app in <StrictMode>). React
-  // Query dedupes the two fetchQuery calls a double-invoke starts for the
-  // same key, so exactly one migration lands regardless.
+  // actually land in dev (main.tsx wraps the app in <StrictMode>). Each
+  // invocation's own `cancelled` flag is what keeps a cancelled first pass
+  // from acting on its (eventually resolved) result.
+  //
+  // Calls listThemesWithStatus() directly rather than going through
+  // queryClient.fetchQuery(themesQueryKey, listThemes): the StrictMode
+  // dedup that gave the old code was a nice-to-have, not a correctness
+  // requirement (each invocation is independently idempotent via its own
+  // `cancelled` flag), and listThemes()'s plain ThemeEntry[] result can't
+  // carry the degraded/genuinely-empty distinction this migration needs
+  // (final whole-plan review, Fix 3) without a second, incompatible shape
+  // under the same react-query cache key.
   useEffect(() => {
     const legacyId = getLegacyThemeId()
     if (!legacyId || hasThemePrefs()) return
     let cancelled = false
-    void queryClient
-      .fetchQuery({ queryKey: themesQueryKey, queryFn: listThemes })
-      .then((entries) => {
+    void listThemesWithStatus()
+      .then(({ entries, degraded }) => {
         if (cancelled) return
+        // A preference written while this read was in flight (e.g. the
+        // user opened Settings during a slow boot) is the newer intent and
+        // must not be clobbered by the stale legacy value — re-check the
+        // gate here rather than trusting the synchronous check above,
+        // which ran before this await.
+        if (hasThemePrefs()) return
         const entry = entries.find((e) => e.id === legacyId && !e.error)
-        // An id whose theme is no longer installed (or no longer validates)
-        // cannot be slotted, so the defaults stand rather than guessing an
-        // appearance for it. entry.appearance is checked too: ThemeEntry.
-        // appearance admits null for a theme whose own appearance could
-        // not be determined (Fix 2), and that cannot be slotted either.
+        // An id whose theme is no longer installed (or no longer
+        // validates) cannot be slotted, so the defaults stand rather than
+        // guessing an appearance for it. entry.appearance is checked too:
+        // ThemeEntry.appearance admits null for a theme whose own
+        // appearance could not be determined (Fix 2), and that cannot be
+        // slotted either.
         if (entry?.appearance) {
           setThemeForAppearance(entry.appearance, legacyId)
           setThemeMode(entry.appearance)
         }
+        if (!entry && degraded) {
+          // Not found, but the read itself degraded (sidecar unavailable
+          // or failed) rather than genuinely succeeding without this id —
+          // not proof legacyId is uninstalled. Leave the legacy key in
+          // place so migration can retry on a later launch, rather than
+          // silently discarding the user's choice. A found entry is
+          // unaffected by this branch and always falls through to clear
+          // below, since built-in ids are always present regardless of
+          // whether the user-theme read degraded.
+          return
+        }
         clearLegacyThemeId()
       })
       .catch(() => {
-        // List unavailable (no sidecar). Leave the legacy key in place so
-        // migration can retry on a later launch rather than silently
-        // discarding the user's choice.
+        // listThemesWithStatus itself does not reject (listThemesResult
+        // catches the rpc failure internally and reports it via
+        // `degraded` instead) — this is defence-in-depth only.
       })
     return () => {
       cancelled = true
     }
-  }, [queryClient])
+  }, [])
 
   // Bumped only when a hot-reload revalidation finds the ACTIVE theme still
   // valid, so the apply effect below re-runs and re-reads the same id. A
