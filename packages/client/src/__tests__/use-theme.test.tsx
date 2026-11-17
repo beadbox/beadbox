@@ -8,8 +8,9 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
+import { SettingsDialog } from "../components/settings-dialog"
 import { usePreferences } from "../hooks/use-preferences"
 import {
   _resetListenStderrForTheme,
@@ -25,6 +26,7 @@ import {
   setThemePreference,
   subscribeThemePreference,
 } from "../lib/local-storage"
+import { queryClient } from "../lib/query-client"
 import { _resetRpc, _setRpc, type RemoteApi } from "../lib/rpc"
 import { __resetProbeCache } from "../lib/theme-engine"
 import type { ThemeEntry } from "../lib/theme-source"
@@ -81,6 +83,11 @@ afterEach(() => {
   _resetRpc()
   _resetListenStderrForTheme()
   _resetRuntimeCheckForTheme()
+  // Only the Fix 5 integration test below touches the real singleton
+  // client (it mounts SettingsDialog, which self-wraps with it); clearing
+  // unconditionally keeps that test from leaking cached entries into
+  // settings-theme-picker.test.tsx's own suite.
+  queryClient.clear()
 })
 
 // ─── Hot-reload test helpers (task 13) ─────────────────────────────────────
@@ -424,5 +431,244 @@ describe("useTheme hot reload", () => {
       expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
     })
     expect(rpcMock.startWatch).not.toHaveBeenCalled()
+  })
+
+  // Fix 1 (sidecar restart): the new process boots with
+  // packages/server/src/handlers/themes.ts's stopWatcher back at null, and
+  // nothing re-arms the watch unless the client calls startWatch() again
+  // against the new process. lib/rpc.ts dispatches "beadbox:sidecar-exit"
+  // for exactly this; the watcher effect must re-run on it, mirroring
+  // lib/subscribe.ts's transportEpoch.
+  test("re-subscribes (startWatch again) after a beadbox:sidecar-exit event", async () => {
+    localStorage.setItem("beads-theme", "beadbox-dark")
+    const rpcMock = installThemesRpcMock()
+    rpcMock.setEntries([])
+    installThemeChangeListener()
+
+    const { getByTestId } = render(withQuery(<Probe />))
+    await waitFor(() => {
+      expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
+    })
+    await waitFor(() => {
+      expect(rpcMock.startWatch).toHaveBeenCalledTimes(1)
+    })
+
+    act(() => {
+      window.dispatchEvent(new Event("beadbox:sidecar-exit"))
+    })
+
+    await waitFor(() => {
+      expect(rpcMock.startWatch).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  // Fix 2 (the race leaves the app stuck on dark, not merely flashing): the
+  // watcher's list refetch can still find the active theme valid (so the
+  // epoch bumps) while a SECOND, invalid save has already landed on disk by
+  // the time loadTheme actually reads the file — rpc.themes.get now returns
+  // something that fails validateTheme, so loadTheme collapses to
+  // FALLBACK_THEME. The apply effect must refuse that result rather than
+  // applying it, or the app would be stranded on Beadbox Dark until the
+  // file becomes valid again.
+  test("a hot-reload re-apply that resolves the fallback theme leaves the on-screen theme untouched", async () => {
+    localStorage.setItem("beads-theme", "custom1")
+    const rpcMock = installThemesRpcMock()
+    const v1 = { ...lightJson, id: "custom1", name: "Custom 1" }
+    rpcMock.setTheme("custom1", v1)
+    rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "light", source: "user" }])
+    const listen = installThemeChangeListener()
+
+    const { getByTestId } = render(withQuery(<Probe />))
+    await waitFor(() => {
+      expect(getByTestId("out").textContent).toBe("custom1:true")
+      expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
+        v1.colors.background,
+      )
+    })
+
+    // The list still reports custom1 as valid (stillValid -> epoch bumps),
+    // but the file behind `get` is now broken — the exact race window Fix 2
+    // targets. The list entry is deliberately left without `.error`: that
+    // is what makes the watcher think the theme is still good.
+    rpcMock.setTheme("custom1", { ...v1, appearance: undefined })
+
+    act(() => {
+      listen.fire()
+    })
+
+    // Give the (wrongly) applied fallback a chance to land before asserting
+    // its absence — this is an absence assertion, which cannot be polled for.
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
+      v1.colors.background,
+    )
+    expect(document.documentElement.classList.contains("dark")).toBe(false)
+  })
+
+  // Fix 2's critical constraint: the guard above must apply ONLY to
+  // epoch-triggered re-applies, never to the initial apply — startup has no
+  // last-good theme to protect, so falling back to the bundled dark theme
+  // there is correct, already-tested behaviour that Fix 2 must not disturb.
+  test("startup still falls back to the bundled dark theme when the stored theme fails validation", async () => {
+    localStorage.setItem("beads-theme", "custom1")
+    const rpcMock = installThemesRpcMock()
+    // No appearance field: fails validateTheme, so loadTheme collapses to
+    // FALLBACK_THEME on the very first (initial, non-epoch-triggered) apply.
+    rpcMock.setTheme("custom1", { id: "custom1", name: "Custom 1", colors: {} })
+
+    const { getByTestId } = render(withQuery(<Probe />))
+
+    await waitFor(() => {
+      expect(document.documentElement.classList.contains("dark")).toBe(true)
+    })
+    expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
+      darkJson.colors.background,
+    )
+    // The stored preference id itself is untouched by the fallback — only
+    // the applied DOM tokens fall back.
+    expect(getByTestId("out").textContent).toBe("custom1:true")
+  })
+
+  // Fix 3 (listener leak): if this effect's cleanup runs before the
+  // listenStderrImpl promise resolves — React 18 StrictMode double-invokes
+  // effects in dev, and main.tsx wraps the app in <StrictMode> — the real
+  // Tauri listener must still be unlistened once attach finally resolves,
+  // mirroring lib/subscribe.ts:419-420/466.
+  test("unlistens the real listener even when cleanup beats the attach promise", async () => {
+    localStorage.setItem("beads-theme", "beadbox-dark")
+    installThemesRpcMock()
+    const unlistenMock = mock(() => undefined)
+    let resolveAttach: ((fn: () => void) => void) | null = null
+    const attach = mock(
+      (_name: string, _cb: (data: string) => void) =>
+        new Promise<() => void>((resolve) => {
+          resolveAttach = resolve
+        }),
+    )
+    _setListenStderrForTheme(attach as unknown as Parameters<typeof _setListenStderrForTheme>[0])
+    _setRuntimeCheckForTheme(() => true)
+
+    const { getByTestId, unmount } = render(withQuery(<Probe />))
+    await waitFor(() => {
+      expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
+    })
+    await waitFor(() => {
+      expect(attach).toHaveBeenCalled()
+    })
+
+    // Cleanup runs before the attach promise has resolved.
+    unmount()
+
+    act(() => {
+      resolveAttach?.(unlistenMock)
+    })
+
+    await waitFor(() => {
+      expect(unlistenMock).toHaveBeenCalledTimes(1)
+    })
+  })
+})
+
+// ─── Fix 5: the "reason becomes visible" chain, end to end ────────────────
+//
+// settings-theme-picker.test.tsx proves a ThemeEntry.error renders; the
+// tests above prove the active theme stays on screen when its file goes
+// bad. Neither proves the two happen TOGETHER for the theme the user is
+// actually looking at — that composition requires useTheme's watcher (which
+// invalidates+bumps) and SettingsDialog's picker (which reads the same
+// themesQueryKey) mounted in the SAME tree, sharing the SAME QueryClient.
+// SettingsDialog self-wraps with the app's singleton `queryClient`
+// (lib/query-client.ts), so this test wraps both it and the hook's Probe in
+// that singleton rather than withQuery's fresh-client-per-render helper.
+describe("useTheme + settings dialog (task 13 fix 5)", () => {
+  test("an active theme going bad surfaces its reason in the picker while staying on screen", async () => {
+    localStorage.setItem("beads-theme", "custom1")
+    let entries: ThemeEntry[] = [
+      { id: "custom1", name: "Custom 1", appearance: "light", source: "user" },
+    ]
+    const v1 = { ...lightJson, id: "custom1", name: "Custom 1" }
+    const themesById = new Map<string, unknown>([["custom1", v1]])
+    const list = mock(async () => entries)
+    const get = mock(async (id: string) => themesById.get(id) ?? null)
+    const startWatch = mock(async () => undefined)
+    const stopWatch = mock(async () => undefined)
+    _setRpc({
+      themes: { list, get, startWatch, stopWatch },
+      system: { getLogDirectory: mock(async () => null) },
+      bdSettings: { getBdPath: mock(async () => ({ savedPath: null })) },
+    } as never)
+
+    let cb: ((data: string) => void) | null = null
+    const attach = mock(async (_name: string, fn: (data: string) => void) => {
+      cb = fn
+      return (() => undefined) as unknown as () => void
+    })
+    _setListenStderrForTheme(attach as unknown as Parameters<typeof _setListenStderrForTheme>[0])
+    _setRuntimeCheckForTheme(() => true)
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Probe />
+        <SettingsDialog
+          open
+          onOpenChange={() => {}}
+          theme="custom1"
+          onThemeChange={() => {}}
+          zoomLevel={100}
+          onZoomChange={() => {}}
+          vimNavigationEnabled
+          onVimNavigationChange={() => {}}
+          updateCheckEnabled
+          onUpdateCheckEnabledChange={() => {}}
+          updateCheckFrequency={3600000}
+          onUpdateCheckFrequencyChange={() => {}}
+          updateAvailable={null}
+          updateChecking={false}
+          updateCheckError={null}
+          onCheckForUpdates={async () => {}}
+        />
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
+        v1.colors.background,
+      )
+    })
+
+    // File edited to something invalid: the list now reports an error for
+    // the active theme's own entry.
+    entries = [
+      {
+        id: "custom1",
+        name: "Custom 1",
+        appearance: "light",
+        source: "user",
+        error: "colors.ring is missing",
+      },
+    ]
+
+    act(() => {
+      if (!cb) throw new Error("theme-change listener not yet attached")
+      cb(`[THEMES:changed] ${JSON.stringify({ at: Date.now() })}\n`)
+    })
+
+    // The rejection reason reaches the picker.
+    await waitFor(() => {
+      expect(screen.getByText(/colors\.ring is missing/)).toBeDefined()
+    })
+
+    // Give a (wrongly) triggered re-apply a chance to land before asserting
+    // its absence — an absence assertion, which cannot be polled for, same
+    // as the sibling "keeps last-good on screen" test above.
+    await new Promise((r) => setTimeout(r, 50))
+
+    // The theme on screen is unchanged: the invalidation found the active
+    // theme's own entry errored, so stillValid is false, the epoch never
+    // bumps, and loadTheme/applyTheme never re-run for this save at all.
+    expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
+      v1.colors.background,
+    )
   })
 })

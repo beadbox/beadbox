@@ -75,6 +75,25 @@ export function useTheme(): {
   // startup, where there is no "last good" theme yet, but wrong here).
   const [reapplyEpoch, setReapplyEpoch] = useState(0)
 
+  // Bumped when the sidecar process restarts (lib/rpc.ts's
+  // "beadbox:sidecar-exit" window event — mirrors lib/subscribe.ts's own
+  // transportEpoch). A restarted process boots a fresh
+  // packages/server/src/handlers/themes.ts module, so its stopWatcher is
+  // null again and nothing is watching the themes folder until
+  // rpc.themes.startWatch() runs against the NEW process. This hook's own
+  // stderr listener survives the restart untouched (it is keyed by sidecar
+  // name, not process), so without re-running the watcher effect below on
+  // this bump, hot reload would go silently dead for the rest of the
+  // session.
+  const [transportEpoch, setTransportEpoch] = useState(0)
+
+  useEffect(() => {
+    if (!runtimeCheck()) return
+    const onSidecarExit = () => setTransportEpoch((epoch) => epoch + 1)
+    window.addEventListener("beadbox:sidecar-exit", onSidecarExit)
+    return () => window.removeEventListener("beadbox:sidecar-exit", onSidecarExit)
+  }, [])
+
   // themeId can change (user switches theme) without the watcher effect
   // below re-subscribing; the listener closure reads this ref instead of
   // depending on themeId directly, so the stderr listener and the
@@ -85,18 +104,50 @@ export function useTheme(): {
     themeIdRef.current = themeId
   }, [themeId])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reapplyEpoch is a deliberate re-run trigger (hot reload re-applying the same themeId) and is not read in the body
+  // Tells apart a hot-reload re-apply (reapplyEpoch bumped, themeId
+  // unchanged since this effect's previous run) from the initial apply and
+  // from a user-driven theme switch (themeId changed). Explicit refs rather
+  // than inferring it from reapplyEpoch's value alone: reapplyEpoch can
+  // already be > 0 by the time a later themeId switch reruns this effect,
+  // so "epoch > 0" alone would misclassify that switch as a hot-reload
+  // re-apply too.
+  const lastAppliedThemeIdRef = useRef<string | null>(null)
+  const lastReapplyEpochRef = useRef(reapplyEpoch)
+
   useEffect(() => {
     if (!available) return
+    // Only a hot-reload re-apply (same themeId as the previous run, with
+    // reapplyEpoch — and nothing else — having changed) sets this true. The
+    // initial apply (lastAppliedThemeIdRef.current starts null) and a
+    // themeId switch both leave it false.
+    const isHotReloadReapply =
+      lastAppliedThemeIdRef.current === themeId && reapplyEpoch !== lastReapplyEpochRef.current
+    lastAppliedThemeIdRef.current = themeId
+    lastReapplyEpochRef.current = reapplyEpoch
+
     let cancelled = false
     void loadTheme(themeId).then((theme) => {
-      if (!cancelled) applyTheme(theme)
+      if (cancelled) return
+      // On the hot-reload path there IS a last-good theme already on
+      // screen, so a load that resolves to a DIFFERENT id — loadTheme
+      // collapsing a second, now-invalid save to FALLBACK_THEME — must be
+      // refused rather than applied: applying it would strand the app on
+      // Beadbox Dark until the file becomes valid again (task-13-addendum),
+      // exactly what "fall back to the last good theme" forbids. The
+      // initial apply and a themeId switch have no last-good theme to
+      // protect, so loadTheme's fallback there is correct and must still go
+      // through — note loadTheme short-circuits built-in ids, so when the
+      // active theme IS the dark built-in, theme.id legitimately equals
+      // themeId and this guard correctly does not trigger.
+      if (isHotReloadReapply && theme.id !== themeId) return
+      applyTheme(theme)
     })
     return () => {
       cancelled = true
     }
   }, [themeId, available, reapplyEpoch])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: transportEpoch is a deliberate re-run trigger (re-subscribe against a restarted sidecar) and is not read in the body
   useEffect(() => {
     if (!available) return
     if (!runtimeCheck()) return // browser/stub mode: no sidecar, hot reload is simply absent
@@ -107,14 +158,20 @@ export function useTheme(): {
 
     void (async () => {
       try {
-        unlisten = await listenStderrImpl(SIDECAR_NAME, (data) => {
+        const stop = await listenStderrImpl(SIDECAR_NAME, (data) => {
           if (disposed) return
           for (const line of data.split("\n")) {
             if (!line.startsWith(THEMES_CHANGED_PREFIX)) continue
-            // This invalidation is the error-reporting channel: it is what
-            // makes settings-dialog.tsx's picker show (or clear) a
-            // rejection reason per ThemeEntry.error, not merely a
-            // nice-to-have refresh.
+            // The invalidate must run BEFORE the fetchQuery: query-client.ts
+            // sets a global staleTime of 30s, so the synchronous invalidate
+            // is what marks themesQueryKey stale. Without it running first,
+            // fetchQuery would just serve the cached (up to 30s stale)
+            // entries instead of re-reading the directory — swapping this
+            // order silently breaks hot reload. This invalidation is also
+            // the error-reporting channel: it is what makes
+            // settings-dialog.tsx's picker show (or clear) a rejection
+            // reason per ThemeEntry.error, not merely a nice-to-have
+            // refresh.
             void queryClient.invalidateQueries({ queryKey: themesQueryKey })
             void queryClient
               .fetchQuery({ queryKey: themesQueryKey, queryFn: listThemes })
@@ -140,6 +197,17 @@ export function useTheme(): {
               })
           }
         })
+        if (disposed) {
+          // Cleanup already ran before this promise resolved — this
+          // effect's own cleanup saw `unlisten` as still null and skipped
+          // it (the same race lib/subscribe.ts:419-420/466 guards against:
+          // React 18 StrictMode double-invokes effects in dev, and
+          // main.tsx wraps the app in <StrictMode>), so unlisten the real
+          // listener here instead of leaking it.
+          stop()
+        } else {
+          unlisten = stop
+        }
       } catch {
         /* listener attach failed — hot reload is simply absent this session */
       }
@@ -150,7 +218,7 @@ export function useTheme(): {
       unlisten?.()
       void rpc.themes.stopWatch().catch(() => {})
     }
-  }, [available, queryClient])
+  }, [available, queryClient, transportEpoch])
 
   return { themeId, setTheme, available }
 }
