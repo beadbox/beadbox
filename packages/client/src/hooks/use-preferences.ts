@@ -18,6 +18,7 @@ import {
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
+  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { safeCapture } from "../lib/posthog-safe"
@@ -29,9 +30,24 @@ export function usePreferences() {
   // single observable store (local-storage.ts), not local state here —
   // see use-theme-preference.ts for the subscription-only hook and
   // use-theme.ts for the hook that owns the apply-to-<html> effect. This
-  // keeps usePreferences's five independent call sites in sync with any
-  // change made through the store, including from use-theme.ts itself.
-  const { themeId: theme, setTheme: handleThemeChange } = useThemePreference()
+  // keeps usePreferences's independent call sites in sync with any change
+  // made through the store, including from use-theme.ts itself.
+  //
+  // beadbox-sdd/2026-11-17-appearance-mode task 4 (ruling B): the store now
+  // has two slots (dark/light) plus a mode, but SettingsDialog still shows
+  // a single grid at this point in the plan (Task 5 moves it to the new
+  // model and removes these two exports along with its props). `theme` is
+  // the derived id for whichever appearance is CURRENTLY resolved, and
+  // `handleThemeChange` assigns a new id to that same currently-resolved
+  // slot — preserving both names, types and behaviour for the single-grid
+  // dialog so none of its seven call sites need to change here.
+  const { activeThemeId: theme, appearance, setThemeForAppearance } = useThemePreference()
+  const handleThemeChange = useCallback(
+    (id: ThemeId) => {
+      setThemeForAppearance(appearance, id)
+    },
+    [appearance, setThemeForAppearance],
+  )
   const [zoomLevel, setZoomLevelState] = useState(100)
   const [isTauri, setIsTauri] = useState(false)
   const isTauriRef = useRef(false)

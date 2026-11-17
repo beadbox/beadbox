@@ -330,6 +330,25 @@ export function setThemeForAppearance(appearance: Appearance, id: ThemeId): void
 }
 
 /**
+ * Whether the three-value prefs key has ever been written.
+ *
+ * Distinguishes "never migrated" from "migrated and happens to hold the
+ * defaults" — getThemePrefs() returns DEFAULT_THEME_PREFS for both, so the
+ * migration in use-theme.ts cannot tell them apart without this.
+ */
+export function hasThemePrefs(): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    return localStorage.getItem(THEME_PREFS_KEY) !== null
+  } catch {
+    // localStorage unavailable — treat as "nothing stored", so a session
+    // that cannot read storage does not repeatedly attempt a migration it
+    // cannot persist.
+    return false
+  }
+}
+
+/**
  * The pre-§6 single-id key, for one-time migration.
  *
  * Reading it here rather than migrating here is deliberate: choosing which

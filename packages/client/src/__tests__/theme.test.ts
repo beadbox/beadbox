@@ -10,6 +10,7 @@ import {
   getLegacyThemeId,
   getThemePreference,
   getThemePrefs,
+  hasThemePrefs,
   resolveThemeId,
   setThemeForAppearance,
   setThemeMode,
@@ -295,5 +296,16 @@ describe("theme prefs (appearance mode)", () => {
   test("ignores a malformed legacy id", () => {
     localStorage.setItem("beads-theme", "../nope")
     expect(getLegacyThemeId()).toBeNull()
+  })
+
+  test("hasThemePrefs distinguishes never-written from migrated-to-defaults", () => {
+    expect(hasThemePrefs()).toBe(false)
+
+    setThemeMode("dark")
+    expect(hasThemePrefs()).toBe(true)
+
+    _resetThemePreferenceForTests()
+    localStorage.clear()
+    expect(hasThemePrefs()).toBe(false)
   })
 })

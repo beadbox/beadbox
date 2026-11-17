@@ -17,10 +17,18 @@
 // local useState here would silently stop the applied theme from tracking
 // changes made elsewhere.
 
+import type { Appearance } from "@beadbox/server/theme-tokens"
 import { useQueryClient } from "@tanstack/react-query"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { useEffect, useRef, useState } from "react"
 
+import {
+  clearLegacyThemeId,
+  getLegacyThemeId,
+  hasThemePrefs,
+  setThemeForAppearance,
+  setThemeMode,
+} from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
 import { hasSidecarTransport, onStderr } from "../lib/sidecar-transport"
 import { applyTheme, isThemingAvailable } from "../lib/theme-engine"
@@ -58,14 +66,59 @@ export function _resetRuntimeCheckForTheme(): void {
 }
 
 export function useTheme(): {
-  themeId: string
-  setTheme: (id: string) => void
+  activeThemeId: string
+  appearance: Appearance
   available: boolean
 } {
-  const { themeId, setTheme } = useThemePreference()
+  const { activeThemeId, appearance } = useThemePreference()
   // Lazy-once: the probe is memoised in theme-engine.ts and must not run per render.
   const [available] = useState(() => isThemingAvailable())
   const queryClient = useQueryClient()
+
+  // One-time migration of the pre-§6 single-id preference. The migration
+  // logic itself does not live in local-storage.ts: choosing which slot a
+  // legacy id belongs in needs the theme's `appearance`, which only the
+  // loaded theme list knows.
+  //
+  // Migrates only when the new three-value key has never been written
+  // (hasThemePrefs() false). If prefs already exist, they are the newer
+  // intent and a stale legacy id must not overwrite them — getThemePrefs()
+  // returns DEFAULT_THEME_PREFS both when prefs were never written and when
+  // they were written AS the defaults, so hasThemePrefs() (which reads
+  // persisted storage directly) is what tells the two apart.
+  const migratedRef = useRef(false)
+  useEffect(() => {
+    if (migratedRef.current) return
+    const legacyId = getLegacyThemeId()
+    if (!legacyId || hasThemePrefs()) {
+      migratedRef.current = true
+      return
+    }
+    migratedRef.current = true
+    let cancelled = false
+    void queryClient
+      .fetchQuery({ queryKey: themesQueryKey, queryFn: listThemes })
+      .then((entries) => {
+        if (cancelled) return
+        const entry = entries.find((e) => e.id === legacyId && !e.error)
+        // An id whose theme is no longer installed (or no longer validates)
+        // cannot be slotted, so the defaults stand rather than guessing an
+        // appearance for it.
+        if (entry) {
+          setThemeForAppearance(entry.appearance, legacyId)
+          setThemeMode(entry.appearance)
+        }
+        clearLegacyThemeId()
+      })
+      .catch(() => {
+        // List unavailable (no sidecar). Leave the legacy key in place so
+        // migration can retry on a later launch rather than silently
+        // discarding the user's choice.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [queryClient])
 
   // Bumped only when a hot-reload revalidation finds the ACTIVE theme still
   // valid, so the apply effect below re-runs and re-reads the same id. A
@@ -94,39 +147,40 @@ export function useTheme(): {
     return () => window.removeEventListener("beadbox:sidecar-exit", onSidecarExit)
   }, [])
 
-  // themeId can change (user switches theme) without the watcher effect
-  // below re-subscribing; the listener closure reads this ref instead of
-  // depending on themeId directly, so the stderr listener and the
-  // startWatch/stopWatch RPC pair aren't torn down and rebuilt on every
-  // switch.
-  const themeIdRef = useRef(themeId)
+  // activeThemeId can change (user switches theme, or the resolved
+  // appearance flips) without the watcher effect below re-subscribing; the
+  // listener closure reads this ref instead of depending on activeThemeId
+  // directly, so the stderr listener and the startWatch/stopWatch RPC pair
+  // aren't torn down and rebuilt on every switch.
+  const themeIdRef = useRef(activeThemeId)
   useEffect(() => {
-    themeIdRef.current = themeId
-  }, [themeId])
+    themeIdRef.current = activeThemeId
+  }, [activeThemeId])
 
-  // Tells apart a hot-reload re-apply (reapplyEpoch bumped, themeId
+  // Tells apart a hot-reload re-apply (reapplyEpoch bumped, activeThemeId
   // unchanged since this effect's previous run) from the initial apply and
-  // from a user-driven theme switch (themeId changed). Explicit refs rather
-  // than inferring it from reapplyEpoch's value alone: reapplyEpoch can
-  // already be > 0 by the time a later themeId switch reruns this effect,
-  // so "epoch > 0" alone would misclassify that switch as a hot-reload
-  // re-apply too.
+  // from a user-driven theme switch (activeThemeId changed). Explicit refs
+  // rather than inferring it from reapplyEpoch's value alone: reapplyEpoch
+  // can already be > 0 by the time a later activeThemeId switch reruns this
+  // effect, so "epoch > 0" alone would misclassify that switch as a
+  // hot-reload re-apply too.
   const lastAppliedThemeIdRef = useRef<string | null>(null)
   const lastReapplyEpochRef = useRef(reapplyEpoch)
 
   useEffect(() => {
     if (!available) return
-    // Only a hot-reload re-apply (same themeId as the previous run, with
-    // reapplyEpoch — and nothing else — having changed) sets this true. The
-    // initial apply (lastAppliedThemeIdRef.current starts null) and a
-    // themeId switch both leave it false.
+    // Only a hot-reload re-apply (same activeThemeId as the previous run,
+    // with reapplyEpoch — and nothing else — having changed) sets this
+    // true. The initial apply (lastAppliedThemeIdRef.current starts null)
+    // and an activeThemeId switch both leave it false.
     const isHotReloadReapply =
-      lastAppliedThemeIdRef.current === themeId && reapplyEpoch !== lastReapplyEpochRef.current
-    lastAppliedThemeIdRef.current = themeId
+      lastAppliedThemeIdRef.current === activeThemeId &&
+      reapplyEpoch !== lastReapplyEpochRef.current
+    lastAppliedThemeIdRef.current = activeThemeId
     lastReapplyEpochRef.current = reapplyEpoch
 
     let cancelled = false
-    void loadTheme(themeId).then((theme) => {
+    void loadTheme(activeThemeId).then((theme) => {
       if (cancelled) return
       // On the hot-reload path there IS a last-good theme already on
       // screen, so a load that resolves to a DIFFERENT id — loadTheme
@@ -134,19 +188,20 @@ export function useTheme(): {
       // refused rather than applied: applying it would strand the app on
       // Beadbox Dark until the file becomes valid again (task-13-addendum),
       // exactly what "fall back to the last good theme" forbids. The
-      // initial apply and a themeId switch have no last-good theme to
-      // protect, so loadTheme's fallback there is correct and must still go
-      // through — note loadTheme short-circuits built-in ids, so when the
-      // active theme IS the dark built-in, theme.id legitimately equals
-      // themeId and this guard correctly does not trigger.
-      if (isHotReloadReapply && theme.id !== themeId) return
-      // TODO(task 4): pass the resolved appearance, not the theme's own field
-      applyTheme(theme, theme.appearance)
+      // initial apply and an activeThemeId switch have no last-good theme
+      // to protect, so loadTheme's fallback there is correct and must still
+      // go through — note loadTheme short-circuits built-in ids, so when
+      // the active theme IS the dark built-in, theme.id legitimately equals
+      // activeThemeId and this guard correctly does not trigger.
+      if (isHotReloadReapply && theme.id !== activeThemeId) return
+      // The resolved MODE's appearance drives the .dark class (spec §6),
+      // not the theme's own `appearance` field — see theme-engine.ts.
+      applyTheme(theme, appearance)
     })
     return () => {
       cancelled = true
     }
-  }, [themeId, available, reapplyEpoch])
+  }, [activeThemeId, available, reapplyEpoch, appearance])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: transportEpoch is a deliberate re-run trigger (re-subscribe against a restarted sidecar) and is not read in the body
   useEffect(() => {
@@ -221,5 +276,5 @@ export function useTheme(): {
     }
   }, [available, queryClient, transportEpoch])
 
-  return { themeId, setTheme, available }
+  return { activeThemeId, appearance, available }
 }

@@ -1,4 +1,9 @@
 // Task 11: wiring the stored theme preference into app startup.
+// beadbox-sdd/2026-11-17-appearance-mode task 4: the single stored theme
+// id became a MODE (dark/light/system) plus a theme assigned to each of
+// the dark and light slots. useTheme() now exposes the theme actually
+// rendered (activeThemeId) and the resolved appearance, not a raw
+// preference id — see use-theme-preference.ts and use-theme.ts.
 //
 // Covers the design in
 // .superpowers/sdd/2026-11-13-runtime-themes/task-11-addendum.md: the
@@ -22,8 +27,10 @@ import {
 import { useThemePreference } from "../hooks/use-theme-preference"
 import {
   _resetThemePreferenceForTests,
-  getThemePreference,
-  setThemePreference,
+  DEFAULT_THEME_PREFS,
+  getThemePrefs,
+  setThemeForAppearance,
+  setThemeMode,
   subscribeThemePreference,
 } from "../lib/local-storage"
 import { queryClient } from "../lib/query-client"
@@ -34,24 +41,33 @@ import darkJson from "../themes/beadbox-dark.json"
 import lightJson from "../themes/beadbox-light.json"
 
 // useTheme() now reads useQueryClient() (task 13's hot-reload re-apply
-// path), so every render needs a QueryClientProvider ancestor — a fresh
-// client per render keeps tests isolated from each other's cache.
+// path, and task 4's legacy migration), so every render needs a
+// QueryClientProvider ancestor — a fresh client per render keeps tests
+// isolated from each other's cache.
 function withQuery(node: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return <QueryClientProvider client={client}>{node}</QueryClientProvider>
 }
 
 function Probe() {
-  const { themeId, available } = useTheme()
-  return <div data-testid="out">{`${themeId}:${available}`}</div>
+  const { activeThemeId, available } = useTheme()
+  return <div data-testid="out">{`${activeThemeId}:${available}`}</div>
+}
+
+function renderProbe() {
+  return render(withQuery(<Probe />))
 }
 
 function SetterProbe() {
-  const { themeId, setTheme } = useTheme()
+  const {
+    activeThemeId,
+    appearance,
+    setThemeForAppearance: setForAppearance,
+  } = useThemePreference()
   return (
     <div>
-      <div data-testid="setter-out">{themeId}</div>
-      <button type="button" onClick={() => setTheme("beadbox-light")}>
+      <div data-testid="setter-out">{activeThemeId}</div>
+      <button type="button" onClick={() => setForAppearance(appearance, "beadbox-light")}>
         switch
       </button>
     </div>
@@ -64,8 +80,8 @@ function PreferencesProbe() {
 }
 
 function SubscriptionProbe() {
-  const { themeId } = useThemePreference()
-  return <div data-testid="subscription-out">{themeId}</div>
+  const { activeThemeId } = useThemePreference()
+  return <div data-testid="subscription-out">{activeThemeId}</div>
 }
 
 beforeEach(() => {
@@ -177,9 +193,19 @@ function installThemeChangeListener(): { fire: () => void } {
 }
 
 describe("useTheme", () => {
-  test("applies the stored theme on mount", async () => {
-    localStorage.setItem("beads-theme", "beadbox-light")
-    const { getByTestId } = render(withQuery(<Probe />))
+  test("applies the dark slot's theme in dark mode", async () => {
+    setThemeMode("dark")
+    setThemeForAppearance("dark", "beadbox-dark")
+    const { getByTestId } = renderProbe()
+    await waitFor(() => {
+      expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
+      expect(document.documentElement.classList.contains("dark")).toBe(true)
+    })
+  })
+
+  test("applies the light slot's theme when mode is light", async () => {
+    setThemeMode("light")
+    const { getByTestId } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-light:true")
     })
@@ -190,38 +216,85 @@ describe("useTheme", () => {
   })
 
   test("defaults to the dark theme with no stored preference", async () => {
-    const { getByTestId } = render(withQuery(<Probe />))
+    const { getByTestId } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
     })
     expect(document.documentElement.classList.contains("dark")).toBe(true)
   })
 
+  test("switching mode to light applies the light slot's theme and drops the class", async () => {
+    renderProbe()
+    await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true))
+
+    act(() => {
+      setThemeMode("light")
+    })
+
+    await waitFor(() => {
+      expect(document.documentElement.classList.contains("dark")).toBe(false)
+      expect(document.documentElement.style.getPropertyValue("--bb-background").trim()).toBe(
+        lightJson.colors.background,
+      )
+    })
+  })
+
+  test("system mode follows the OS, and a live OS change re-resolves it", async () => {
+    // Drive the media query through a settable seam so the change event can fire.
+    let prefersDark = true
+    const listeners = new Set<() => void>()
+    const original = window.matchMedia
+    window.matchMedia = (() => ({
+      get matches() {
+        return prefersDark
+      },
+      addEventListener: (_: string, l: () => void) => {
+        listeners.add(l)
+      },
+      removeEventListener: (_: string, l: () => void) => {
+        listeners.delete(l)
+      },
+    })) as unknown as typeof window.matchMedia
+    try {
+      setThemeMode("system")
+      renderProbe()
+      await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true))
+
+      act(() => {
+        prefersDark = false
+        for (const l of listeners) l()
+      })
+
+      await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(false))
+    } finally {
+      window.matchMedia = original
+    }
+  })
+
   // The most important test in the file: the five-mirrors problem the
   // addendum describes would mean a change made outside this hook never
   // reaches the root that applies tokens to <html>. A local useState in
   // useTheme would pass every other test here while still shipping that
-  // bug, because nothing else writes through this hook's own setTheme.
-  test("a write through setThemePreference from outside the hook propagates", async () => {
-    const { getByTestId } = render(withQuery(<Probe />))
+  // bug, because nothing else writes through this hook's own store.
+  test("a write through setThemeForAppearance from outside the hook propagates", async () => {
+    const { getByTestId } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
     })
 
     act(() => {
-      setThemePreference("beadbox-light")
+      setThemeForAppearance("dark", "beadbox-light")
     })
 
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-light:true")
     })
-    expect(document.documentElement.classList.contains("dark")).toBe(false)
-    expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
-      lightJson.colors.background,
-    )
+    // Mode is still "dark" — only the dark slot's assigned theme changed —
+    // so the appearance class is unaffected by this write.
+    expect(document.documentElement.classList.contains("dark")).toBe(true)
   })
 
-  test("setTheme persists to storage and updates themeId", async () => {
+  test("setThemeForAppearance persists to storage and updates activeThemeId", async () => {
     const { getByTestId } = render(withQuery(<SetterProbe />))
     await waitFor(() => {
       expect(getByTestId("setter-out").textContent).toBe("beadbox-dark")
@@ -232,7 +305,7 @@ describe("useTheme", () => {
     await waitFor(() => {
       expect(getByTestId("setter-out").textContent).toBe("beadbox-light")
     })
-    expect(getThemePreference()).toBe("beadbox-light")
+    expect(getThemePrefs().darkThemeId).toBe("beadbox-light")
   })
 
   test("two independent subscribers both observe a change made through either", async () => {
@@ -253,9 +326,9 @@ describe("useTheme", () => {
 
     // Change made through the OTHER subscriber's channel (direct storage
     // write, standing in for a change made by usePreferences's
-    // handleThemeChange, which also just calls setThemePreference).
+    // handleThemeChange, which also just calls setThemeForAppearance).
     act(() => {
-      setThemePreference("beadbox-light")
+      setThemeForAppearance("dark", "beadbox-light")
     })
 
     await waitFor(() => {
@@ -270,11 +343,11 @@ describe("useTheme", () => {
     const unsubscribe = subscribeThemePreference(() => {
       calls++
     })
-    setThemePreference("beadbox-light")
+    setThemeMode("light")
     expect(calls).toBe(1)
 
     unsubscribe()
-    setThemePreference("beadbox-dark")
+    setThemeMode("dark")
     expect(calls).toBe(1)
   })
 
@@ -284,7 +357,7 @@ describe("useTheme", () => {
       throw new Error("Simulated engine failure")
     }
     try {
-      const { getByTestId } = render(withQuery(<Probe />))
+      const { getByTestId } = renderProbe()
       await waitFor(() => {
         expect(getByTestId("out").textContent).toBe("beadbox-dark:false")
       })
@@ -292,6 +365,66 @@ describe("useTheme", () => {
       window.getComputedStyle = originalGetComputedStyle
     }
     expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe("")
+  })
+})
+
+// ─── Task 4: legacy single-id migration ────────────────────────────────────
+//
+// Pre-§6 installs stored one theme id under "beads-theme". On first launch
+// after the upgrade, that id must be adopted into whichever slot matches
+// its own appearance, and the mode set to match — but ONLY when the new
+// three-value key has never been written, so a deliberate choice already
+// made under the new model is never clobbered by a stale legacy value.
+
+describe("useTheme legacy migration", () => {
+  test("migrates a legacy single-id preference into the slot matching its appearance", async () => {
+    localStorage.setItem("beads-theme", "beadbox-light")
+    _resetThemePreferenceForTests()
+
+    renderProbe()
+
+    await waitFor(() => {
+      expect(getThemePrefs()).toEqual({
+        mode: "light",
+        darkThemeId: "beadbox-dark",
+        lightThemeId: "beadbox-light",
+      })
+    })
+    // The legacy key is removed so it cannot become a second source of truth.
+    expect(localStorage.getItem("beads-theme")).toBeNull()
+  })
+
+  test("a legacy id whose theme is no longer installed falls back to defaults", async () => {
+    localStorage.setItem("beads-theme", "uninstalled")
+    _resetThemePreferenceForTests()
+
+    renderProbe()
+
+    await waitFor(() => {
+      expect(getThemePrefs()).toEqual(DEFAULT_THEME_PREFS)
+    })
+    expect(localStorage.getItem("beads-theme")).toBeNull()
+  })
+
+  // The guard this test protects: migration must key off "has the new
+  // three-value key ever been written", not "does a legacy id happen to
+  // exist". Without that guard, a legacy key left behind (e.g. from
+  // clearCache not having run yet) would overwrite a deliberate, newer
+  // choice with a stale one on every launch.
+  test("migration does not run when prefs already exist", async () => {
+    setThemeMode("light")
+    localStorage.setItem("beads-theme", "beadbox-dark")
+
+    renderProbe()
+
+    // This is an absence assertion (migration must NOT have overwritten
+    // mode), so it cannot be a waitFor that returns the instant it first
+    // passes — mode reads "light" synchronously from the write above,
+    // before the migration effect's fetchQuery has even had a chance to
+    // resolve. Give any (wrongly) running migration a real chance to land
+    // its write first.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(getThemePrefs().mode).toBe("light")
   })
 })
 
@@ -304,17 +437,22 @@ describe("useTheme", () => {
 // when it no longer validates. The reason reaches the picker purely
 // through the themesQueryKey invalidation (tested in settings-dialog's own
 // suite); here we test the apply/no-apply decision itself.
+//
+// Setup goes directly through setThemeMode/setThemeForAppearance rather
+// than the legacy "beads-theme" key, so these tests exercise hot reload in
+// isolation from the migration covered above.
 
 describe("useTheme hot reload", () => {
   test("re-applies the active theme when the changed file still validates", async () => {
-    localStorage.setItem("beads-theme", "custom1")
+    setThemeMode("light")
+    setThemeForAppearance("light", "custom1")
     const rpcMock = installThemesRpcMock()
     const v1 = { ...lightJson, id: "custom1", name: "Custom 1" }
     rpcMock.setTheme("custom1", v1)
     rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "light", source: "user" }])
     const listen = installThemeChangeListener()
 
-    const { getByTestId } = render(withQuery(<Probe />))
+    const { getByTestId } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("custom1:true")
       expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
@@ -340,14 +478,15 @@ describe("useTheme hot reload", () => {
   })
 
   test("keeps the last-good theme on screen when the changed file no longer validates", async () => {
-    localStorage.setItem("beads-theme", "custom1")
+    setThemeMode("light")
+    setThemeForAppearance("light", "custom1")
     const rpcMock = installThemesRpcMock()
     const v1 = { ...lightJson, id: "custom1", name: "Custom 1" }
     rpcMock.setTheme("custom1", v1)
     rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "light", source: "user" }])
     const listen = installThemeChangeListener()
 
-    const { getByTestId } = render(withQuery(<Probe />))
+    const { getByTestId } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("custom1:true")
       expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
@@ -387,14 +526,15 @@ describe("useTheme hot reload", () => {
     // `!entry?.error` alone, or a deleted file would read as "still valid"
     // and re-trigger loadTheme/applyTheme for an id the sidecar can no
     // longer serve.
-    localStorage.setItem("beads-theme", "custom1")
+    setThemeMode("light")
+    setThemeForAppearance("light", "custom1")
     const rpcMock = installThemesRpcMock()
     const v1 = { ...lightJson, id: "custom1", name: "Custom 1" }
     rpcMock.setTheme("custom1", v1)
     rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "light", source: "user" }])
     const listen = installThemeChangeListener()
 
-    const { getByTestId } = render(withQuery(<Probe />))
+    const { getByTestId } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("custom1:true")
       expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
@@ -422,11 +562,10 @@ describe("useTheme hot reload", () => {
   })
 
   test("startWatch/stopWatch are not called outside a sidecar transport", async () => {
-    localStorage.setItem("beads-theme", "beadbox-dark")
     const rpcMock = installThemesRpcMock()
     // No installThemeChangeListener(): runtimeCheck defaults to
     // hasSidecarTransport(), which is false under bun test.
-    const { getByTestId } = render(withQuery(<Probe />))
+    const { getByTestId } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
     })
@@ -440,12 +579,11 @@ describe("useTheme hot reload", () => {
   // for exactly this; the watcher effect must re-run on it, mirroring
   // lib/subscribe.ts's transportEpoch.
   test("re-subscribes (startWatch again) after a beadbox:sidecar-exit event", async () => {
-    localStorage.setItem("beads-theme", "beadbox-dark")
     const rpcMock = installThemesRpcMock()
     rpcMock.setEntries([])
     installThemeChangeListener()
 
-    const { getByTestId } = render(withQuery(<Probe />))
+    const { getByTestId } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
     })
@@ -471,14 +609,15 @@ describe("useTheme hot reload", () => {
   // applying it, or the app would be stranded on Beadbox Dark until the
   // file becomes valid again.
   test("a hot-reload re-apply that resolves the fallback theme leaves the on-screen theme untouched", async () => {
-    localStorage.setItem("beads-theme", "custom1")
+    setThemeMode("light")
+    setThemeForAppearance("light", "custom1")
     const rpcMock = installThemesRpcMock()
     const v1 = { ...lightJson, id: "custom1", name: "Custom 1" }
     rpcMock.setTheme("custom1", v1)
     rpcMock.setEntries([{ id: "custom1", name: "Custom 1", appearance: "light", source: "user" }])
     const listen = installThemeChangeListener()
 
-    const { getByTestId } = render(withQuery(<Probe />))
+    const { getByTestId } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("custom1:true")
       expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
@@ -510,14 +649,18 @@ describe("useTheme hot reload", () => {
   // epoch-triggered re-applies, never to the initial apply — startup has no
   // last-good theme to protect, so falling back to the bundled dark theme
   // there is correct, already-tested behaviour that Fix 2 must not disturb.
-  test("startup still falls back to the bundled dark theme when the stored theme fails validation", async () => {
-    localStorage.setItem("beads-theme", "custom1")
+  //
+  // This also exercises the slot-id/applied-DOM distinction under the new
+  // model: the slot keeps holding the id it was assigned even though the
+  // thing actually painted on screen falls back to the bundled theme.
+  test("startup still falls back to the bundled dark theme when the active slot's theme fails validation", async () => {
+    setThemeForAppearance("dark", "custom1")
     const rpcMock = installThemesRpcMock()
     // No appearance field: fails validateTheme, so loadTheme collapses to
     // FALLBACK_THEME on the very first (initial, non-epoch-triggered) apply.
     rpcMock.setTheme("custom1", { id: "custom1", name: "Custom 1", colors: {} })
 
-    const { getByTestId } = render(withQuery(<Probe />))
+    const { getByTestId } = renderProbe()
 
     await waitFor(() => {
       expect(document.documentElement.classList.contains("dark")).toBe(true)
@@ -525,7 +668,7 @@ describe("useTheme hot reload", () => {
     expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe(
       darkJson.colors.background,
     )
-    // The stored preference id itself is untouched by the fallback — only
+    // The slot's assigned id itself is untouched by the fallback — only
     // the applied DOM tokens fall back.
     expect(getByTestId("out").textContent).toBe("custom1:true")
   })
@@ -536,7 +679,6 @@ describe("useTheme hot reload", () => {
   // Tauri listener must still be unlistened once attach finally resolves,
   // mirroring lib/subscribe.ts:419-420/466.
   test("unlistens the real listener even when cleanup beats the attach promise", async () => {
-    localStorage.setItem("beads-theme", "beadbox-dark")
     installThemesRpcMock()
     const unlistenMock = mock(() => undefined)
     let resolveAttach: ((fn: () => void) => void) | null = null
@@ -549,7 +691,7 @@ describe("useTheme hot reload", () => {
     _setListenStderrForTheme(attach as unknown as Parameters<typeof _setListenStderrForTheme>[0])
     _setRuntimeCheckForTheme(() => true)
 
-    const { getByTestId, unmount } = render(withQuery(<Probe />))
+    const { getByTestId, unmount } = renderProbe()
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
     })
@@ -583,7 +725,8 @@ describe("useTheme hot reload", () => {
 // that singleton rather than withQuery's fresh-client-per-render helper.
 describe("useTheme + settings dialog (task 13 fix 5)", () => {
   test("an active theme going bad surfaces its reason in the picker while staying on screen", async () => {
-    localStorage.setItem("beads-theme", "custom1")
+    setThemeMode("light")
+    setThemeForAppearance("light", "custom1")
     let entries: ThemeEntry[] = [
       { id: "custom1", name: "Custom 1", appearance: "light", source: "user" },
     ]
