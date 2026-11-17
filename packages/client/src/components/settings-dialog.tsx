@@ -34,6 +34,7 @@ import {
   resolveThemeId,
   setAnalyticsEnabled,
   type ThemeId,
+  type ThemeMode,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { safeCapture } from "../lib/posthog-safe"
@@ -387,6 +388,122 @@ function ThemeSlotGrid({
   )
 }
 
+const MODE_OPTIONS = ["dark", "light", "system"] as const
+
+/**
+ * The appearance-mode radiogroup (dark / light / follow system). Same
+ * roving-tabindex pattern as ThemeSlotGrid above — exactly one button is a
+ * Tab stop, arrow keys move it, Enter/Space selects — but simpler: three
+ * fixed options are never invalid, so there is no skip-the-errored-card
+ * logic to port over.
+ */
+function AppearanceModeSelector({
+  mode,
+  setMode,
+  open,
+}: {
+  mode: ThemeMode
+  setMode: (m: ThemeMode) => void
+  open: boolean
+}) {
+  const [focusedIndex, setFocusedIndex] = useState(() => MODE_OPTIONS.indexOf(mode))
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  // Resync the tab stop to the current mode on dialog open or on a mode
+  // change made some other way (e.g. a future external setter) — mirrors
+  // ThemeSlotGrid's prevSyncRef, minus the ids/errors tracking it needs and
+  // this selector does not.
+  const prevSyncRef = useRef<{ open: boolean; mode: ThemeMode }>({ open: false, mode })
+  useEffect(() => {
+    const openedNow = open && !prevSyncRef.current.open
+    const modeChanged = mode !== prevSyncRef.current.mode
+    if (open && (openedNow || modeChanged)) {
+      setFocusedIndex(MODE_OPTIONS.indexOf(mode))
+    }
+    prevSyncRef.current = { open, mode }
+  }, [open, mode])
+
+  const select = useCallback(
+    (m: ThemeMode) => {
+      if (getAnalyticsEnabled()) {
+        safeCapture("app_setting_changed", {
+          setting: "theme_mode",
+          old_value: mode,
+          new_value: m,
+        })
+      }
+      setMode(m)
+    },
+    [mode, setMode],
+  )
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      let nextIndex = focusedIndex
+      switch (e.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+          e.preventDefault()
+          nextIndex = (focusedIndex + 1) % MODE_OPTIONS.length
+          break
+        case "ArrowLeft":
+        case "ArrowUp":
+          e.preventDefault()
+          nextIndex = (focusedIndex - 1 + MODE_OPTIONS.length) % MODE_OPTIONS.length
+          break
+        case "Home":
+          e.preventDefault()
+          nextIndex = 0
+          break
+        case "End":
+          e.preventDefault()
+          nextIndex = MODE_OPTIONS.length - 1
+          break
+        case "Enter":
+        case " ":
+          e.preventDefault()
+          select(MODE_OPTIONS[focusedIndex])
+          return
+        default:
+          return
+      }
+      setFocusedIndex(nextIndex)
+      buttonRefs.current[nextIndex]?.focus()
+    },
+    [focusedIndex, select],
+  )
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Appearance mode"
+      className="flex gap-2 mb-6"
+      onKeyDown={handleKeyDown}
+    >
+      {MODE_OPTIONS.map((m, i) => (
+        <button
+          key={m}
+          ref={(el) => {
+            buttonRefs.current[i] = el
+          }}
+          type="button"
+          role="radio"
+          aria-checked={mode === m}
+          aria-label={m === "system" ? "Follow system appearance" : `${m} mode`}
+          tabIndex={focusedIndex === i ? 0 : -1}
+          onClick={() => select(m)}
+          className={cn(
+            "rounded-md border px-3 py-1.5 text-sm capitalize transition-colors",
+            mode === m ? "border-primary bg-primary/10" : "border-border hover:bg-accent",
+          )}
+        >
+          {m === "system" ? "System" : m}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 const FREQUENCY_OPTIONS: { value: UpdateCheckFrequency; label: string }[] = [
   { value: 1800000, label: "Every 30 minutes" },
   { value: 3600000, label: "Every hour" },
@@ -631,39 +748,7 @@ function SettingsDialogContent({
                     </div>
                   ) : (
                     <>
-                      <div
-                        role="radiogroup"
-                        aria-label="Appearance mode"
-                        className="flex gap-2 mb-6"
-                      >
-                        {(["dark", "light", "system"] as const).map((m) => (
-                          <button
-                            key={m}
-                            type="button"
-                            role="radio"
-                            aria-checked={mode === m}
-                            aria-label={m === "system" ? "Follow system appearance" : `${m} mode`}
-                            onClick={() => {
-                              if (getAnalyticsEnabled()) {
-                                safeCapture("app_setting_changed", {
-                                  setting: "theme_mode",
-                                  old_value: mode,
-                                  new_value: m,
-                                })
-                              }
-                              setMode(m)
-                            }}
-                            className={cn(
-                              "rounded-md border px-3 py-1.5 text-sm capitalize transition-colors",
-                              mode === m
-                                ? "border-primary bg-primary/10"
-                                : "border-border hover:bg-accent",
-                            )}
-                          >
-                            {m === "system" ? "System" : m}
-                          </button>
-                        ))}
-                      </div>
+                      <AppearanceModeSelector mode={mode} setMode={setMode} open={open} />
                       <ThemeSlotGrid
                         label="Dark"
                         themes={darkThemes}

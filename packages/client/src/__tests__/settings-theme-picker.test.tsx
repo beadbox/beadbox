@@ -83,6 +83,33 @@ test("choosing a mode persists it", async () => {
   await waitFor(() => expect(getThemePrefs().mode).toBe("light"))
 })
 
+// The mode selector is a role="radiogroup" of three fixed options, so per
+// the ARIA Authoring Practices it must use roving tabindex like the two
+// ThemeSlotGrids below it: exactly one button is a Tab stop, and arrow keys
+// move that stop instead of doing nothing.
+test("mode selector has exactly one roving tab stop and arrow keys move it", async () => {
+  stubThemesRpc([])
+  renderDialog()
+  await waitFor(() => screen.getByRole("radio", { name: /dark mode/i }))
+
+  const group = screen.getByRole("radiogroup", { name: /appearance mode/i })
+  const radios = () => within(group).getAllByRole("radio")
+
+  // dark is the default mode, so it starts as the sole tab stop.
+  expect(radios().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1)
+  expect(screen.getByRole("radio", { name: /dark mode/i }).getAttribute("tabindex")).toBe("0")
+
+  fireEvent.keyDown(group, { key: "ArrowRight" })
+  expect(radios().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1)
+  expect(screen.getByRole("radio", { name: /light mode/i }).getAttribute("tabindex")).toBe("0")
+  expect(screen.getByRole("radio", { name: /dark mode/i }).getAttribute("tabindex")).toBe("-1")
+
+  // Enter selects whichever button arrow keys moved focus to — the light
+  // button, not the dark one still showing aria-checked.
+  fireEvent.keyDown(group, { key: "Enter" })
+  await waitFor(() => expect(getThemePrefs().mode).toBe("light"))
+})
+
 test("each slot grid offers only themes of its own appearance", async () => {
   stubThemesRpc([
     { id: "nord", name: "Nord", appearance: "dark", source: "user" },
