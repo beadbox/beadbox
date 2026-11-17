@@ -303,6 +303,32 @@ describe("theme picker, per-grid behaviour preserved from the single-grid picker
     expect(lightRadios().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1)
   })
 
+  // final whole-plan review, Fix 2: a theme whose own appearance could not
+  // be recovered (unparseable JSON) must not be filed under Dark or Light
+  // — it belongs in neither grid, so it renders in its own "Unknown
+  // appearance" section instead.
+  test("a theme with no recoverable appearance renders in its own section, not Dark or Light", async () => {
+    stubThemesRpc([
+      {
+        id: "broken",
+        name: "broken",
+        appearance: null,
+        source: "user",
+        error: "not valid JSON: Unexpected token",
+      },
+    ])
+    renderDialog()
+
+    const unknownGrid = await screen.findByRole("radiogroup", { name: "Unknown appearance" })
+    expect(within(unknownGrid).getByText(/not valid JSON/)).toBeDefined()
+
+    // Neither real grid shows it or its error.
+    expect(within(darkGrid()).queryByText(/not valid JSON/)).toBeNull()
+    expect(within(lightGrid()).queryByText(/not valid JSON/)).toBeNull()
+    expect(darkRadios().some((r) => r.getAttribute("aria-label") === "broken theme")).toBe(false)
+    expect(lightRadios().some((r) => r.getAttribute("aria-label") === "broken theme")).toBe(false)
+  })
+
   // Task 13: hot reload invalidates themesQueryKey so a changed file's
   // error (or updated preview) reaches this picker. That refetch must not
   // yank focus away from a card the user has already arrow-keyed to —
