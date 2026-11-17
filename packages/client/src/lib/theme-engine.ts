@@ -9,6 +9,7 @@
 // the wrong surface.
 
 import {
+  type Appearance,
   COLOR_KEYS,
   cssVarName,
   FONT_KEYS,
@@ -35,7 +36,11 @@ export function clearTheme(el: HTMLElement = document.documentElement): void {
   for (const name of allVarNames()) el.style.removeProperty(name)
 }
 
-export function applyTheme(theme: Theme, el: HTMLElement = document.documentElement): void {
+export function applyTheme(
+  theme: Theme,
+  appearance: Appearance,
+  el: HTMLElement = document.documentElement,
+): void {
   // Clear first so an optional token the previous theme set (a font, a
   // radius) does not survive into a theme that omits it.
   clearTheme(el)
@@ -57,9 +62,14 @@ export function applyTheme(theme: Theme, el: HTMLElement = document.documentElem
   }
 
   // Toggle appearance last so observers see a fully-applied theme.
-  // Delegates to theme.ts's applyThemeClass so exactly one function in
-  // the codebase maps an Appearance to the dark class.
-  applyThemeClass(el, theme.appearance)
+  // Delegates to theme.ts's applyThemeClass so exactly one function in the
+  // codebase maps an Appearance to the dark class.
+  //
+  // The appearance comes from the caller (the resolved MODE, spec §6), not
+  // from theme.appearance: a theme's own field governs only which slot it is
+  // eligible for. Reading it here instead would let a mis-slotted theme paint
+  // dark tokens under a light class.
+  applyThemeClass(el, appearance)
 }
 
 // --- startup probe -------------------------------------------------------

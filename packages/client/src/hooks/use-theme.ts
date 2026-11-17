@@ -140,7 +140,8 @@ export function useTheme(): {
       // active theme IS the dark built-in, theme.id legitimately equals
       // themeId and this guard correctly does not trigger.
       if (isHotReloadReapply && theme.id !== themeId) return
-      applyTheme(theme)
+      // TODO(task 4): pass the resolved appearance, not the theme's own field
+      applyTheme(theme, theme.appearance)
     })
     return () => {
       cancelled = true
