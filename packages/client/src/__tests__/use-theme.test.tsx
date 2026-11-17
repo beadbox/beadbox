@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import type { ReactNode } from "react"
+import { type ReactNode, StrictMode } from "react"
 import { SettingsDialog } from "../components/settings-dialog"
 import { usePreferences } from "../hooks/use-preferences"
 import {
@@ -391,6 +391,39 @@ describe("useTheme legacy migration", () => {
       })
     })
     // The legacy key is removed so it cannot become a second source of truth.
+    expect(localStorage.getItem("beads-theme")).toBeNull()
+  })
+
+  // Regression test for a bug caught after the first version of this task:
+  // main.tsx wraps the app in <StrictMode>, which double-invokes effects in
+  // dev (setup → cleanup → setup, same refs). A migration effect that set a
+  // "already migrated" ref SYNCHRONOUSLY — before its async fetchQuery
+  // resolved — would see: pass 1 sets the ref and starts the fetch, cleanup
+  // cancels that fetch's result, pass 2 sees the ref already set and skips
+  // entirely. The migration would never complete under StrictMode, only in
+  // production's single effect run. render() from @testing-library/react is
+  // NOT StrictMode-wrapped, so no other test in this file would ever catch
+  // that. This one mounts inside <StrictMode> deliberately.
+  test("migration completes under StrictMode's double-invoked effects", async () => {
+    localStorage.setItem("beads-theme", "beadbox-light")
+    _resetThemePreferenceForTests()
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <StrictMode>
+        <QueryClientProvider client={client}>
+          <Probe />
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+
+    await waitFor(() => {
+      expect(getThemePrefs()).toEqual({
+        mode: "light",
+        darkThemeId: "beadbox-dark",
+        lightThemeId: "beadbox-light",
+      })
+    })
     expect(localStorage.getItem("beads-theme")).toBeNull()
   })
 

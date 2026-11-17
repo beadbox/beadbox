@@ -86,15 +86,19 @@ export function useTheme(): {
   // returns DEFAULT_THEME_PREFS both when prefs were never written and when
   // they were written AS the defaults, so hasThemePrefs() (which reads
   // persisted storage directly) is what tells the two apart.
-  const migratedRef = useRef(false)
+  //
+  // No ref guards this effect — both checks above are already durable
+  // across a remount: a completed migration clears the legacy key, and its
+  // own writes make hasThemePrefs() true. A ref set before the async work
+  // resolves would make StrictMode's double-invoke a permanent no-op: the
+  // first pass's result is cancelled, and the second pass would see the
+  // ref already set and skip entirely, so the migration would never
+  // actually land in dev (main.tsx wraps the app in <StrictMode>). React
+  // Query dedupes the two fetchQuery calls a double-invoke starts for the
+  // same key, so exactly one migration lands regardless.
   useEffect(() => {
-    if (migratedRef.current) return
     const legacyId = getLegacyThemeId()
-    if (!legacyId || hasThemePrefs()) {
-      migratedRef.current = true
-      return
-    }
-    migratedRef.current = true
+    if (!legacyId || hasThemePrefs()) return
     let cancelled = false
     void queryClient
       .fetchQuery({ queryKey: themesQueryKey, queryFn: listThemes })
