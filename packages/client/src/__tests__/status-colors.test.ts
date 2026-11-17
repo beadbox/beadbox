@@ -8,10 +8,12 @@ import {
   BUILTIN_STATUSES,
   DEFAULT_PRIORITY_HEX,
   DEFAULT_STATUS_HEX,
+  DEFAULT_TYPE_HEX,
   THEME_SURFACES,
   assignCustomDefaults,
   buildPriorityColorCss,
   buildStatusColorCss,
+  buildTypeColorCss,
   contrastRatio,
   isGreyish,
   readableTextColor,
@@ -320,5 +322,42 @@ describe("buildPriorityColorCss", () => {
     // Priorities are not user-configurable, so the hue is fixed; what a light
     // theme needs is the text, not a different fill.
     expect(buildPriorityColorCss(LIGHT)).toContain("rgb(239 68 68 / 0.2)")
+  })
+})
+
+describe("buildTypeColorCss", () => {
+  const DARK = "#27272a"
+
+  test("emits a rule set for every known bead type", () => {
+    const css = buildTypeColorCss(DARK)
+    for (const t of Object.keys(DEFAULT_TYPE_HEX)) {
+      expect(css).toContain(`[data-type="${t}"][data-type-role="badge"]`)
+    }
+  })
+
+  // typeColors tinted at /20 with a softer /30 edge; the edge comes out of
+  // 0.4 * 0.75, which is 0.30000000000000004 unrounded.
+  test("reproduces typeColors' /20 fill and /30 edge, with no float noise", () => {
+    const css = buildTypeColorCss(DARK)
+    expect(css).toContain("rgb(239 68 68 / 0.2)")
+    expect(css).toContain("rgb(239 68 68 / 0.3)")
+    expect(css).not.toContain("0.30000000000000004")
+    expect(css).not.toMatch(/\/ 0\.\d{5,}\)/)
+  })
+
+  test("derives different text per surface", () => {
+    const dark = buildTypeColorCss(DARK)
+    const light = buildTypeColorCss("#ffffff")
+    expect(dark).not.toBe(light)
+    for (const hex of Object.values(DEFAULT_TYPE_HEX)) {
+      expect(dark).toContain(`color:${readableTextColor(hex, DARK)}`)
+      expect(light).toContain(`color:${readableTextColor(hex, "#ffffff")}`)
+    }
+  })
+
+  test("no emitted alpha anywhere carries float noise", () => {
+    for (const css of [buildTypeColorCss(DARK), buildPriorityColorCss(DARK)]) {
+      expect(css).not.toMatch(/\/ 0\.\d{5,}\)/)
+    }
   })
 })

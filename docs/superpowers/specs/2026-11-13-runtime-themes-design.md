@@ -95,8 +95,9 @@ remaining uncertainty.
 1. **Light ships as a bundled theme file**, loaded through the identical path a
    user's custom theme uses. One mechanism, dogfooded — if light works, custom
    themes provably work.
-2. **A theme controls colours, radius, and fonts** — exactly the tokens already
-   in the `@theme` block. No new token vocabulary is invented.
+2. **A theme controls colours, radius, and fonts** — the tokens already in the
+   `@theme` block, plus exactly three semantic tone tokens (amended
+   2026-11-17, see Decision 7 and §7).
 3. **The sidecar reads a themes folder.** No new Tauri `fs:` capability.
 4. **A malformed theme is rejected atomically**, falling back to the last good
    theme, with the offending key named.
@@ -104,6 +105,12 @@ remaining uncertainty.
 6. **Appearance is a separate axis from theme choice** (added 2026-11-17, see §6).
    The user picks a mode — permanently dark, permanently light, or follow the
    system — and assigns a theme to each of the dark and light slots.
+7. **Three semantic tone tokens are added** — `warning`, `info`, `success`
+   (amended 2026-11-17, see §7). This narrows Decision 2's original "no new
+   token vocabulary is invented", which could not survive the palette sweep:
+   none of the 19 existing tokens expresses these roles, and they account for
+   ~424 of the 721 hardcoded palette sites. They are OPTIONAL in a theme file,
+   and their readable text value is DERIVED per surface, never authored.
 
 ## §1 Rendering mechanism
 
@@ -198,10 +205,12 @@ incompatibly.
 }
 ```
 
-The 19 colour keys map 1:1 onto the `--color-*` tokens in `index.css`'s `@theme`
-block; the 4 radius keys onto `--radius-{sm,md,lg,xl}`; the 2 font keys onto
-`--font-{sans,mono}`. No token vocabulary is invented, and the set is closed:
-validation rejects unknown keys so a typo is reported rather than ignored.
+The 19 required colour keys map 1:1 onto the `--color-*` tokens in
+`index.css`'s `@theme` block; the 3 optional tone keys (§7) onto
+`--color-{warning,info,success}`; the 4 radius keys onto
+`--radius-{sm,md,lg,xl}`; the 2 font keys onto `--font-{sans,mono}`. The set is
+closed: validation rejects unknown keys so a typo is reported rather than
+ignored.
 
 **Why colours are required but radius and fonts are optional.** A partial colour
 set is the failure that produces an unreadable UI — a theme defining
@@ -457,10 +466,105 @@ theme's reason.
 ### Consequence for the unthemed palette
 
 With light as a first-class mode — reachable automatically via `system` — the
-~693 hardcoded Tailwind palette literals outside the 19-token vocabulary stop
-being deferrable. They render at 1.4–2.8:1 on white, and `lib/badge-config.tsx`
-alone paints every row of the main view. This remains separate work, but it is a
-prerequisite for calling light mode usable rather than a nice-to-have.
+hardcoded Tailwind palette literals outside the token vocabulary stop being
+deferrable. They render at 1.4–2.8:1 on white, and `lib/badge-config.tsx` alone
+paints every row of the main view.
+
+A full survey (2026-11-17) found **721** such sites across 46 production files,
+of which exactly ONE sat inside a `dark:` variant. They are not 18 colour
+families but six semantic roles reused throughout — `formula-dag`'s
+`bg-amber-500/15 text-amber-400` is byte-identical to `home-page`'s:
+
+| role | sites | mechanism |
+|---|---|---|
+| info / warning / success | ~424 | the three new tone tokens (§7) |
+| error | ~91 | the existing `destructive` |
+| neutral chrome | ~133 | existing `muted` / `border` / `card` |
+| status, priority, bead-type keyed | ~88 | the status-colour machinery |
+
+The sweep is being done in phases, main view first. See §7.
+
+## §7 Semantic tone tokens (amended 2026-11-17)
+
+Three authorable colour tokens are added — `warning`, `info`, `success` — and
+one derivation rule that also applies to the pre-existing `destructive`.
+
+### Why the vocabulary had to grow
+
+Decision 2 originally promised no new tokens. The palette survey showed that
+promise could not be kept: ~424 of the 721 hardcoded sites are warning, info or
+success tones, and none of the 19 existing tokens expresses them. `primary` is
+the brand green, and `accent` is a neutral tint in this palette — neither is a
+warning amber or a link blue. The alternative was `dark:`-paired literals at
+each of those sites, which works visually but leaves them **unthemeable** — so
+a user's theme file could never change them. That defeats the purpose of the
+feature, so the vocabulary grows by three rather than the sweep shipping
+something a theme cannot reach.
+
+`destructive` already covers the error tone and is deliberately NOT duplicated.
+
+### One hex per tone, text derived not authored
+
+A theme supplies one hex per tone. The readable text value is computed per
+surface by the engine, using the `readableTextColor(hex, surface)` that
+per-status colours already use: it mixes the tone toward white or black until
+it clears 4.5:1 against its own 20% tint over the theme's `card`.
+
+That is what lets a single authored hex work in both appearances:
+
+| tone | base | text on `#27272a` | text on `#ffffff` |
+|---|---|---|---|
+| warning | `#f59e0b` | `#f59e0b` | `#935f07` |
+| info | `#3b82f6` | `#76a8f9` | `#2c62b9` |
+| success | `#10b981` | `#28c08e` | `#0a7854` |
+| destructive | `#ef4444` | `#f47c7c` | `#b33333` |
+
+All four clear 4.78:1 against their own fill in both appearances (measured).
+
+The engine emits `--bb-<tone>` and `--bb-<tone>-text`; `@theme` exposes
+`--color-<tone>` and `--color-<tone>-text`. Call sites use
+`bg-warning/15 border-warning/30 text-warning-text`. The bare tone token must
+never be used as text — the hex is tuned for fills and fails contrast on a
+light card. A source-scan test enforces this rather than a comment asserting
+it. `destructive` gets a derived `-text` companion WITHOUT becoming a new
+authorable token: it is shadcn's semantic for a solid fill, paired with
+`destructiveForeground` for text ON that fill, which is the wrong value for a
+tinted badge.
+
+### Tones are optional
+
+Unlike the 19 required colours, a theme may omit all three. `DEFAULT_TONE_HEX`
+then applies, so every theme file written before these tokens existed stays
+valid — the compatibility guarantee that makes this amendment safe to ship
+after the format was already public. A tone that IS present must still parse as
+hex or `rgb()`, since a value is derived from it.
+
+### Status, priority and bead-type colours route through the machinery
+
+These are keyed, not tonal: five priorities and fourteen bead types against
+three tones, so routing them to tones would flatten red/orange/yellow into one
+hue. Each instead gets a default-hex table — `DEFAULT_STATUS_HEX`,
+`DEFAULT_PRIORITY_HEX`, `DEFAULT_TYPE_HEX` — carrying exactly the hues the
+literals used, tagged via `data-status` / `data-priority` / `data-type`, and
+emitted as one unlayered stylesheet that beats Tailwind's `@layer utilities`
+without `!important`. They go through it purely for the per-surface text.
+
+A built-in status with no chosen colour previously kept the hardcoded Tailwind
+classes and emitted no rule. That is reversed: every status now emits a rule,
+so a built-in and a user-coloured custom status behave identically. The fill is
+unchanged — `amber-500` IS `#f59e0b` at the same alpha.
+
+A badge config's `className` is now the PRE-STYLESHEET fallback only, written
+in tokens, since status rules appear only once the custom-status list loads.
+
+### `open`'s default follows the theme
+
+`DEFAULT_STATUS_HEX.open` was `#ffffff`, correct only while every theme is
+dark: tinted 20% over a white card it is white — contrast 1.00, an invisible
+badge in any light theme. `open` has no colour of its own (it draws in the body
+text colour), so its default resolves from the theme's `foreground` and follows
+any theme, user themes included. It stays in `RESERVED_HEX` so a generated
+custom colour keeps avoiding it.
 
 ## Out of scope
 

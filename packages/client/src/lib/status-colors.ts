@@ -322,8 +322,11 @@ function colorRules(
   const text = readableTextColor(hex, surface)
   const sel = `${prefix}[data-${attr}="${cssEscapeIdent(name)}"]`
   const role = (n: string) => `${sel}[data-${attr}-role="${n}"]`
-  const tint = `rgb(${r} ${g} ${b} / ${0.2 * emphasis})`
-  const edge = `rgb(${r} ${g} ${b} / ${0.4 * edgeEmphasis})`
+  // Round: 0.4 * 0.75 is 0.30000000000000004 in binary floating point, which
+  // is valid CSS but noise in the stylesheet (and in any test reading it).
+  const alpha = (base: number, mult: number) => Number((base * mult).toFixed(3))
+  const tint = `rgb(${r} ${g} ${b} / ${alpha(0.2, emphasis)})`
+  const edge = `rgb(${r} ${g} ${b} / ${alpha(0.4, edgeEmphasis)})`
   return [
     `${role("badge")}{background-color:${tint};border-color:${edge};color:${text}}`,
     `${role("stage")}{background-color:${tint};border-color:${edge}}`,

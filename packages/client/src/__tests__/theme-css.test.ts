@@ -113,3 +113,36 @@ describe("tone tokens in the stylesheet", () => {
     }
   })
 })
+
+describe("regression: tone tokens are never used bare as text", () => {
+  // `--bb-warning` is tuned as a FILL. As text it does not clear 4.5:1 on a
+  // light card — that is the entire reason the derived `-text` companion
+  // exists. A comment saying so is not a
+  // guarantee, so this scans for it.
+  //
+  // `destructive` is deliberately excluded: bare `text-destructive` is
+  // legitimate on a solid fill, which is its shadcn semantic.
+  const srcDir = join(import.meta.dir, "..")
+  const scanned = new Set([".ts", ".tsx", ".css"])
+
+  function collect(dir: string): string[] {
+    const out: string[] = []
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name === "dist") continue
+      const full = join(dir, e.name)
+      if (e.isDirectory()) out.push(...collect(full))
+      else if (scanned.has(extname(e.name))) out.push(full)
+    }
+    return out
+  }
+
+  test("no `text-<tone>` without the -text suffix anywhere in src/", () => {
+    const bare = new RegExp(`\\btext-(${TONE_KEYS.join("|")})\\b(?!-text)`)
+    const offenders: Array<{ file: string; match: string }> = []
+    for (const file of collect(srcDir)) {
+      const m = bare.exec(readFileSync(file, "utf-8"))
+      if (m) offenders.push({ file: file.slice(srcDir.length + 1), match: m[0] })
+    }
+    expect(offenders).toEqual([])
+  })
+})

@@ -18,7 +18,7 @@ import { cn } from "./utils"
  * It is written in tokens rather than palette literals so that window, and
  * any surface the stylesheet does not reach, is still legible in a light
  * theme. `-text` tokens are the per-surface derived values; never use the
- * bare `text-warning`, which is tuned for fills.
+ * bare tone token as text, which is tuned for fills.
  */
 export type BadgeConfig = {
   label: string

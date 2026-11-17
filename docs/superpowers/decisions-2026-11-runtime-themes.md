@@ -768,4 +768,57 @@ test that writes per-case files into that HOME will race across workers. The
 report documents it; flagging to the final review as a latent hazard the harness
 invites rather than a defect in this diff.
 
-<!-- 52 decision blocks -->
+## Palette sweep (2026-11-17)
+
+Decision 53 — amend Decision 2 ("no new token vocabulary is invented") by three
+semantic tone tokens: `warning`, `info`, `success`. Reasoning: the palette
+survey found 721 hardcoded sites across 46 production files, exactly ONE of
+which sat inside a `dark:` variant, and ~424 of them are warning/info/success
+tones that no existing token expresses — `primary` is the brand green and
+`accent` a neutral tint. The two alternatives both failed: `dark:`-paired
+literals work visually but leave those sites unthemeable, which defeats the
+feature's purpose, and collapsing them onto existing tokens would have
+flattened distinct roles. Approved by the user before implementation. Cost if
+wrong: three tokens a theme author may ignore (they are optional), and a
+vocabulary one wider than the spec originally promised.
+
+Decision 54 — one authored hex per tone, with the readable TEXT value derived
+per surface rather than authored. Reasoning: `readableTextColor(hex, surface)`
+already exists for per-status colours and solves exactly this; measured, all
+four tones clear 4.78:1 against their own tint on both `#27272a` and `#ffffff`.
+A `warningForeground` pair would have doubled the author's burden and carried
+the wrong semantic — shadcn's `*Foreground` is text ON a solid fill, but these
+badges tint. `destructive` therefore gets the same derived companion without
+becoming a new authorable token. Cost if wrong: a theme author cannot
+hand-tune badge text, only the tone it derives from.
+
+Decision 55 — route built-in statuses, priorities and bead types through the
+status-colour machinery instead of tone tokens. Reasoning: they are keyed, not
+tonal (5 priorities, 14 types, 3 tones), so tones would flatten red/orange/
+yellow into one hue; and the machinery is already surface-aware. This REVERSES
+the earlier o3h decision that a built-in with no chosen colour emits no rule
+and keeps its Tailwind classes — those classes are dark-only. Three tests
+asserted the old behaviour and were updated with the reason rather than
+deleted. Cost if wrong: badge text shifts slightly from the old `-400` shades
+(fills are byte-identical, since `amber-500` IS `#f59e0b`).
+
+Decision 56 — `open`'s default colour resolves from the theme's `foreground`
+rather than the literal `#ffffff`. Reasoning: a real bug the routing exposed —
+`#ffffff` tinted 20% over a white card is white, contrast 1.00, an invisible
+badge in every light theme. A foreground-derived default follows any theme
+including a user's, where a per-appearance hex table would not. Cost if wrong:
+`open` tracks body text colour, so a theme with an unusual foreground gets an
+unusual `open` badge.
+
+Decision 57 — verify the token chain in the BUILT CSS, not only in tests.
+Reasoning: every test here asserts class STRINGS, so all 1072 would pass even
+if Tailwind generated no rule at all — the same vacuous-assertion shape that
+bit this project six times. The build output confirms `.bg-warning\/15` resolves
+to `color-mix(in oklab, var(--bb-warning) 15%, transparent)` inside its
+`@supports` block and `.text-warning-text` to `var(--bb-warning-text)`. Two of
+my own readings of that output were wrong before I read it correctly (I claimed
+the alpha was dropped, having matched only the pre-color-mix fallback rule, and
+claimed the hover variants were missing, having not accounted for the `:hover`
+suffix). Cost if wrong: nothing — this check is pure verification.
+
+<!-- 57 decision blocks -->

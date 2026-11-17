@@ -105,9 +105,9 @@
      already covers the error tone. Each has a `-text` companion the theme
      engine DERIVES per surface (theme-engine.ts), which is why one authored
      hex renders correctly in both appearances: use `bg-warning/15
-     border-warning/30 text-warning-text`, never `text-warning` — the base
-     hex is tuned for fills and will not clear 4.5:1 as text on a light
-     card. */
+     border-warning/30 text-warning-text`, never the bare tone token as
+     text — that hex is tuned for fills and will not clear 4.5:1 as text on
+     a light card. */
   --color-warning: var(--bb-warning);
   --color-warning-text: var(--bb-warning-text);
   --color-info: var(--bb-info);
