@@ -8,7 +8,7 @@ import { expect, test } from "../fixtures/harness"
 
 const lightTheme = JSON.parse(
   readFileSync(join(__dirname, "..", "..", "packages/client/src/themes/beadbox-light.json"), "utf-8"),
-) as { id: string; colors: { background: string } }
+) as { id: string; colors: { background: string; card: string } }
 
 const bbBackground = (page: import("@playwright/test").Page) =>
   page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bb-background").trim())
@@ -36,7 +36,7 @@ test.describe("theme switching", () => {
     const surface = await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue("--bb-card").trim(),
     )
-    expect(surface).toBe("#ffffff")
+    expect(surface).toBe(lightTheme.colors.card)
   })
 
   test("body text stays readable against the background in light mode", async ({ page }) => {
