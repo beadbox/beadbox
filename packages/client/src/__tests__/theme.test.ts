@@ -46,23 +46,44 @@ describe("theme preference", () => {
   })
 
   test("a write survives in-memory for the session when the storage write throws", () => {
+    // Plain assignment (`localStorage.setItem = fn`) does NOT override the
+    // method on Bun's Storage implementation: it writes a storage entry
+    // under the literal key "setItem" and the real setItem keeps running
+    // underneath, so the simulated failure below would never actually fire.
+    // Object.defineProperty is the verified way to replace it for the
+    // duration of the test. Restoring via `delete` throws ("Unable to
+    // delete property") on Bun's Storage object, so the restore must
+    // redefine the property back to the real, bound original instead.
     const original = localStorage.setItem.bind(localStorage)
-    localStorage.setItem = () => {
-      throw new Error("Simulated quota/private-mode failure")
-    }
+    Object.defineProperty(localStorage, "setItem", {
+      value: () => {
+        throw new Error("Simulated quota/private-mode failure")
+      },
+      configurable: true,
+      writable: true,
+    })
     try {
       setThemePreference("nord")
       expect(getThemePreference()).toBe("nord")
+      expect(localStorage.getItem("beads-theme")).toBeNull()
     } finally {
-      localStorage.setItem = original
+      Object.defineProperty(localStorage, "setItem", {
+        value: original,
+        configurable: true,
+        writable: true,
+      })
     }
   })
 
   test("subscribers are still notified when the storage write throws", () => {
     const original = localStorage.setItem.bind(localStorage)
-    localStorage.setItem = () => {
-      throw new Error("Simulated quota/private-mode failure")
-    }
+    Object.defineProperty(localStorage, "setItem", {
+      value: () => {
+        throw new Error("Simulated quota/private-mode failure")
+      },
+      configurable: true,
+      writable: true,
+    })
     let calls = 0
     const unsubscribe = subscribeThemePreference(() => {
       calls++
@@ -70,9 +91,14 @@ describe("theme preference", () => {
     try {
       setThemePreference("nord")
       expect(calls).toBe(1)
+      expect(localStorage.getItem("beads-theme")).toBeNull()
     } finally {
       unsubscribe()
-      localStorage.setItem = original
+      Object.defineProperty(localStorage, "setItem", {
+        value: original,
+        configurable: true,
+        writable: true,
+      })
     }
   })
 
@@ -180,11 +206,14 @@ describe("theme prefs (appearance mode)", () => {
     expect(getThemePrefs().darkThemeId).toBe("beadbox-dark")
   })
 
-  test("rejects an invalid mode and an invalid id without writing", () => {
+  test("an invalid mode and an invalid id are rejected without writing to storage or cache", () => {
     setThemeMode("neon" as never)
     expect(getThemePrefs().mode).toBe("dark")
+    expect(localStorage.getItem("beads-theme-prefs")).toBeNull()
+
     setThemeForAppearance("dark", "../etc/passwd")
     expect(getThemePrefs().darkThemeId).toBe("beadbox-dark")
+    expect(localStorage.getItem("beads-theme-prefs")).toBeNull()
   })
 
   test("a corrupt stored blob falls back to defaults rather than throwing", () => {
@@ -203,16 +232,56 @@ describe("theme prefs (appearance mode)", () => {
     })
   })
 
-  test("writes still apply for the session when localStorage throws", () => {
-    const original = localStorage.setItem
-    localStorage.setItem = () => {
-      throw new Error("quota")
+  test("a stored blob that parses to a non-object value falls back per field, not caught as a whole", () => {
+    for (const raw of ["42", '"hello"', "[]"]) {
+      localStorage.setItem("beads-theme-prefs", raw)
+      _resetThemePreferenceForTests()
+      expect(getThemePrefs()).toEqual(DEFAULT_THEME_PREFS)
     }
+  })
+
+  test("a stored blob of JSON null is caught by the outer catch (null.mode throws)", () => {
+    localStorage.setItem("beads-theme-prefs", "null")
+    _resetThemePreferenceForTests()
+    expect(getThemePrefs()).toEqual(DEFAULT_THEME_PREFS)
+  })
+
+  test("extra unknown keys in the stored blob are ignored", () => {
+    localStorage.setItem(
+      "beads-theme-prefs",
+      JSON.stringify({ mode: "light", darkThemeId: "nord", somethingElse: "junk" }),
+    )
+    _resetThemePreferenceForTests()
+    expect(getThemePrefs()).toEqual({
+      mode: "light",
+      darkThemeId: "nord",
+      lightThemeId: "beadbox-light",
+    })
+  })
+
+  test("writes still apply for the session when localStorage throws, and nothing lands in storage", () => {
+    // See the comment on the legacy write-throws test above: plain
+    // assignment does not override Storage.setItem in Bun, and `delete`
+    // cannot restore it afterwards either, so the restore redefines the
+    // property back to the real, bound original.
+    const original = localStorage.setItem.bind(localStorage)
+    Object.defineProperty(localStorage, "setItem", {
+      value: () => {
+        throw new Error("quota")
+      },
+      configurable: true,
+      writable: true,
+    })
     try {
       setThemeMode("light")
       expect(getThemePrefs().mode).toBe("light")
+      expect(localStorage.getItem("beads-theme-prefs")).toBeNull()
     } finally {
-      localStorage.setItem = original
+      Object.defineProperty(localStorage, "setItem", {
+        value: original,
+        configurable: true,
+        writable: true,
+      })
     }
   })
 
