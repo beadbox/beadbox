@@ -32,7 +32,7 @@ import {
 import { rpc } from "../lib/rpc"
 import { hasSidecarTransport, onStderr } from "../lib/sidecar-transport"
 import { applyTheme, isThemingAvailable } from "../lib/theme-engine"
-import { listThemes, loadTheme, themesQueryKey } from "../lib/theme-source"
+import { builtinThemeFor, listThemes, loadTheme, themesQueryKey } from "../lib/theme-source"
 import { useThemePreference } from "./use-theme-preference"
 
 // Task 13 hot reload: the sidecar's themes.startWatch() emits this line on
@@ -107,8 +107,10 @@ export function useTheme(): {
         const entry = entries.find((e) => e.id === legacyId && !e.error)
         // An id whose theme is no longer installed (or no longer validates)
         // cannot be slotted, so the defaults stand rather than guessing an
-        // appearance for it.
-        if (entry) {
+        // appearance for it. entry.appearance is checked too: ThemeEntry.
+        // appearance admits null for a theme whose own appearance could
+        // not be determined (Fix 2), and that cannot be slotted either.
+        if (entry?.appearance) {
           setThemeForAppearance(entry.appearance, legacyId)
           setThemeMode(entry.appearance)
         }
@@ -127,9 +129,9 @@ export function useTheme(): {
   // Bumped only when a hot-reload revalidation finds the ACTIVE theme still
   // valid, so the apply effect below re-runs and re-reads the same id. A
   // revalidation that FAILS does not bump this: per task-13-addendum, the
-  // currently applied theme must stay on screen rather than snapping to
-  // FALLBACK_THEME (which loadTheme collapses failures to — correct for
-  // startup, where there is no "last good" theme yet, but wrong here).
+  // currently applied theme must stay on screen rather than snapping to the
+  // appearance's built-in (which loadTheme collapses failures to — correct
+  // for startup, where there is no "last good" theme yet, but wrong here).
   const [reapplyEpoch, setReapplyEpoch] = useState(0)
 
   // Bumped when the sidecar process restarts (lib/rpc.ts's
@@ -184,23 +186,42 @@ export function useTheme(): {
     lastReapplyEpochRef.current = reapplyEpoch
 
     let cancelled = false
-    void loadTheme(activeThemeId).then((theme) => {
+    void loadTheme(activeThemeId, appearance).then((theme) => {
       if (cancelled) return
       // On the hot-reload path there IS a last-good theme already on
       // screen, so a load that resolves to a DIFFERENT id — loadTheme
-      // collapsing a second, now-invalid save to FALLBACK_THEME — must be
-      // refused rather than applied: applying it would strand the app on
-      // Beadbox Dark until the file becomes valid again (task-13-addendum),
-      // exactly what "fall back to the last good theme" forbids. The
-      // initial apply and an activeThemeId switch have no last-good theme
-      // to protect, so loadTheme's fallback there is correct and must still
-      // go through — note loadTheme short-circuits built-in ids, so when
-      // the active theme IS the dark built-in, theme.id legitimately equals
-      // activeThemeId and this guard correctly does not trigger.
+      // collapsing a second, now-invalid save to its appearance's built-in
+      // — must be refused rather than applied: applying it would strand
+      // the app on that built-in until the file becomes valid again
+      // (task-13-addendum), exactly what "fall back to the last good
+      // theme" forbids. The initial apply and an activeThemeId switch have
+      // no last-good theme to protect, so loadTheme's fallback there is
+      // correct and must still go through — note loadTheme short-circuits
+      // built-in ids, so when the active theme IS a built-in, theme.id
+      // legitimately equals activeThemeId and this guard correctly does
+      // not trigger.
       if (isHotReloadReapply && theme.id !== activeThemeId) return
+      // Checked AFTER the id-guard above, not before: this guard targets a
+      // DIFFERENT failure mode — same id, but the file's own `appearance`
+      // field was edited to no longer match the slot it is assigned to
+      // (final whole-plan review, Fix 1). The id-guard above never refuses
+      // that case (the id is unchanged), so it falls through to here
+      // regardless of ordering; loadTheme's own fallback paths, in turn,
+      // always return a theme whose appearance already matches what was
+      // asked for, so this guard never second-guesses the id-guard's
+      // fallback result. The two guards are independent — each refuses a
+      // different, disjoint mismatch — so either order is safe, but
+      // checking id first keeps the existing hot-reload-stranding
+      // protection textually first and this newer check an addition after
+      // it. Unlike the id-guard (which leaves the last-good theme alone),
+      // this one actively applies a safe appearance-correct built-in: an
+      // appearance mismatch can originate from the INITIAL apply too (no
+      // last-good theme exists yet to fall back to), so doing nothing is
+      // not an option here.
+      const safeTheme = theme.appearance === appearance ? theme : builtinThemeFor(appearance)
       // The resolved MODE's appearance drives the .dark class (spec §6),
       // not the theme's own `appearance` field — see theme-engine.ts.
-      applyTheme(theme, appearance)
+      applyTheme(safeTheme, appearance)
     })
     return () => {
       cancelled = true
@@ -244,8 +265,9 @@ export function useTheme(): {
                 // `entry?.error` alone, or a deleted active theme's file
                 // would read as valid and bump the epoch, sending a deleted
                 // theme's id into loadTheme/rpc.themes.get, which would
-                // collapse to FALLBACK_THEME anyway — just via a path that
-                // looks like "still valid" instead of an intentional one.
+                // collapse to the appearance's built-in anyway — just via a
+                // path that looks like "still valid" instead of an
+                // intentional one.
                 const stillValid = entry !== undefined && !entry.error
                 if (stillValid) setReapplyEpoch((n) => n + 1)
                 // else: leave the applied theme as-is; the failure reason

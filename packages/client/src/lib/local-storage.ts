@@ -135,11 +135,22 @@ export function setFiltersPreference(filters: Filters): void {
 }
 
 export const DEFAULT_THEME_ID = "beadbox-dark"
+export const DEFAULT_LIGHT_THEME_ID = "beadbox-light"
+
+/**
+ * The default theme id for a given appearance slot — the one fact (final
+ * whole-plan review, Fix 1) that loadTheme's failure path, resolveThemeId's
+ * display fallback, and DEFAULT_THEME_PREFS below all read, instead of each
+ * independently assuming "dark" and silently breaking the light slot.
+ */
+export function defaultThemeIdFor(appearance: Appearance): ThemeId {
+  return appearance === "dark" ? DEFAULT_THEME_ID : DEFAULT_LIGHT_THEME_ID
+}
 
 // THEME_ID_RE itself now lives in @beadbox/server/theme-tokens (Fix 8, final
 // whole-branch review): theme-validate.ts's validateTheme() shares this
 // exact pattern, so a format relaxed on one side can no longer silently
-// mismatch the other and make setThemePreference below reject an id that
+// mismatch the other and make setThemeForAppearance below reject an id that
 // validates and lists fine.
 
 // beadbox-sdd/2026-11-13-runtime-themes task 11: the theme preference is
@@ -149,60 +160,15 @@ export const DEFAULT_THEME_ID = "beadbox-dark"
 const themePreferenceEvents = new EventTarget()
 const THEME_PREFERENCE_CHANGE_EVENT = "theme-preference-change"
 
-// In-memory fallback for the current session. getThemePreference prefers
-// this when set, so a write that survives only in memory (localStorage
-// threw) is still visible to every reader this session — see
-// setThemePreference's catch below.
-let currentThemeId: ThemeId | null = null
-
-/**
- * The stored theme id, or the built-in dark theme.
- *
- * A syntactically valid id for a theme that is not currently installed is
- * returned as-is and left in storage: a user who removes a theme file and
- * puts it back should get their choice returned rather than silently reset.
- * Whether the id resolves to an installed theme is theme-source's concern.
- */
-export function getThemePreference(): ThemeId {
-  if (typeof window === "undefined") return DEFAULT_THEME_ID
-  if (currentThemeId !== null) return currentThemeId
-
-  try {
-    const stored = localStorage.getItem(THEME_KEY)
-    if (stored && THEME_ID_RE.test(stored)) return stored
-  } catch {
-    // localStorage unavailable (private mode, disabled storage).
-  }
-  return DEFAULT_THEME_ID
-}
-
-export function setThemePreference(id: ThemeId): void {
-  if (typeof window === "undefined") return
-  if (!THEME_ID_RE.test(id)) return
-
-  currentThemeId = id
-  try {
-    localStorage.setItem(THEME_KEY, id)
-  } catch {
-    // Non-fatal: currentThemeId above already holds the new id, so
-    // getThemePreference still returns it and the theme still applies for
-    // this session even though it won't persist across reloads.
-  }
-  // Dispatched outside the try/catch: subscribers must still be notified
-  // when the localStorage write itself fails, so "the theme still applies
-  // for this session" (above) is actually true.
-  themePreferenceEvents.dispatchEvent(new Event(THEME_PREFERENCE_CHANGE_EVENT))
-}
-
 /**
  * Subscribe to theme-preference changes. The listener fires AFTER each
- * setThemePreference write that passes the id-format guard. Returns an
- * unsubscribe function. The listener receives no arguments — read
- * getThemePreference() inside the listener to get the current value.
+ * writeThemePrefs write (setThemeMode, setThemeForAppearance, clearCache).
+ * Returns an unsubscribe function. The listener receives no arguments —
+ * read getThemePrefs() inside the listener to get the current value.
  *
- * Pair with getThemePreference via useSyncExternalStore so every consumer
- * (use-theme.ts, usePreferences) observes the same single store instead of
- * holding its own copy.
+ * Pair with getThemePrefs via useSyncExternalStore so every consumer
+ * (use-theme.ts, use-theme-preference.ts) observes the same single store
+ * instead of holding its own copy.
  */
 export function subscribeThemePreference(listener: () => void): () => void {
   themePreferenceEvents.addEventListener(THEME_PREFERENCE_CHANGE_EVENT, listener)
@@ -214,18 +180,25 @@ export function subscribeThemePreference(listener: () => void): () => void {
 // Clears the in-memory fallback so a test can simulate a fresh module/page
 // load that reads whatever is actually in storage.
 export function _resetThemePreferenceForTests(): void {
-  currentThemeId = null
   currentThemePrefs = null
 }
 
 /**
- * The theme id that actually renders for a stored preference: the stored id if
- * it is one we can render, else the default. Used for SELECTION DISPLAY only —
- * the stored preference itself is never rewritten, so a theme the user removes
- * and later restores comes back as their choice.
+ * The theme id that actually renders for a stored preference: the stored id
+ * if it is one we can render, else the default FOR THIS APPEARANCE. Used for
+ * SELECTION DISPLAY only — the stored preference itself is never rewritten,
+ * so a theme the user removes and later restores comes back as their
+ * choice. The appearance param matters: falling back to the dark default
+ * for an unresolvable id in the LIGHT grid would never match any light
+ * card, so no card there would ever show as selected (final whole-plan
+ * review, Fix 1).
  */
-export function resolveThemeId(stored: ThemeId, availableIds: readonly string[]): ThemeId {
-  return availableIds.includes(stored) ? stored : DEFAULT_THEME_ID
+export function resolveThemeId(
+  stored: ThemeId,
+  availableIds: readonly string[],
+  appearance: Appearance,
+): ThemeId {
+  return availableIds.includes(stored) ? stored : defaultThemeIdFor(appearance)
 }
 
 // --- Appearance mode (beadbox-sdd/2026-11-17-appearance-mode task 1) ---
@@ -238,8 +211,6 @@ export function resolveThemeId(stored: ThemeId, availableIds: readonly string[])
 
 const THEME_PREFS_KEY = "beads-theme-prefs"
 
-export const DEFAULT_LIGHT_THEME_ID = "beadbox-light"
-
 export type ThemeMode = "dark" | "light" | "system"
 
 export interface ThemePrefs {
@@ -250,19 +221,18 @@ export interface ThemePrefs {
 
 export const DEFAULT_THEME_PREFS: ThemePrefs = {
   mode: "dark",
-  darkThemeId: DEFAULT_THEME_ID,
-  lightThemeId: DEFAULT_LIGHT_THEME_ID,
+  darkThemeId: defaultThemeIdFor("dark"),
+  lightThemeId: defaultThemeIdFor("light"),
 }
 
 const THEME_MODES: readonly ThemeMode[] = ["dark", "light", "system"]
 const isThemeMode = (v: unknown): v is ThemeMode => THEME_MODES.includes(v as ThemeMode)
 
-// In-memory fallback/cache for the current session, mirroring currentThemeId
-// above. getThemePrefs prefers this when set, both so a write that survives
-// only in memory (localStorage threw) is visible this session, and so a
-// successful parse is cached: useSyncExternalStore (Task 4) compares
-// snapshots by identity, and a freshly parsed object on every call would
-// re-render forever.
+// In-memory fallback/cache for the current session. getThemePrefs prefers
+// this when set, both so a write that survives only in memory (localStorage
+// threw) is visible this session, and so a successful parse is cached:
+// useSyncExternalStore (Task 4) compares snapshots by identity, and a
+// freshly parsed object on every call would re-render forever.
 let currentThemePrefs: ThemePrefs | null = null
 
 export function getThemePrefs(): ThemePrefs {
@@ -831,7 +801,6 @@ export function clearCache(): void {
   // Reset theme preference and notify subscribers outside try/catch, so the
   // reset and notification happen even when storage clear throws, ensuring
   // the in-memory value doesn't become stale.
-  currentThemeId = null
   currentThemePrefs = null
   themePreferenceEvents.dispatchEvent(new Event(THEME_PREFERENCE_CHANGE_EVENT))
 }
