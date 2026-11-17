@@ -1,4 +1,4 @@
-import { THEME_ID_RE } from "@beadbox/server/theme-tokens"
+import { type Appearance, THEME_ID_RE } from "@beadbox/server/theme-tokens"
 import {
   ALL_PRIORITIES,
   type Bead,
@@ -215,6 +215,7 @@ export function subscribeThemePreference(listener: () => void): () => void {
 // load that reads whatever is actually in storage.
 export function _resetThemePreferenceForTests(): void {
   currentThemeId = null
+  currentThemePrefs = null
 }
 
 /**
@@ -225,6 +226,134 @@ export function _resetThemePreferenceForTests(): void {
  */
 export function resolveThemeId(stored: ThemeId, availableIds: readonly string[]): ThemeId {
   return availableIds.includes(stored) ? stored : DEFAULT_THEME_ID
+}
+
+// --- Appearance mode (beadbox-sdd/2026-11-17-appearance-mode task 1) ---
+//
+// A second axis on top of the single theme id above: the user picks a MODE
+// (dark / light / follow the system) and assigns a theme to each of the dark
+// and light slots. All three values live in one storage key so a change
+// produces ONE store notification instead of three keys that can drift
+// mid-update.
+
+const THEME_PREFS_KEY = "beads-theme-prefs"
+
+export const DEFAULT_LIGHT_THEME_ID = "beadbox-light"
+
+export type ThemeMode = "dark" | "light" | "system"
+
+export interface ThemePrefs {
+  mode: ThemeMode
+  darkThemeId: ThemeId
+  lightThemeId: ThemeId
+}
+
+export const DEFAULT_THEME_PREFS: ThemePrefs = {
+  mode: "dark",
+  darkThemeId: DEFAULT_THEME_ID,
+  lightThemeId: DEFAULT_LIGHT_THEME_ID,
+}
+
+const THEME_MODES: readonly ThemeMode[] = ["dark", "light", "system"]
+const isThemeMode = (v: unknown): v is ThemeMode => THEME_MODES.includes(v as ThemeMode)
+
+// In-memory fallback/cache for the current session, mirroring currentThemeId
+// above. getThemePrefs prefers this when set, both so a write that survives
+// only in memory (localStorage threw) is visible this session, and so a
+// successful parse is cached: useSyncExternalStore (Task 4) compares
+// snapshots by identity, and a freshly parsed object on every call would
+// re-render forever.
+let currentThemePrefs: ThemePrefs | null = null
+
+export function getThemePrefs(): ThemePrefs {
+  if (typeof window === "undefined") return DEFAULT_THEME_PREFS
+  if (currentThemePrefs !== null) return currentThemePrefs
+
+  try {
+    const raw = localStorage.getItem(THEME_PREFS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ThemePrefs>
+      // Each field is validated independently and falls back on its own, so a
+      // single bad value cannot discard the user's other two choices.
+      const next: ThemePrefs = {
+        mode: isThemeMode(parsed.mode) ? parsed.mode : DEFAULT_THEME_PREFS.mode,
+        darkThemeId:
+          typeof parsed.darkThemeId === "string" && THEME_ID_RE.test(parsed.darkThemeId)
+            ? parsed.darkThemeId
+            : DEFAULT_THEME_PREFS.darkThemeId,
+        lightThemeId:
+          typeof parsed.lightThemeId === "string" && THEME_ID_RE.test(parsed.lightThemeId)
+            ? parsed.lightThemeId
+            : DEFAULT_THEME_PREFS.lightThemeId,
+      }
+      // Cache the parsed result so a second call returns the SAME object
+      // (see the comment on currentThemePrefs above), not just an equal one.
+      currentThemePrefs = next
+      return next
+    }
+  } catch {
+    // Unparseable blob or localStorage unavailable (private mode, disabled
+    // storage). Defaults render today's appearance, so this degrades rather
+    // than failing.
+  }
+  return DEFAULT_THEME_PREFS
+}
+
+function writeThemePrefs(next: ThemePrefs): void {
+  currentThemePrefs = next
+  try {
+    localStorage.setItem(THEME_PREFS_KEY, JSON.stringify(next))
+  } catch {
+    // Non-fatal: currentThemePrefs above already holds the new value, so
+    // getThemePrefs returns it and the choice applies for this session even
+    // though it will not persist across reloads.
+  }
+  // Dispatched outside the try/catch for the same reason: subscribers must
+  // still be notified when the write itself failed, or "applies for this
+  // session" would not be true.
+  themePreferenceEvents.dispatchEvent(new Event(THEME_PREFERENCE_CHANGE_EVENT))
+}
+
+export function setThemeMode(mode: ThemeMode): void {
+  if (typeof window === "undefined") return
+  if (!isThemeMode(mode)) return
+  writeThemePrefs({ ...getThemePrefs(), mode })
+}
+
+export function setThemeForAppearance(appearance: Appearance, id: ThemeId): void {
+  if (typeof window === "undefined") return
+  if (!THEME_ID_RE.test(id)) return
+  const prefs = getThemePrefs()
+  writeThemePrefs(
+    appearance === "dark" ? { ...prefs, darkThemeId: id } : { ...prefs, lightThemeId: id },
+  )
+}
+
+/**
+ * The pre-§6 single-id key, for one-time migration.
+ *
+ * Reading it here rather than migrating here is deliberate: choosing which
+ * slot the id belongs in needs the theme's `appearance`, which only the
+ * loaded theme list knows. hooks/use-theme.ts owns that step (Task 4).
+ */
+export function getLegacyThemeId(): ThemeId | null {
+  if (typeof window === "undefined") return null
+  try {
+    const stored = localStorage.getItem(THEME_KEY)
+    if (stored && THEME_ID_RE.test(stored)) return stored
+  } catch {
+    // localStorage unavailable.
+  }
+  return null
+}
+
+export function clearLegacyThemeId(): void {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.removeItem(THEME_KEY)
+  } catch {
+    // localStorage unavailable; nothing to clear.
+  }
 }
 
 // --- Analytics opt-out ---
@@ -655,6 +784,7 @@ const CLEARABLE_KEYS = [
   SORT_KEY,
   FILTERS_KEY,
   THEME_KEY,
+  THEME_PREFS_KEY,
   ZOOM_KEY,
   VIM_NAV_KEY,
   UPDATE_CHECK_FREQUENCY_KEY,
@@ -683,6 +813,7 @@ export function clearCache(): void {
   // reset and notification happen even when storage clear throws, ensuring
   // the in-memory value doesn't become stale.
   currentThemeId = null
+  currentThemePrefs = null
   themePreferenceEvents.dispatchEvent(new Event(THEME_PREFERENCE_CHANGE_EVENT))
 }
 

@@ -4,9 +4,15 @@ import { afterEach, describe, expect, test } from "bun:test"
 import {
   _resetThemePreferenceForTests,
   clearCache,
+  clearLegacyThemeId,
   DEFAULT_THEME_ID,
+  DEFAULT_THEME_PREFS,
+  getLegacyThemeId,
   getThemePreference,
+  getThemePrefs,
   resolveThemeId,
+  setThemeForAppearance,
+  setThemeMode,
   setThemePreference,
   subscribeThemePreference,
 } from "../lib/local-storage"
@@ -134,5 +140,91 @@ describe("applyThemeClass", () => {
   test("no longer writes theme-* classes", () => {
     applyThemeClass(document.documentElement, "dark")
     expect(document.documentElement.className).toBe("dark")
+  })
+})
+
+describe("theme prefs (appearance mode)", () => {
+  test("defaults to dark mode with both built-in slots filled", () => {
+    expect(getThemePrefs()).toEqual({
+      mode: "dark",
+      darkThemeId: "beadbox-dark",
+      lightThemeId: "beadbox-light",
+    })
+  })
+
+  test("getThemePrefs caches its parsed result for identity stability", () => {
+    localStorage.setItem("beads-theme-prefs", JSON.stringify({ mode: "light" }))
+    _resetThemePreferenceForTests()
+    const first = getThemePrefs()
+    const second = getThemePrefs()
+    expect(first).toBe(second)
+  })
+
+  test("setThemeMode persists and notifies", () => {
+    let calls = 0
+    const un = subscribeThemePreference(() => {
+      calls++
+    })
+    try {
+      setThemeMode("system")
+      expect(getThemePrefs().mode).toBe("system")
+      expect(calls).toBe(1)
+    } finally {
+      un()
+    }
+  })
+
+  test("setThemeForAppearance writes only the named slot", () => {
+    setThemeForAppearance("light", "solarized")
+    expect(getThemePrefs().lightThemeId).toBe("solarized")
+    expect(getThemePrefs().darkThemeId).toBe("beadbox-dark")
+  })
+
+  test("rejects an invalid mode and an invalid id without writing", () => {
+    setThemeMode("neon" as never)
+    expect(getThemePrefs().mode).toBe("dark")
+    setThemeForAppearance("dark", "../etc/passwd")
+    expect(getThemePrefs().darkThemeId).toBe("beadbox-dark")
+  })
+
+  test("a corrupt stored blob falls back to defaults rather than throwing", () => {
+    localStorage.setItem("beads-theme-prefs", "{not json")
+    _resetThemePreferenceForTests()
+    expect(getThemePrefs()).toEqual(DEFAULT_THEME_PREFS)
+  })
+
+  test("a partial stored blob fills missing keys from defaults", () => {
+    localStorage.setItem("beads-theme-prefs", JSON.stringify({ mode: "light" }))
+    _resetThemePreferenceForTests()
+    expect(getThemePrefs()).toEqual({
+      mode: "light",
+      darkThemeId: "beadbox-dark",
+      lightThemeId: "beadbox-light",
+    })
+  })
+
+  test("writes still apply for the session when localStorage throws", () => {
+    const original = localStorage.setItem
+    localStorage.setItem = () => {
+      throw new Error("quota")
+    }
+    try {
+      setThemeMode("light")
+      expect(getThemePrefs().mode).toBe("light")
+    } finally {
+      localStorage.setItem = original
+    }
+  })
+
+  test("exposes and clears the legacy single-id key", () => {
+    localStorage.setItem("beads-theme", "nord")
+    expect(getLegacyThemeId()).toBe("nord")
+    clearLegacyThemeId()
+    expect(getLegacyThemeId()).toBeNull()
+  })
+
+  test("ignores a malformed legacy id", () => {
+    localStorage.setItem("beads-theme", "../nope")
+    expect(getLegacyThemeId()).toBeNull()
   })
 })
