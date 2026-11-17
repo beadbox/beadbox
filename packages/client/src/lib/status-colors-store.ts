@@ -4,7 +4,12 @@
 // surface at once, with no reload.
 
 import { useSyncExternalStore } from "react"
-import { resolveStatusColors, type StatusColorMap, THEME_SURFACES } from "./status-colors"
+import {
+  DEFAULT_STATUS_HEX,
+  resolveStatusColors,
+  type StatusColorMap,
+  THEME_SURFACES,
+} from "./status-colors"
 
 export interface StatusColorState {
   workspaceId: string | null
@@ -16,6 +21,12 @@ export interface StatusColorState {
   customs: string[] | null
   /** The theme's card color, the surface the contrast rule reads against. */
   surface: string
+  /**
+   * The theme's foreground color. `open` has no colour of its own — it draws
+   * in the body text colour — so its default is resolved from the theme
+   * rather than baked (see FOREGROUND_DEFAULT_STATUSES).
+   */
+  foreground: string
 }
 
 export interface ResolvedStatusColors extends StatusColorState {
@@ -28,7 +39,10 @@ function resolve(s: StatusColorState): ResolvedStatusColors {
   // Until the custom list is in, render nothing for any status: a bd
   // built-in must never flash a generated color.
   if (s.customs === null) return { ...s, css: {}, display: {}, defaults: {} }
-  return { ...s, ...resolveStatusColors(s.statuses, s.overrides, s.customs) }
+  return {
+    ...s,
+    ...resolveStatusColors(s.statuses, s.overrides, s.customs, { foreground: s.foreground }),
+  }
 }
 
 let state: ResolvedStatusColors = resolve({
@@ -37,6 +51,7 @@ let state: ResolvedStatusColors = resolve({
   overrides: {},
   customs: null,
   surface: THEME_SURFACES.gray.card,
+  foreground: DEFAULT_STATUS_HEX.open,
 })
 const listeners = new Set<() => void>()
 
@@ -84,9 +99,20 @@ export function useStatusColors(): ResolvedStatusColors {
  * so the engine still reports a surface even if theming is unavailable.
  */
 export function currentThemeSurface(el: Element = document.documentElement): string {
-  const inline = (el as HTMLElement).style?.getPropertyValue("--bb-card")?.trim()
+  return readThemeVar(el, "--bb-card") || THEME_SURFACES.gray.card
+}
+
+/**
+ * The theme's foreground, read the same way as the surface above. Falls back
+ * to the dark literal, which is what `open` has always drawn in.
+ */
+export function currentThemeForeground(el: Element = document.documentElement): string {
+  return readThemeVar(el, "--bb-foreground") || DEFAULT_STATUS_HEX.open
+}
+
+function readThemeVar(el: Element, name: string): string {
+  const inline = (el as HTMLElement).style?.getPropertyValue(name)?.trim()
   if (inline) return inline
   const view = el.ownerDocument?.defaultView
-  const computed = view?.getComputedStyle(el).getPropertyValue("--bb-card").trim()
-  return computed || THEME_SURFACES.gray.card
+  return view?.getComputedStyle(el).getPropertyValue(name).trim() ?? ""
 }

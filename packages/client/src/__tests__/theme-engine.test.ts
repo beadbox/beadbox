@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { COLOR_KEYS, type Theme } from "@beadbox/server/theme-tokens"
+import {
+  COLOR_KEYS,
+  DEFAULT_TONE_HEX,
+  TEXT_DERIVED_KEYS,
+  type Theme,
+  TONE_KEYS,
+} from "@beadbox/server/theme-tokens"
+import { readableTextColor } from "../lib/status-colors"
 import { applyTheme, clearTheme } from "../lib/theme-engine"
 import darkJson from "../themes/beadbox-dark.json"
 
@@ -117,5 +124,72 @@ describe("applyTheme", () => {
 
     expect(order.at(-1)).toBe("toggle")
     expect(order.filter((o) => o === "toggle")).toHaveLength(1)
+  })
+})
+
+describe("tone tokens (warning / info / success)", () => {
+  const DARK_CARD = "#27272a"
+  const LIGHT_CARD = "#ffffff"
+  const withCard = (card: string, over: Partial<Theme["colors"]> = {}) =>
+    theme({ colors: { ...theme().colors, card, ...over } })
+
+  test("falls back to DEFAULT_TONE_HEX when the theme omits tones", () => {
+    applyTheme(withCard(DARK_CARD), "dark")
+    const s = document.documentElement.style
+    for (const k of TONE_KEYS) {
+      expect(s.getPropertyValue(`--bb-${k}`)).toBe(DEFAULT_TONE_HEX[k])
+    }
+  })
+
+  test("a theme-authored tone overrides the default", () => {
+    applyTheme(withCard(DARK_CARD, { warning: "#ff00ff" }), "dark")
+    expect(document.documentElement.style.getPropertyValue("--bb-warning")).toBe("#ff00ff")
+  })
+
+  // The load-bearing property: ONE authored hex has to read correctly on
+  // both surfaces. If the engine ever wrote the base hex straight through
+  // as the text value, dark and light would be identical and this fails.
+  test("derives a DIFFERENT readable text value per surface from one base hex", () => {
+    applyTheme(withCard(DARK_CARD), "dark")
+    const dark = TONE_KEYS.map((k) =>
+      document.documentElement.style.getPropertyValue(`--bb-${k}-text`),
+    )
+    applyTheme(withCard(LIGHT_CARD), "light")
+    const light = TONE_KEYS.map((k) =>
+      document.documentElement.style.getPropertyValue(`--bb-${k}-text`),
+    )
+
+    expect(dark).toEqual(TONE_KEYS.map((k) => readableTextColor(DEFAULT_TONE_HEX[k], DARK_CARD)))
+    expect(light).toEqual(TONE_KEYS.map((k) => readableTextColor(DEFAULT_TONE_HEX[k], LIGHT_CARD)))
+    // Every tone must actually move between the two surfaces.
+    for (let i = 0; i < TONE_KEYS.length; i++) expect(light[i]).not.toBe(dark[i])
+  })
+
+  test("normalises an rgb() tone rather than mis-deriving it as black", () => {
+    // rgb(245, 158, 11) IS #f59e0b, so it must derive identically.
+    applyTheme(withCard(DARK_CARD, { warning: "rgb(245, 158, 11)" }), "dark")
+    expect(document.documentElement.style.getPropertyValue("--bb-warning-text")).toBe(
+      readableTextColor("#f59e0b", DARK_CARD),
+    )
+  })
+
+  test("clearTheme removes every tone and every derived -text", () => {
+    applyTheme(withCard(DARK_CARD), "dark")
+    clearTheme()
+    const s = document.documentElement.style
+    for (const k of TONE_KEYS) expect(s.getPropertyValue(`--bb-${k}`)).toBe("")
+    for (const k of TEXT_DERIVED_KEYS) expect(s.getPropertyValue(`--bb-${k}-text`)).toBe("")
+  })
+
+  // `destructive` is authored, not a tone, but error badges tint rather than
+  // fill, so it needs the same per-surface text derivation.
+  test("derives destructive-text per surface from the authored destructive", () => {
+    applyTheme(withCard(DARK_CARD, { destructive: "#ef4444" }), "dark")
+    const dark = document.documentElement.style.getPropertyValue("--bb-destructive-text")
+    applyTheme(withCard(LIGHT_CARD, { destructive: "#ef4444" }), "light")
+    const light = document.documentElement.style.getPropertyValue("--bb-destructive-text")
+    expect(dark).toBe(readableTextColor("#ef4444", DARK_CARD))
+    expect(light).toBe(readableTextColor("#ef4444", LIGHT_CARD))
+    expect(light).not.toBe(dark)
   })
 })

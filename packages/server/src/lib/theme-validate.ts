@@ -13,6 +13,7 @@ import {
   RADIUS_KEYS,
   THEME_ID_RE,
   type Theme,
+  TONE_KEYS,
 } from "./theme-tokens"
 
 const HEX = /^#[0-9a-fA-F]{6}$/
@@ -59,8 +60,9 @@ export function validateTheme(input: unknown, opts: { id?: string } = {}): Valid
     return fail("colors must be an object")
   }
   const colors = t.colors as Record<string, unknown>
+  const known = new Set<string>([...COLOR_KEYS, ...TONE_KEYS])
   for (const key of Object.keys(colors)) {
-    if (!(COLOR_KEYS as readonly string[]).includes(key)) {
+    if (!known.has(key)) {
       return fail(`colors.${key} is not a known colour token`)
     }
   }
@@ -69,6 +71,16 @@ export function validateTheme(input: unknown, opts: { id?: string } = {}): Valid
     if (typeof v !== "string") return fail(`colors.${key} is missing`)
     if (!isValidColor(v)) {
       return fail(`colors.${key} must be hex (#rrggbb) or rgb(); got "${v}"`)
+    }
+  }
+  // Tone colours are optional (DEFAULT_TONE_HEX fills a gap), so a missing
+  // one is valid — but a PRESENT one must still be a colour we can parse,
+  // since the engine derives a readable text value from it.
+  for (const key of TONE_KEYS) {
+    const v = colors[key]
+    if (v === undefined) continue
+    if (typeof v !== "string" || !isValidColor(v)) {
+      return fail(`colors.${key} must be hex (#rrggbb) or rgb(); got "${String(v)}"`)
     }
   }
 

@@ -108,9 +108,29 @@ describe("readableTextColor", () => {
 })
 
 describe("resolveStatusColors", () => {
-  test("built-ins with no chosen color get no CSS (they keep today's classes)", () => {
-    const { css } = resolveStatusColors([...BUILTIN_STATUSES, "ready_for_qa", "ready_to_ship"], {})
-    expect(css).toEqual({})
+  // REVERSED by the light-theme palette sweep. This previously asserted
+  // `css` was empty, because a built-in with no chosen colour kept the
+  // hardcoded Tailwind classes each surface carried. Those classes are
+  // dark-only (`text-amber-400` on a white card fails contrast), so every
+  // status now emits a rule and gets readableTextColor's per-surface text.
+  test("built-ins with no chosen color now emit CSS, at their default hex", () => {
+    const statuses = [...BUILTIN_STATUSES, "ready_for_qa", "ready_to_ship"]
+    const { css } = resolveStatusColors(statuses, {})
+    for (const s of statuses) {
+      expect(css[s]).toBe(DEFAULT_STATUS_HEX[s])
+    }
+  })
+
+  test("open's default follows the theme foreground, not a baked #ffffff", () => {
+    // The bug this fixes: #ffffff tinted 20% over a white card is white —
+    // contrast 1.00, an invisible badge in every light theme.
+    const dark = resolveStatusColors(["open"], {}, [], { foreground: "#f4f4f5" })
+    const light = resolveStatusColors(["open"], {}, [], { foreground: "#0a0a0a" })
+    expect(dark.css.open).toBe("#f4f4f5")
+    expect(light.css.open).toBe("#0a0a0a")
+    // Absent/garbage foreground falls back to the dark literal.
+    expect(resolveStatusColors(["open"], {}, []).css.open).toBe("#ffffff")
+    expect(resolveStatusColors(["open"], {}, [], { foreground: "nope" }).css.open).toBe("#ffffff")
   })
 
   test("a chosen color applies; a generated default applies to other customs", () => {
@@ -122,12 +142,14 @@ describe("resolveStatusColors", () => {
     expect(display.in_progress).toBe(DEFAULT_STATUS_HEX.in_progress)
   })
 
-  test("bd built-ins beyond the five (pinned, hooked on bd 1.3) are built-ins: no CSS, today's blue", () => {
+  test("bd built-ins beyond the five (pinned, hooked on bd 1.3) are built-ins: today's blue", () => {
     // bd 1.3.1 lists pinned and hooked as built-ins; only status.custom is custom.
+    // They now emit CSS too (see the reversal above), still at FALLBACK_HEX,
+    // so they keep looking like the blue every surface fell back to.
     const statuses = [...BUILTIN_STATUSES, "pinned", "hooked", "waiting_on_nelson"]
     const { css, display } = resolveStatusColors(statuses, {}, ["waiting_on_nelson"])
-    expect(css.pinned).toBeUndefined()
-    expect(css.hooked).toBeUndefined()
+    expect(css.pinned).toBe("#3b82f6")
+    expect(css.hooked).toBe("#3b82f6")
     expect(display.pinned).toBe("#3b82f6")
     expect(css.waiting_on_nelson).toMatch(/^#[0-9a-f]{6}$/)
     // and a chosen color still applies to one

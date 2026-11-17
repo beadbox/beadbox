@@ -13,7 +13,12 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { rpc } from "../lib/rpc"
 import { buildStatusColorCss } from "../lib/status-colors"
-import { currentThemeSurface, statusColorStore, useStatusColors } from "../lib/status-colors-store"
+import {
+  currentThemeForeground,
+  currentThemeSurface,
+  statusColorStore,
+  useStatusColors,
+} from "../lib/status-colors-store"
 import { getWorkspaceCookie, subscribeWorkspaceCookie } from "../lib/workspace-cookie"
 import { useWorkspaceGate } from "./startup-gate"
 
@@ -70,7 +75,11 @@ export function StatusColorsMount() {
 
   useEffect(() => {
     const el = document.documentElement
-    const update = () => statusColorStore.set({ surface: currentThemeSurface(el) })
+    const update = () =>
+      statusColorStore.set({
+        surface: currentThemeSurface(el),
+        foreground: currentThemeForeground(el),
+      })
     update()
     const observer = new MutationObserver(update)
     observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] })

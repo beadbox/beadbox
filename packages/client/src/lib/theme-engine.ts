@@ -12,20 +12,47 @@ import {
   type Appearance,
   COLOR_KEYS,
   cssVarName,
+  DEFAULT_TONE_HEX,
   FONT_KEYS,
   fontVarName,
   RADIUS_KEYS,
   radiusVarName,
   type Theme,
+  TEXT_DERIVED_KEYS,
+  TONE_KEYS,
+  toneTextVarName,
 } from "@beadbox/server/theme-tokens"
+import { readableTextColor } from "./status-colors"
 import { applyThemeClass } from "./theme"
 
 function allVarNames(): string[] {
   return [
     ...COLOR_KEYS.map(cssVarName),
+    ...TONE_KEYS.map(cssVarName),
+    ...TEXT_DERIVED_KEYS.map(toneTextVarName),
     ...RADIUS_KEYS.map(radiusVarName),
     ...FONT_KEYS.map(fontVarName),
   ]
+}
+
+const RGB_FN = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/
+
+/**
+ * readableTextColor does hex arithmetic, but a theme may legally write a
+ * token as rgb() (see theme-validate.ts). Normalise so the derivation is
+ * never fed a string it would mis-parse into black.
+ *
+ * Returns null for anything unrecognised; the caller then skips derivation
+ * rather than writing a wrong colour.
+ */
+function toHexColor(value: string): string | null {
+  const v = value.trim()
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v.toLowerCase()
+  const m = RGB_FN.exec(v)
+  if (!m) return null
+  return `#${[1, 2, 3]
+    .map((i) => Math.min(255, Number(m[i])).toString(16).padStart(2, "0"))
+    .join("")}`
 }
 
 export function clearTheme(el: HTMLElement = document.documentElement): void {
@@ -48,6 +75,32 @@ export function applyTheme(
   for (const key of COLOR_KEYS) {
     el.style.setProperty(cssVarName(key), theme.colors[key])
   }
+  // Tone colours (warning / info / success). Optional in a theme file, so an
+  // omitted one falls back to DEFAULT_TONE_HEX — that is what keeps themes
+  // written before these tokens existed rendering correctly.
+  //
+  // The `-text` companion is DERIVED, never authored: readableTextColor
+  // mixes the tone toward white or black until it clears 4.5:1 against its
+  // own 20% tint over this theme's card surface. That is the whole reason one
+  // authored hex works in both appearances — on #27272a `warning` stays
+  // #f59e0b, on #ffffff it becomes #935f07.
+  const surface = toHexColor(theme.colors.card)
+  for (const key of TONE_KEYS) {
+    el.style.setProperty(cssVarName(key), theme.colors[key] ?? DEFAULT_TONE_HEX[key])
+  }
+  // `destructive` is authored in COLOR_KEYS and already written above; the
+  // tones were just written. Derive the readable-text companion for all four
+  // from whatever value is now effective.
+  for (const key of TEXT_DERIVED_KEYS) {
+    const base = theme.colors[key] ?? DEFAULT_TONE_HEX[key as keyof typeof DEFAULT_TONE_HEX]
+    const baseHex = base ? toHexColor(base) : null
+    // No derivation without a parseable base AND surface; the :root default
+    // for --bb-<key>-text then stands rather than a mis-derived colour.
+    if (baseHex && surface) {
+      el.style.setProperty(toneTextVarName(key), readableTextColor(baseHex, surface))
+    }
+  }
+
   if (theme.radius) {
     for (const key of RADIUS_KEYS) {
       const v = theme.radius[key]

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { COLOR_KEYS, cssVarName } from "../lib/theme-tokens"
+import { COLOR_KEYS, cssVarName, TONE_KEYS, toneTextVarName } from "../lib/theme-tokens"
 import { validateTheme } from "../lib/theme-validate"
 
 const colors = () =>
@@ -79,5 +79,40 @@ describe("validateTheme", () => {
     const r = validateTheme(base({ id: "nord" }), { id: "arctic" })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain("id")
+  })
+})
+
+describe("tone colour tokens", () => {
+  test("toneTextVarName names the derived companion", () => {
+    expect(toneTextVarName("warning")).toBe("--bb-warning-text")
+    expect(toneTextVarName("success")).toBe("--bb-success-text")
+  })
+
+  // Backwards compatibility: every theme file written before tone tokens
+  // existed omits all three, and must stay valid.
+  test("a theme omitting every tone is still valid", () => {
+    const r = validateTheme(base())
+    expect(r.ok).toBe(true)
+  })
+
+  test("accepts authored tones, hex and rgb()", () => {
+    const r = validateTheme(
+      base({ colors: { ...colors(), warning: "#ff8800", info: "rgb(1, 2, 3)" } }),
+    )
+    expect(r.ok).toBe(true)
+  })
+
+  test("rejects a present-but-malformed tone", () => {
+    for (const k of TONE_KEYS) {
+      const r = validateTheme(base({ colors: { ...colors(), [k]: "goldenrod" } }))
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain(`colors.${k}`)
+    }
+  })
+
+  test("still rejects a genuinely unknown colour key", () => {
+    const r = validateTheme(base({ colors: { ...colors(), chartreuse: "#010101" } }))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain("not a known colour token")
   })
 })

@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { extname, join } from "node:path"
-import { COLOR_KEYS, cssVarName } from "@beadbox/server/theme-tokens"
+import {
+  COLOR_KEYS,
+  cssVarName,
+  TEXT_DERIVED_KEYS,
+  TONE_KEYS,
+  toneTextVarName,
+} from "@beadbox/server/theme-tokens"
 
 const css = readFileSync(join(import.meta.dir, "../index.css"), "utf-8")
 const html = readFileSync(join(import.meta.dir, "../../index.html"), "utf-8")
@@ -80,5 +86,30 @@ describe("regression: no bare --token var() references survive in client source"
       }
     }
     expect(offenders).toEqual([])
+  })
+})
+
+describe("tone tokens in the stylesheet", () => {
+  test("every tone dereferences a --bb-* variable", () => {
+    for (const key of TONE_KEYS) {
+      expect(css).toContain(`--color-${key}: var(${cssVarName(key)})`)
+    }
+  })
+
+  // Four: the three tones plus `destructive`, whose tinted-text companion is
+  // derived even though the base colour is authored.
+  test("every derived -text companion dereferences a --bb-*-text variable", () => {
+    for (const key of TEXT_DERIVED_KEYS) {
+      expect(css).toContain(`--color-${key}-text: var(${toneTextVarName(key)})`)
+    }
+  })
+
+  test("every tone and every derived -text has a :root default", () => {
+    for (const key of TONE_KEYS) {
+      expect(css).toMatch(new RegExp(`${cssVarName(key)}:\\s*#[0-9a-fA-F]{6}`))
+    }
+    for (const key of TEXT_DERIVED_KEYS) {
+      expect(css).toMatch(new RegExp(`${toneTextVarName(key)}:\\s*#[0-9a-fA-F]{6}`))
+    }
   })
 })

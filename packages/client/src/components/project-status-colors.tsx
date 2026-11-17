@@ -13,7 +13,7 @@ import { useQueries } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { rpc } from "../lib/rpc"
 import { buildStatusColorCss, resolveStatusColors } from "../lib/status-colors"
-import { currentThemeSurface } from "../lib/status-colors-store"
+import { currentThemeForeground, currentThemeSurface } from "../lib/status-colors-store"
 import { statusColorsQueryKey, statusListQueryKey } from "./status-colors-mount"
 
 export interface StatusColorSource {
@@ -22,10 +22,22 @@ export interface StatusColorSource {
 }
 
 export function ProjectStatusColors({ sources }: { sources: readonly StatusColorSource[] }) {
-  const [surface, setSurface] = useState(() => currentThemeSurface())
+  // Surface AND foreground: the surface drives readable-text contrast, the
+  // foreground is `open`'s default (FOREGROUND_DEFAULT_STATUSES). Tracked as
+  // one object so a theme change updates both in a single render.
+  const [theme, setTheme] = useState(() => ({
+    surface: currentThemeSurface(),
+    foreground: currentThemeForeground(),
+  }))
   useEffect(() => {
     const el = document.documentElement
-    const update = () => setSurface(currentThemeSurface(el))
+    const update = () =>
+      setTheme((prev) => {
+        const next = { surface: currentThemeSurface(el), foreground: currentThemeForeground(el) }
+        // Keep the identity stable when nothing moved, so an unrelated
+        // attribute mutation does not re-render every project's sheet.
+        return prev.surface === next.surface && prev.foreground === next.foreground ? prev : next
+      })
     update()
     const observer = new MutationObserver(update)
     observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] })
@@ -34,7 +46,12 @@ export function ProjectStatusColors({ sources }: { sources: readonly StatusColor
   return (
     <>
       {sources.map((source) => (
-        <ProjectStatusColorStyles key={source.id} source={source} surface={surface} />
+        <ProjectStatusColorStyles
+          key={source.id}
+          source={source}
+          surface={theme.surface}
+          foreground={theme.foreground}
+        />
       ))}
     </>
   )
@@ -43,9 +60,11 @@ export function ProjectStatusColors({ sources }: { sources: readonly StatusColor
 function ProjectStatusColorStyles({
   source,
   surface,
+  foreground,
 }: {
   source: StatusColorSource
   surface: string
+  foreground: string
 }) {
   const { id, databasePath } = source
   const [colors, statuses, customs] = useQueries({
@@ -71,7 +90,9 @@ function ProjectStatusColorStyles({
   const ready = customs.data !== undefined && customs.data !== null && statuses.data !== undefined
   const css = ready
     ? buildStatusColorCss(
-        resolveStatusColors(statuses.data ?? [], colors.data ?? {}, customs.data ?? undefined).css,
+        resolveStatusColors(statuses.data ?? [], colors.data ?? {}, customs.data ?? undefined, {
+          foreground,
+        }).css,
         surface,
         id,
       )

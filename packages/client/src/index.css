@@ -101,6 +101,23 @@
   --color-input: var(--bb-input);
   --color-ring: var(--bb-ring);
 
+  /* Semantic tone tokens (warning / info / success). `destructive` above
+     already covers the error tone. Each has a `-text` companion the theme
+     engine DERIVES per surface (theme-engine.ts), which is why one authored
+     hex renders correctly in both appearances: use `bg-warning/15
+     border-warning/30 text-warning-text`, never `text-warning` — the base
+     hex is tuned for fills and will not clear 4.5:1 as text on a light
+     card. */
+  --color-warning: var(--bb-warning);
+  --color-warning-text: var(--bb-warning-text);
+  --color-info: var(--bb-info);
+  --color-info-text: var(--bb-info-text);
+  --color-success: var(--bb-success);
+  --color-success-text: var(--bb-success-text);
+  /* `destructive` itself is authored (COLOR_KEYS); only its tinted-text
+     companion is derived, for error badges that tint rather than fill. */
+  --color-destructive-text: var(--bb-destructive-text);
+
   --radius-sm: var(--bb-radius-sm);
   --radius-md: var(--bb-radius-md);
   --radius-lg: var(--bb-radius-lg);
@@ -133,6 +150,19 @@
   --bb-border: #3f3f46;
   --bb-input: #3f3f46;
   --bb-ring: #22c55e;
+
+  /* Tone defaults. These are the DARK-derived values (the `:root` defaults
+     are the dark palette, per the block above): each `-text` is
+     readableTextColor(base, #27272a), the dark card. The engine overwrites
+     both halves on every applyTheme, so these only stand when no engine is
+     running — JS disabled, or the startup probe bailed. */
+  --bb-warning: #f59e0b;
+  --bb-warning-text: #f59e0b;
+  --bb-info: #3b82f6;
+  --bb-info-text: #76a8f9;
+  --bb-success: #10b981;
+  --bb-success-text: #28c08e;
+  --bb-destructive-text: #f47c7c;
 
   --bb-radius-sm: calc(0.625rem - 4px);
   --bb-radius-md: calc(0.625rem - 2px);

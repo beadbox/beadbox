@@ -35,6 +35,21 @@ export const DEFAULT_STATUS_HEX: Readonly<Record<string, string>> = {
 // status with no entry of its own (bd's pinned / hooked, for one).
 const FALLBACK_HEX = "#3b82f6"
 
+/**
+ * Statuses whose default colour is the THEME'S FOREGROUND, not a fixed hex.
+ *
+ * `open` means "no colour of its own": it has always drawn in the body text
+ * colour. As a literal that was #ffffff, which is only correct while every
+ * theme is dark — on a white card its 20% tint is white-on-white, contrast
+ * 1.00, an invisible badge. Resolving it from the theme instead follows ANY
+ * theme, including a user's, in either appearance.
+ *
+ * DEFAULT_STATUS_HEX.open stays #ffffff: it is still the right swatch for
+ * the dark default, and it is a member of RESERVED_HEX, which a generated
+ * custom colour must keep avoiding.
+ */
+export const FOREGROUND_DEFAULT_STATUSES: ReadonlySet<string> = new Set(["open"])
+
 // Colors some surface already uses for a status by default (badge, detail
 // panel, pipeline tile or molecule graph). A generated default never lands on
 // one, so a custom status cannot look like a built-in anywhere.
@@ -237,7 +252,13 @@ export function resolveStatusColors(
   statuses: readonly string[],
   overrides: StatusColorMap,
   customs?: readonly string[],
+  opts: { foreground?: string } = {},
 ): { css: StatusColorMap; display: StatusColorMap; defaults: StatusColorMap } {
+  // Defaults to the dark literal so a caller that cannot read the DOM (and
+  // every existing test) behaves exactly as before.
+  const foreground = isHexColor(opts.foreground ?? "")
+    ? (opts.foreground as string).toLowerCase()
+    : DEFAULT_STATUS_HEX.open
   const present = new Set(statuses)
   const live: StatusColorMap = {}
   for (const [k, v] of Object.entries(overrides)) {
@@ -253,11 +274,18 @@ export function resolveStatusColors(
   const display: StatusColorMap = {}
   const defaults: StatusColorMap = {}
   for (const s of statuses) {
-    const def = builtins.has(s) ? (DEFAULT_STATUS_HEX[s] ?? FALLBACK_HEX) : generated[s]
+    const builtinDef = FOREGROUND_DEFAULT_STATUSES.has(s)
+      ? foreground
+      : (DEFAULT_STATUS_HEX[s] ?? FALLBACK_HEX)
+    const def = builtins.has(s) ? builtinDef : generated[s]
     defaults[s] = def
     display[s] = live[s] ?? def
-    if (live[s]) css[s] = live[s]
-    else if (!builtins.has(s) && def !== DEFAULT_STATUS_HEX[s]) css[s] = def
+    // Every status now emits a stylesheet rule, built-ins included. Before
+    // tone/light themes a built-in with no chosen colour kept the hardcoded
+    // Tailwind classes on each surface; those are dark-only. Routing it here
+    // instead gives it readableTextColor's per-surface text for free, and
+    // makes a built-in and a custom status behave identically.
+    css[s] = live[s] ?? def
   }
   return { css, display, defaults }
 }
