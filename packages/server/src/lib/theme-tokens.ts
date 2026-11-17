@@ -44,8 +44,8 @@ export interface Theme {
  * The theme-id slug format: a lowercase letter or digit, then up to 63 more
  * lowercase letters, digits, underscores or hyphens. The single source for
  * this shape — theme-validate.ts's validateTheme() and the client's
- * local-storage.ts (setThemePreference's guard) both import it, so neither
- * can drift from the other.
+ * local-storage.ts (getThemePrefs, setThemeForAppearance, getLegacyThemeId)
+ * both import it, so neither can drift from the other.
  *
  * theme-files.ts keeps its OWN copy (ID_RE) on purpose: that one gates a
  * filesystem path built from the id, and stays independent as

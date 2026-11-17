@@ -271,9 +271,10 @@ describe("theme picker, per-grid behaviour preserved from the single-grid picker
     // The title's premise ("present but errored") requires the STORED
     // preference itself to point at the errored theme — otherwise
     // selectedId resolves to the valid default, which IS present and NOT
-    // errored, and settings-dialog.tsx:179's error-fallback branch never
-    // runs at all (final whole-plan review, Fix 4: this test used to pass
-    // without exercising the branch it names).
+    // errored, and the error-fallback in settings-dialog.tsx that finds
+    // the first non-errored theme never runs at all (final whole-plan
+    // review, Fix 4: this test used to pass without exercising the branch
+    // it names).
     setThemeForAppearance("dark", "errored-theme")
     renderDialog()
 
