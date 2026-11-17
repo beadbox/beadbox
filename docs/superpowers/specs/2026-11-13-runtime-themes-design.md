@@ -101,6 +101,9 @@ remaining uncertainty.
 4. **A malformed theme is rejected atomically**, falling back to the last good
    theme, with the offending key named.
 5. **Themes hot-reload** when their file changes on disk.
+6. **Appearance is a separate axis from theme choice** (added 2026-11-17, see §6).
+   The user picks a mode — permanently dark, permanently light, or follow the
+   system — and assigns a theme to each of the dark and light slots.
 
 ## §1 Rendering mechanism
 
@@ -209,10 +212,16 @@ pure recolour without restating geometry they do not care about.
 
 ### `appearance` is required and load-bearing
 
-It is not cosmetic metadata. It decides whether `.dark` is applied, which drives
-the `dark:` variants *and* tells the status-colour system which surface to
-contrast against. A theme without it would ship dark-tuned status colours on a
-light background.
+It is not cosmetic metadata: it declares which of the two appearance slots a
+theme is eligible for (§6), so the picker can offer only coherent choices.
+
+**Superseded detail (2026-11-17):** this section originally said `appearance`
+"decides whether `.dark` is applied". That is no longer true, and the change is
+deliberate — see §6. The resolved *mode* now drives the class, and a theme's
+`appearance` governs only slot eligibility. Those two cannot disagree, because
+a theme is only offered for the slot matching its own `appearance`; driving the
+class from the slot rather than from the theme removes the state where they
+could.
 
 ### Colour values: hex and `rgb()` only
 
@@ -369,6 +378,89 @@ cannot be rendered.
 
 Rendering on macOS 13–15. It cannot be tested here, which is precisely why §4.2
 exists. Claiming coverage would be dishonest.
+
+## §6 Appearance mode (added 2026-11-17)
+
+### Why this section exists
+
+The original design treated appearance as a property *of a theme*: the user
+picked one theme from a flat list, and that theme's `appearance` decided whether
+the app rendered dark or light. Implementation completed on that model before the
+gap surfaced: it gives the user no way to say "use this theme when I'm in dark
+and that one when I'm in light", and no way to follow the OS at all. There was no
+`prefers-color-scheme` handling anywhere in the client.
+
+The brainstorming that produced this spec asked what a theme controls and how
+custom themes load, but never asked how the user chooses between light and dark —
+the assumption that appearance rides along with the theme was never examined, so
+the approval it received was not an informed one.
+
+### The model
+
+Three persisted values replace the single stored theme id:
+
+| value | meaning |
+|---|---|
+| `mode` | `"dark"` \| `"light"` \| `"system"` |
+| `darkThemeId` | the theme to apply whenever effective appearance is dark |
+| `lightThemeId` | the theme to apply whenever effective appearance is light |
+
+```
+effective appearance = mode === "system"
+  ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+  : mode
+
+active theme id = effective appearance === "dark" ? darkThemeId : lightThemeId
+```
+
+The effective appearance — not the theme — drives the `.dark` class. §1's hybrid
+mechanism is otherwise unchanged: the class still carries appearance and inline
+style still carries tokens.
+
+### Slot eligibility
+
+The dark slot offers only themes whose `appearance` is `"dark"`; the light slot
+only `"light"`. A dark-appearance theme in the light slot would paint dark tokens
+while the class says light, so `dark:` utilities and the status-colour surface
+would both be wrong. Filtering makes the incoherent state unreachable rather than
+merely discouraged.
+
+### Storage and migration
+
+One key holds all three values, so a change produces one store notification
+rather than three keys that can drift. The legacy `beads-theme` key (a bare id)
+is migrated once: read it, look up that theme's `appearance`, assign it to the
+matching slot, and set `mode` to that appearance — so an existing user's current
+appearance is preserved exactly across the upgrade. The legacy key is then
+removed, since leaving it would be a second source of truth.
+
+A migration that cannot resolve the stored id's appearance (the theme was
+uninstalled) falls back to the built-in defaults rather than guessing.
+
+### System mode
+
+`matchMedia("(prefers-color-scheme: dark)")` plus a `change` listener, following
+the existing `use-viewport.ts` idiom. The switch is live: changing the OS
+appearance while the app is open re-resolves the slot and applies the other
+theme, with no reload.
+
+### Settings UI
+
+The Theme section becomes a mode selector (Dark / Light / System) plus **two**
+theme grids, "Dark theme" and "Light theme", each filtered to its slot. Both
+grids stay visible regardless of the active mode — configuring the light theme
+while sitting in dark mode is the normal case, not an edge one. Everything the
+single grid already does carries over per grid: previews, keyboard navigation,
+the analytics capture, and the non-selectable error card bearing a rejected
+theme's reason.
+
+### Consequence for the unthemed palette
+
+With light as a first-class mode — reachable automatically via `system` — the
+~693 hardcoded Tailwind palette literals outside the 19-token vocabulary stop
+being deferrable. They render at 1.4–2.8:1 on white, and `lib/badge-config.tsx`
+alone paints every row of the main view. This remains separate work, but it is a
+prerequisite for calling light mode usable rather than a nice-to-have.
 
 ## Out of scope
 
