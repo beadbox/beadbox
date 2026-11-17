@@ -1,31 +1,23 @@
-// beadbox-knr: Settings > General offers every built-in theme, in the
-// packaged runtime and in the browser alike; a stored id that isn't
-// currently installed (an uninstalled theme, or a legacy "gray"/"blue"/
-// "green" preference from before runtime themes) shows the default theme
-// selected without the stored preference itself being rewritten; the picker
-// stays keyboard-operable.
+// beadbox-sdd/2026-11-17-appearance-mode task 5: Settings > General now
+// offers a mode selector (dark / light / follow system) plus one slot grid
+// per appearance, each grid listing only the themes for its own appearance
+// and each grid independently keyboard-operable (its own roving tabIndex,
+// so arrow keys in one grid never move focus into the other).
 
 import { afterEach, describe, expect, mock, test } from "bun:test"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { SettingsDialog } from "../components/settings-dialog"
-import {
-  _resetThemePreferenceForTests,
-  getThemePreference,
-  setThemePreference,
-  type ThemeId,
-} from "../lib/local-storage"
+import { _resetThemePreferenceForTests, getThemePrefs } from "../lib/local-storage"
 import { queryClient } from "../lib/query-client"
 import { _resetRpc, _setRpc } from "../lib/rpc"
 import { __resetProbeCache } from "../lib/theme-engine"
 import { themesQueryKey } from "../lib/theme-source"
 
-function renderDialog(theme: ThemeId, onThemeChange = mock(() => {})) {
+function renderDialog() {
   render(
     <SettingsDialog
       open
       onOpenChange={() => {}}
-      theme={theme}
-      onThemeChange={onThemeChange}
       zoomLevel={100}
       onZoomChange={() => {}}
       vimNavigationEnabled
@@ -40,11 +32,7 @@ function renderDialog(theme: ThemeId, onThemeChange = mock(() => {})) {
       onCheckForUpdates={async () => {}}
     />,
   )
-  return onThemeChange
 }
-
-const themeRadios = () =>
-  within(screen.getByRole("radiogroup", { name: "Theme selection" })).getAllByRole("radio")
 
 // _setRpc replaces the whole RemoteApi, not just the namespace under test —
 // unlike _resetRpc's default stub, it leaves every other namespace
@@ -59,6 +47,11 @@ const stubThemesRpc = (list: unknown[]) =>
     bdSettings: { getBdPath: mock(async () => ({ savedPath: null })) },
   } as never)
 
+const darkGrid = () => screen.getByRole("radiogroup", { name: /dark theme/i })
+const lightGrid = () => screen.getByRole("radiogroup", { name: /light theme/i })
+const darkRadios = () => within(darkGrid()).getAllByRole("radio")
+const lightRadios = () => within(lightGrid()).getAllByRole("radio")
+
 afterEach(() => {
   cleanup()
   localStorage.clear()
@@ -72,50 +65,76 @@ afterEach(() => {
   __resetProbeCache()
 })
 
-for (const runtime of ["packaged", "browser"] as const) {
-  describe(`theme picker, ${runtime} runtime`, () => {
-    const setRuntime = () => {
-      if (runtime === "packaged")
-        (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
-    }
-
-    test("offers both built-in themes", () => {
-      setRuntime()
-      renderDialog("beadbox-dark")
-      expect(themeRadios().map((r) => r.getAttribute("aria-label"))).toEqual([
-        "Beadbox Dark theme",
-        "Beadbox Light theme",
-      ])
-    })
-
-    test("a stored unknown theme id shows the default selected", () => {
-      setRuntime()
-      renderDialog("nord")
-      const [dark] = themeRadios()
-      expect(dark.getAttribute("aria-label")).toBe("Beadbox Dark theme")
-      expect(dark.getAttribute("aria-checked")).toBe("true")
-    })
-
-    test("an unresolved preference is displayed, not rewritten", () => {
-      setRuntime()
-      setThemePreference("nord")
-      renderDialog("nord")
-      expect(getThemePreference()).toBe("nord")
-    })
-
-    test("keyboard: arrows move focus between themes, Enter chooses the focused one", () => {
-      setRuntime()
-      const onThemeChange = renderDialog("beadbox-dark")
-      const group = screen.getByRole("radiogroup", { name: "Theme selection" })
-      fireEvent.keyDown(group, { key: "ArrowRight" })
-      fireEvent.keyDown(group, { key: "Enter" })
-      expect(onThemeChange).toHaveBeenCalledTimes(1)
-      expect(onThemeChange).toHaveBeenCalledWith("beadbox-light")
-    })
+test("renders a mode selector with dark, light and system", async () => {
+  stubThemesRpc([])
+  renderDialog()
+  await waitFor(() => {
+    expect(screen.getByRole("radio", { name: /dark mode/i })).toBeDefined()
+    expect(screen.getByRole("radio", { name: /light mode/i })).toBeDefined()
+    expect(screen.getByRole("radio", { name: /system/i })).toBeDefined()
   })
-}
+})
 
-describe("theme picker, user themes", () => {
+test("choosing a mode persists it", async () => {
+  stubThemesRpc([])
+  renderDialog()
+  await waitFor(() => screen.getByRole("radio", { name: /light mode/i }))
+  fireEvent.click(screen.getByRole("radio", { name: /light mode/i }))
+  await waitFor(() => expect(getThemePrefs().mode).toBe("light"))
+})
+
+test("each slot grid offers only themes of its own appearance", async () => {
+  stubThemesRpc([
+    { id: "nord", name: "Nord", appearance: "dark", source: "user" },
+    { id: "solar", name: "Solar", appearance: "light", source: "user" },
+  ])
+  renderDialog()
+
+  await waitFor(() => screen.getByRole("radiogroup", { name: /dark theme/i }))
+  const dark = darkGrid()
+  const light = lightGrid()
+
+  expect(within(dark).getByText("Nord")).toBeDefined()
+  expect(within(dark).queryByText("Solar")).toBeNull()
+  expect(within(light).getByText("Solar")).toBeDefined()
+  expect(within(light).queryByText("Nord")).toBeNull()
+})
+
+test("both grids stay visible in either mode, so the inactive slot stays configurable", async () => {
+  stubThemesRpc([])
+  renderDialog()
+  await waitFor(() => screen.getByRole("radiogroup", { name: /dark theme/i }))
+  fireEvent.click(screen.getByRole("radio", { name: /light mode/i }))
+  await waitFor(() => {
+    expect(screen.getByRole("radiogroup", { name: /dark theme/i })).toBeDefined()
+    expect(screen.getByRole("radiogroup", { name: /light theme/i })).toBeDefined()
+  })
+})
+
+test("selecting in a slot writes only that slot", async () => {
+  stubThemesRpc([{ id: "nord", name: "Nord", appearance: "dark", source: "user" }])
+  renderDialog()
+  await waitFor(() => screen.getByText("Nord"))
+  fireEvent.click(screen.getByRole("radio", { name: /Nord theme/i }))
+  await waitFor(() => {
+    expect(getThemePrefs().darkThemeId).toBe("nord")
+    expect(getThemePrefs().lightThemeId).toBe("beadbox-light")
+  })
+})
+
+test("an invalid theme still shows its reason and stays unselectable, per grid", async () => {
+  stubThemesRpc([
+    { id: "bad", name: "Bad", appearance: "dark", source: "user", error: "colors.ring is missing" },
+  ])
+  renderDialog()
+  await waitFor(() => expect(screen.getByText(/colors\.ring is missing/)).toBeDefined())
+  const card = screen.getByRole("radio", { name: /Bad theme/i }) as HTMLButtonElement
+  expect(card.disabled).toBe(true)
+  fireEvent.click(card)
+  await waitFor(() => expect(getThemePrefs().darkThemeId).toBe("beadbox-dark"))
+})
+
+describe("theme picker, per-grid behaviour preserved from the single-grid picker", () => {
   test("a user theme's preview colours drive its card, and it is selectable", async () => {
     stubThemesRpc([
       {
@@ -133,56 +152,45 @@ describe("theme picker, user themes", () => {
         },
       },
     ])
-    const onThemeChange = renderDialog("beadbox-dark")
+    renderDialog()
 
     await waitFor(() => {
       expect(screen.getByText("Nord")).toBeDefined()
     })
 
-    const nord = themeRadios().find((r) => r.getAttribute("aria-label") === "Nord theme")
+    const nord = darkRadios().find((r) => r.getAttribute("aria-label") === "Nord theme")
     expect(nord).toBeDefined()
     expect((nord as HTMLButtonElement).disabled).toBe(false)
 
     fireEvent.click(nord as HTMLButtonElement)
-    expect(onThemeChange).toHaveBeenCalledWith("nord")
+    await waitFor(() => expect(getThemePrefs().darkThemeId).toBe("nord"))
   })
 
-  // Task 12's placeholder -> resolved-list transition: the picker renders
-  // BUILTIN_ENTRIES synchronously before the sidecar's list resolves, so
-  // the stored theme's own card is not even in the DOM on first render.
-  // The focus-sync fix added in task 13 (resync only on open/theme/id-list
-  // change, not on every themesQueryKey refetch) must still catch THIS
-  // transition — the id list goes from [dark, light] to [dark, light,
-  // nord] — or a stored user-theme preference would be left with the tab
-  // stop stuck on Beadbox Dark despite Nord being the checked radio.
-  test("the tab stop moves onto a stored user theme once the placeholder resolves", async () => {
+  test("keyboard: arrows move focus within a grid, Enter chooses the focused one, independently per grid", async () => {
     stubThemesRpc([
-      {
-        id: "nord",
-        name: "Nord",
-        appearance: "dark",
-        source: "user",
-        preview: {
-          background: "#2e3440",
-          card: "#3b4252",
-          primary: "#88c0d0",
-          secondary: "#434c5e",
-          mutedForeground: "#d8dee9",
-          foreground: "#eceff4",
-        },
-      },
+      { id: "nord", name: "Nord", appearance: "dark", source: "user" },
+      { id: "solar", name: "Solar", appearance: "light", source: "user" },
     ])
-    renderDialog("nord")
+    renderDialog()
+    await waitFor(() => screen.getByText("Nord"))
 
-    await waitFor(() => {
-      expect(screen.getByText("Nord")).toBeDefined()
-    })
+    // Exactly one focusable card per grid before any interaction.
+    expect(darkRadios().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1)
+    expect(lightRadios().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1)
 
-    const nord = themeRadios().find((r) => r.getAttribute("aria-label") === "Nord theme")
-    expect(nord?.getAttribute("aria-checked")).toBe("true")
-    expect(nord?.getAttribute("tabindex")).toBe("0")
-    const dark = themeRadios().find((r) => r.getAttribute("aria-label") === "Beadbox Dark theme")
-    expect(dark?.getAttribute("tabindex")).toBe("-1")
+    fireEvent.keyDown(darkGrid(), { key: "ArrowRight" })
+    fireEvent.keyDown(darkGrid(), { key: "Enter" })
+    await waitFor(() => expect(getThemePrefs().darkThemeId).toBe("nord"))
+    // Moving focus and selecting within the dark grid must not touch the
+    // light slot's own (still-default) selection.
+    expect(getThemePrefs().lightThemeId).toBe("beadbox-light")
+
+    // The light grid's tab stop is untouched by the dark grid's arrow keys —
+    // the two grids are independent Tab stops.
+    const lightDefault = lightRadios().find(
+      (r) => r.getAttribute("aria-label") === "Beadbox Light theme",
+    )
+    expect(lightDefault?.getAttribute("tabindex")).toBe("0")
   })
 
   test("shows an invalid user theme's error instead of hiding it, and keyboard nav skips it", async () => {
@@ -195,31 +203,31 @@ describe("theme picker, user themes", () => {
         error: "colors.ring is missing",
       },
     ])
-    const onThemeChange = renderDialog("beadbox-dark")
+    renderDialog()
 
     await waitFor(() => {
       expect(screen.getByText(/colors\.ring is missing/)).toBeDefined()
     })
 
-    const bad = themeRadios().find((r) => r.getAttribute("aria-label") === "Bad Theme theme")
+    const bad = darkRadios().find((r) => r.getAttribute("aria-label") === "Bad Theme theme")
     expect(bad).toBeDefined()
     expect((bad as HTMLButtonElement).disabled).toBe(true)
     expect(bad?.getAttribute("aria-checked")).toBe("false")
 
     // Never selectable: a click on the disabled card must not choose it.
     fireEvent.click(bad as HTMLButtonElement)
-    expect(onThemeChange).not.toHaveBeenCalled()
+    expect(getThemePrefs().darkThemeId).toBe("beadbox-dark")
 
     // Keyboard nav skips straight over it — focus never lands on the
     // unselectable card, however many times arrow keys are pressed.
-    const group = screen.getByRole("radiogroup", { name: "Theme selection" })
+    const group = darkGrid()
     for (let i = 0; i < 4; i++) {
       fireEvent.keyDown(group, { key: "ArrowRight" })
       expect(bad?.getAttribute("tabindex")).toBe("-1")
     }
   })
 
-  test("stored theme id is present but errored: radiogroup has a usable tab stop (not on the disabled card)", async () => {
+  test("stored theme id is present but errored: each grid keeps a usable tab stop (not on the disabled card)", async () => {
     stubThemesRpc([
       {
         id: "errored-theme",
@@ -229,36 +237,42 @@ describe("theme picker, user themes", () => {
         error: "invalid color format",
       },
     ])
-    renderDialog("errored-theme")
+    renderDialog()
 
     await waitFor(() => {
       expect(screen.getByText(/invalid color format/)).toBeDefined()
     })
 
-    const erroredCard = themeRadios().find(
+    const erroredCard = darkRadios().find(
       (r) => r.getAttribute("aria-label") === "Errored Theme theme",
     )
     expect(erroredCard).toBeDefined()
     expect((erroredCard as HTMLButtonElement).disabled).toBe(true)
 
-    // The radiogroup must have exactly one card with tabIndex="0" for keyboard
-    // accessibility. That card must NOT be disabled — a disabled button is
-    // excluded from the tab order regardless of tabIndex, leaving the entire
-    // radiogroup with no Tab stop at all.
-    const radios = themeRadios()
+    // The dark radiogroup must have exactly one card with tabIndex="0" for
+    // keyboard accessibility. That card must NOT be disabled — a disabled
+    // button is excluded from the tab order regardless of tabIndex, leaving
+    // the entire radiogroup with no Tab stop at all.
+    const radios = darkRadios()
     const focusableCards = radios.filter((r) => r.getAttribute("tabindex") === "0")
     expect(focusableCards).toHaveLength(1)
     expect((focusableCards[0] as HTMLButtonElement).disabled).toBe(false)
 
     // The errored card specifically must not hold the tab stop.
     expect(erroredCard?.getAttribute("tabindex")).toBe("-1")
+
+    // The light grid is unaffected and keeps its own single tab stop too.
+    expect(lightRadios().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1)
   })
 
   // Task 13: hot reload invalidates themesQueryKey so a changed file's
   // error (or updated preview) reaches this picker. That refetch must not
   // yank focus away from a card the user has already arrow-keyed to —
-  // task-12-addendum deferred this exact tradeoff to task 13.
-  test("a themesQueryKey refetch while open does not reset arrow-key focus", async () => {
+  // task-12-addendum deferred this exact tradeoff to task 13. After the
+  // task 5 extraction each grid tracks this independently (its own
+  // prevSyncRef), so the refetch-does-not-reset-focus guarantee is checked
+  // on BOTH grids, not just whichever renders first.
+  test("a themesQueryKey refetch while open does not reset arrow-key focus, in either grid", async () => {
     let round = 0
     const list = mock(async () => {
       round++
@@ -277,6 +291,7 @@ describe("theme picker, user themes", () => {
             foreground: "#eceff4",
           },
         },
+        { id: "bbb", name: "Bbb", appearance: "light", source: "user" },
       ]
     })
     _setRpc({
@@ -285,21 +300,24 @@ describe("theme picker, user themes", () => {
       bdSettings: { getBdPath: mock(async () => ({ savedPath: null })) },
     } as never)
 
-    renderDialog("beadbox-dark")
+    renderDialog()
     await waitFor(() => {
       expect(screen.getByText("Aaa")).toBeDefined()
     })
 
-    const group = screen.getByRole("radiogroup", { name: "Theme selection" })
-    // beadbox-dark, beadbox-light, Aaa — arrow right twice lands on Aaa.
-    fireEvent.keyDown(group, { key: "ArrowRight" })
-    fireEvent.keyDown(group, { key: "ArrowRight" })
-    const aaa = themeRadios().find((r) => r.getAttribute("aria-label") === "Aaa theme")
+    // beadbox-dark, Aaa in the dark grid — arrow right once lands on Aaa.
+    fireEvent.keyDown(darkGrid(), { key: "ArrowRight" })
+    const aaa = darkRadios().find((r) => r.getAttribute("aria-label") === "Aaa theme")
     expect(aaa?.getAttribute("tabindex")).toBe("0")
 
-    // Simulate the hot-reload invalidation (same id, changed preview
-    // colour) while the dialog stays open and the selected theme (prop
-    // `theme`) is unchanged.
+    // beadbox-light, Bbb in the light grid — arrow right once lands on Bbb.
+    fireEvent.keyDown(lightGrid(), { key: "ArrowRight" })
+    const bbb = lightRadios().find((r) => r.getAttribute("aria-label") === "Bbb theme")
+    expect(bbb?.getAttribute("tabindex")).toBe("0")
+
+    // Simulate the hot-reload invalidation (same ids, changed preview
+    // colour on Aaa) while the dialog stays open and neither slot's
+    // selection changes.
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: themesQueryKey })
     })
@@ -307,18 +325,26 @@ describe("theme picker, user themes", () => {
       expect(list).toHaveBeenCalledTimes(2)
     })
 
-    // Focus must still be on Aaa, not reset back to beadbox-dark.
-    const aaaAfter = themeRadios().find((r) => r.getAttribute("aria-label") === "Aaa theme")
+    // Focus must still be on Aaa and Bbb, not reset back to the defaults,
+    // in both grids independently.
+    const aaaAfter = darkRadios().find((r) => r.getAttribute("aria-label") === "Aaa theme")
     expect(aaaAfter?.getAttribute("tabindex")).toBe("0")
-    const darkAfter = themeRadios().find(
+    const darkDefaultAfter = darkRadios().find(
       (r) => r.getAttribute("aria-label") === "Beadbox Dark theme",
     )
-    expect(darkAfter?.getAttribute("tabindex")).toBe("-1")
+    expect(darkDefaultAfter?.getAttribute("tabindex")).toBe("-1")
+
+    const bbbAfter = lightRadios().find((r) => r.getAttribute("aria-label") === "Bbb theme")
+    expect(bbbAfter?.getAttribute("tabindex")).toBe("0")
+    const lightDefaultAfter = lightRadios().find(
+      (r) => r.getAttribute("aria-label") === "Beadbox Light theme",
+    )
+    expect(lightDefaultAfter?.getAttribute("tabindex")).toBe("-1")
   })
 })
 
 describe("theme picker, theming unavailable", () => {
-  test("explains why, instead of showing cards", async () => {
+  test("explains why, instead of showing cards or a mode selector", async () => {
     __resetProbeCache()
     const original = window.getComputedStyle
     try {
@@ -327,7 +353,8 @@ describe("theme picker, theming unavailable", () => {
         backgroundColor: "rgba(0, 0, 0, 0)",
         getPropertyValue: () => "",
       })
-      renderDialog("beadbox-dark")
+      stubThemesRpc([])
+      renderDialog()
       await waitFor(() => {
         expect(screen.getByText(/not supported/i)).toBeDefined()
       })

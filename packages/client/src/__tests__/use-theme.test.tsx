@@ -8,15 +8,18 @@
 // Covers the design in
 // .superpowers/sdd/2026-11-13-runtime-themes/task-11-addendum.md: the
 // theme preference is ONE observable store (local-storage.ts), not local
-// state owned by this hook — so a write from any consumer (this hook, or
-// usePreferences) must reach every other subscriber without a reload.
+// state owned by this hook — so a write from any consumer must reach every
+// other subscriber without a reload. (usePreferences itself no longer
+// subscribes to theme state as of task 5 — the settings dialog reads/writes
+// the store directly via useThemePreference() — so the "independent
+// subscribers" below are this hook's own Probe and a raw useThemePreference
+// subscriber.)
 
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { type ReactNode, StrictMode } from "react"
 import { SettingsDialog } from "../components/settings-dialog"
-import { usePreferences } from "../hooks/use-preferences"
 import {
   _resetListenStderrForTheme,
   _resetRuntimeCheckForTheme,
@@ -72,11 +75,6 @@ function SetterProbe() {
       </button>
     </div>
   )
-}
-
-function PreferencesProbe() {
-  const { theme } = usePreferences()
-  return <div data-testid="prefs-out">{theme}</div>
 }
 
 function SubscriptionProbe() {
@@ -313,27 +311,24 @@ describe("useTheme", () => {
       withQuery(
         <div>
           <Probe />
-          <PreferencesProbe />
           <SubscriptionProbe />
         </div>,
       ),
     )
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-dark:true")
-      expect(getByTestId("prefs-out").textContent).toBe("beadbox-dark")
       expect(getByTestId("subscription-out").textContent).toBe("beadbox-dark")
     })
 
     // Change made through the OTHER subscriber's channel (direct storage
-    // write, standing in for a change made by usePreferences's
-    // handleThemeChange, which also just calls setThemeForAppearance).
+    // write, standing in for a change made by the settings dialog, which
+    // also just calls setThemeForAppearance).
     act(() => {
       setThemeForAppearance("dark", "beadbox-light")
     })
 
     await waitFor(() => {
       expect(getByTestId("out").textContent).toBe("beadbox-light:true")
-      expect(getByTestId("prefs-out").textContent).toBe("beadbox-light")
       expect(getByTestId("subscription-out").textContent).toBe("beadbox-light")
     })
   })
@@ -789,8 +784,6 @@ describe("useTheme + settings dialog (task 13 fix 5)", () => {
         <SettingsDialog
           open
           onOpenChange={() => {}}
-          theme="custom1"
-          onThemeChange={() => {}}
           zoomLevel={100}
           onZoomChange={() => {}}
           vimNavigationEnabled

@@ -27,6 +27,7 @@ import {
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
+import { useThemePreference } from "../hooks/use-theme-preference"
 import {
   clearCache,
   getAnalyticsEnabled,
@@ -110,6 +111,282 @@ function themeIds(list: readonly ThemeEntry[]): string {
   return list.map((t) => t.id).join("\0")
 }
 
+/**
+ * One appearance slot's theme picker (dark or light). Each grid owns its
+ * own roving tabIndex and its own prevSyncRef below, so arrow keys stay
+ * within one slot and the two grids are independent Tab stops — sharing
+ * either between the two grids would let a change in one slot's selection
+ * or id list resync the other slot's focus too.
+ *
+ * `open` is threaded in (rather than read from context) so this grid's
+ * own focus-sync effect can tell a fresh dialog-open from an in-place
+ * refetch, exactly as the single-grid version did before this component
+ * was extracted.
+ */
+function ThemeSlotGrid({
+  label,
+  themes,
+  selectedId,
+  onSelect,
+  open,
+}: {
+  label: string
+  themes: readonly ThemeEntry[]
+  selectedId: ThemeId
+  onSelect: (id: ThemeId) => void
+  open: boolean
+}) {
+  const [focusedIndex, setFocusedIndex] = useState(0)
+  const cardRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  // Sync focused index to the current selection — on the open transition,
+  // when `selectedId` itself changes (a deliberate selection, by click or
+  // by keyboard), or when the SET of this grid's own theme ids changes
+  // (the one-time placeholder-to-resolved transition on open —
+  // BUILTIN_ENTRIES only, then the full list — and a theme file being
+  // added/removed shift indices under the user either way, so
+  // re-resolving is correct there too). Deliberately NOT keyed on
+  // `themes` array identity alone: task 13 made the list refetch while
+  // the dialog stays open (hot reload invalidates themesQueryKey so a
+  // changed file's rejection reason, or updated preview colours, reach
+  // the picker — see task-13-addendum), and that refetch can produce a
+  // new array with the SAME ids. Resyncing on every such identity change
+  // would reset focusedIndex and yank the user's arrow-key focus out from
+  // under them mid-session (task-12-addendum deferred this exact tradeoff
+  // to task 13) — so an ids-unchanged refetch is the one case that must
+  // NOT resync.
+  const prevSyncRef = useRef<{ open: boolean; selectedId: ThemeId; ids: string }>({
+    open: false,
+    selectedId,
+    ids: themeIds(themes),
+  })
+  useEffect(() => {
+    const ids = themeIds(themes)
+    const openedNow = open && !prevSyncRef.current.open
+    const selectedChanged = selectedId !== prevSyncRef.current.selectedId
+    const idsChanged = ids !== prevSyncRef.current.ids
+    if (open && (openedNow || selectedChanged || idsChanged)) {
+      const resolved = resolveThemeId(
+        selectedId,
+        themes.map((o) => o.id),
+      )
+      let idx = themes.findIndex((t) => t.id === resolved)
+      // A roving tabIndex on a disabled card is inert — disabled buttons are
+      // excluded from the tab order regardless of tabIndex — which would leave
+      // the radiogroup with no Tab stop at all. Fall back to the first
+      // selectable entry.
+      if (idx < 0 || themes[idx]?.error) idx = themes.findIndex((t) => !t.error)
+      setFocusedIndex(idx >= 0 ? idx : 0)
+    }
+    prevSyncRef.current = { open, selectedId, ids }
+  }, [open, selectedId, themes])
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (themes.length === 0) return
+      let nextIndex = focusedIndex
+
+      switch (e.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+          e.preventDefault()
+          // Invalid (errored) entries are shown but are not a choice, so
+          // arrow navigation skips over them rather than landing focus on a
+          // card that cannot be selected.
+          nextIndex = nextSelectableThemeIndex(themes, focusedIndex, 1)
+          break
+        case "ArrowLeft":
+        case "ArrowUp":
+          e.preventDefault()
+          nextIndex = nextSelectableThemeIndex(themes, focusedIndex, -1)
+          break
+        case "Enter":
+        case " ": {
+          e.preventDefault()
+          const target = themes[focusedIndex]
+          // Belt-and-suspenders: arrow nav already skips errored entries, so
+          // focus should never land here, but a disabled/unselectable entry
+          // must never fire onSelect or the analytics capture.
+          if (!target || target.error) return
+          if (getAnalyticsEnabled()) {
+            safeCapture("app_setting_changed", {
+              setting: "theme",
+              old_value: selectedId,
+              new_value: target.id,
+            })
+          }
+          onSelect(target.id)
+          return
+        }
+        default:
+          return
+      }
+
+      if (nextIndex === focusedIndex) return
+      setFocusedIndex(nextIndex)
+      cardRefs.current[nextIndex]?.focus()
+    },
+    [focusedIndex, onSelect, selectedId, themes],
+  )
+
+  return (
+    <div className="mb-6">
+      <p className="text-xs font-medium text-muted-foreground mb-2">{label}</p>
+      <div
+        role="radiogroup"
+        aria-label={`${label} theme`}
+        className="grid grid-cols-3 gap-3 max-w-lg"
+        onKeyDown={handleKeyDown}
+      >
+        {themes.map((t, i) => {
+          const selected =
+            !t.error &&
+            resolveThemeId(
+              selectedId,
+              themes.map((o) => o.id),
+            ) === t.id
+          return (
+            <button
+              key={t.id}
+              ref={(el) => {
+                cardRefs.current[i] = el
+              }}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-disabled={t.error ? true : undefined}
+              aria-label={`${t.name} theme`}
+              disabled={Boolean(t.error)}
+              tabIndex={focusedIndex === i ? 0 : -1}
+              onClick={() => {
+                // disabled already blocks the native click, but an
+                // invalid entry must never select or capture —
+                // belt and suspenders.
+                if (t.error) return
+                if (getAnalyticsEnabled()) {
+                  safeCapture("app_setting_changed", {
+                    setting: "theme",
+                    old_value: selectedId,
+                    new_value: t.id,
+                  })
+                }
+                onSelect(t.id)
+              }}
+              className={cn(
+                "relative rounded-lg border-2 p-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                t.error && "cursor-not-allowed border-transparent opacity-60",
+                !t.error &&
+                  (selected
+                    ? "cursor-pointer border-primary ring-1 ring-primary/30"
+                    : "cursor-pointer border-transparent hover:border-muted-foreground/30"),
+              )}
+            >
+              {t.preview ? (
+                <div
+                  className="rounded-md overflow-hidden aspect-[4/3]"
+                  style={{ backgroundColor: t.preview.background }}
+                >
+                  {/* Header bar */}
+                  <div
+                    className="flex items-center gap-1 px-2 py-1.5"
+                    style={{ borderBottom: `1px solid ${t.preview.secondary}` }}
+                  >
+                    <div className="flex gap-0.5">
+                      <div
+                        className="w-1.5 h-1.5 rounded-full"
+                        style={{ backgroundColor: t.preview.primary, opacity: 0.8 }}
+                      />
+                      <div
+                        className="w-1.5 h-1.5 rounded-full"
+                        style={{ backgroundColor: t.preview.primary, opacity: 0.5 }}
+                      />
+                      <div
+                        className="w-1.5 h-1.5 rounded-full"
+                        style={{ backgroundColor: t.preview.primary, opacity: 0.3 }}
+                      />
+                    </div>
+                    <div
+                      className="h-1.5 w-8 rounded-sm ml-1"
+                      style={{
+                        backgroundColor: t.preview.mutedForeground,
+                        opacity: 0.4,
+                      }}
+                    />
+                  </div>
+                  {/* Content rows */}
+                  <div className="px-2 py-1.5 space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className="h-1.5 w-6 rounded-sm"
+                        style={{ backgroundColor: t.preview.primary, opacity: 0.7 }}
+                      />
+                      <div
+                        className="h-1.5 flex-1 rounded-sm"
+                        style={{
+                          backgroundColor: t.preview.mutedForeground,
+                          opacity: 0.3,
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className="h-1.5 w-6 rounded-sm"
+                        style={{ backgroundColor: t.preview.secondary }}
+                      />
+                      <div
+                        className="h-1.5 flex-1 rounded-sm"
+                        style={{
+                          backgroundColor: t.preview.mutedForeground,
+                          opacity: 0.2,
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className="h-1.5 w-6 rounded-sm"
+                        style={{ backgroundColor: t.preview.secondary }}
+                      />
+                      <div
+                        className="h-1.5 w-3/4 rounded-sm"
+                        style={{
+                          backgroundColor: t.preview.mutedForeground,
+                          opacity: 0.2,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                // Invalid theme: no colours to preview. Show why it
+                // failed instead of hiding the entry or rendering a
+                // broken mini-UI (task-12-addendum requirement).
+                <div className="rounded-md aspect-[4/3] border border-dashed border-destructive/40 p-2 flex items-center">
+                  <p className="text-[10px] leading-tight text-destructive">{t.error}</p>
+                </div>
+              )}
+              {/* Selected indicator */}
+              {selected && (
+                <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+                  <Check className="w-2.5 h-2.5 text-primary-foreground" />
+                </div>
+              )}
+              {/* Theme label */}
+              <div
+                className={cn(
+                  "text-xs text-center mt-2 pb-1 font-medium",
+                  selected ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {t.name}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 const FREQUENCY_OPTIONS: { value: UpdateCheckFrequency; label: string }[] = [
   { value: 1800000, label: "Every 30 minutes" },
   { value: 3600000, label: "Every hour" },
@@ -120,8 +397,6 @@ const FREQUENCY_OPTIONS: { value: UpdateCheckFrequency; label: string }[] = [
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  theme: ThemeId
-  onThemeChange: (theme: ThemeId) => void
   zoomLevel: number
   onZoomChange: (level: number) => void
   databasePath?: string
@@ -161,8 +436,6 @@ export function SettingsDialog(props: SettingsDialogProps) {
 function SettingsDialogContent({
   open,
   onOpenChange,
-  theme,
-  onThemeChange,
   zoomLevel,
   onZoomChange,
   databasePath,
@@ -187,8 +460,6 @@ function SettingsDialogContent({
     setIsTauri(!!(window as any).__TAURI_INTERNALS__)
   }, [])
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
-  const [focusedThemeIndex, setFocusedThemeIndex] = useState(0)
-  const themeCardRefs = useRef<(HTMLButtonElement | null)[]>([])
   // Lazy-once: the probe is memoised in theme-engine.ts and must not run per
   // render. Trap 1 (task-12-addendum): do NOT call useTheme() here — it runs
   // the apply effect, and this dialog must not become a second applier.
@@ -199,6 +470,9 @@ function SettingsDialogContent({
   // back from the sidecar.
   const { data: themesData } = useQuery({ queryKey: themesQueryKey, queryFn: listThemes })
   const themes: readonly ThemeEntry[] = themesData ?? BUILTIN_ENTRIES
+  const darkThemes = themes.filter((t) => t.appearance === "dark")
+  const lightThemes = themes.filter((t) => t.appearance === "light")
+  const { mode, darkThemeId, lightThemeId, setMode, setThemeForAppearance } = useThemePreference()
   const [analyticsEnabled, setAnalyticsEnabledState] = useState(true)
 
   // Track whether we just did a manual check (to show result feedback)
@@ -254,95 +528,6 @@ function SettingsDialogContent({
       posthog.opt_out_capturing()
     }
   }, [analyticsEnabled])
-
-  // Sync focused index to current theme — on the open transition, when
-  // `theme` itself changes (a deliberate selection, by click or by
-  // keyboard), or when the SET of theme ids changes (the one-time
-  // placeholder-to-resolved transition on open — BUILTIN_ENTRIES only,
-  // then the full list — and a theme file being added/removed shift
-  // indices under the user either way, so re-resolving is correct there
-  // too). Deliberately NOT keyed on `themes` array identity alone: task 13
-  // made the list refetch while the dialog stays open (hot reload
-  // invalidates themesQueryKey so a changed file's rejection reason, or
-  // updated preview colours, reach the picker — see task-13-addendum), and
-  // that refetch can produce a new array with the SAME ids. Resyncing on
-  // every such identity change would reset focusedThemeIndex and yank the
-  // user's arrow-key focus out from under them mid-session
-  // (task-12-addendum deferred this exact tradeoff to task 13) — so an
-  // ids-unchanged refetch is the one case that must NOT resync.
-  const prevSyncRef = useRef<{ open: boolean; theme: ThemeId; ids: string }>({
-    open: false,
-    theme,
-    ids: themeIds(themes),
-  })
-  useEffect(() => {
-    const ids = themeIds(themes)
-    const openedNow = open && !prevSyncRef.current.open
-    const themeChanged = theme !== prevSyncRef.current.theme
-    const idsChanged = ids !== prevSyncRef.current.ids
-    if (open && (openedNow || themeChanged || idsChanged)) {
-      const resolved = resolveThemeId(
-        theme,
-        themes.map((o) => o.id),
-      )
-      let idx = themes.findIndex((t) => t.id === resolved)
-      // A roving tabIndex on a disabled card is inert — disabled buttons are
-      // excluded from the tab order regardless of tabIndex — which would leave
-      // the radiogroup with no Tab stop at all. Fall back to the first
-      // selectable entry.
-      if (idx < 0 || themes[idx]?.error) idx = themes.findIndex((t) => !t.error)
-      setFocusedThemeIndex(idx >= 0 ? idx : 0)
-    }
-    prevSyncRef.current = { open, theme, ids }
-  }, [open, theme, themes])
-
-  const handleThemeKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (themes.length === 0) return
-      let nextIndex = focusedThemeIndex
-
-      switch (e.key) {
-        case "ArrowRight":
-        case "ArrowDown":
-          e.preventDefault()
-          // Invalid (errored) entries are shown but are not a choice, so
-          // arrow navigation skips over them rather than landing focus on a
-          // card that cannot be selected.
-          nextIndex = nextSelectableThemeIndex(themes, focusedThemeIndex, 1)
-          break
-        case "ArrowLeft":
-        case "ArrowUp":
-          e.preventDefault()
-          nextIndex = nextSelectableThemeIndex(themes, focusedThemeIndex, -1)
-          break
-        case "Enter":
-        case " ": {
-          e.preventDefault()
-          const target = themes[focusedThemeIndex]
-          // Belt-and-suspenders: arrow nav already skips errored entries, so
-          // focus should never land here, but a disabled/unselectable entry
-          // must never fire onThemeChange or the analytics capture.
-          if (!target || target.error) return
-          if (getAnalyticsEnabled()) {
-            safeCapture("app_setting_changed", {
-              setting: "theme",
-              old_value: theme,
-              new_value: target.id,
-            })
-          }
-          onThemeChange(target.id)
-          return
-        }
-        default:
-          return
-      }
-
-      if (nextIndex === focusedThemeIndex) return
-      setFocusedThemeIndex(nextIndex)
-      themeCardRefs.current[nextIndex]?.focus()
-    },
-    [focusedThemeIndex, onThemeChange, theme, themes],
-  )
 
   const [appLogDir, setAppLogDir] = useState<string | null>(null)
 
@@ -430,7 +615,7 @@ function SettingsDialogContent({
                 <div>
                   <h3 className="text-lg font-semibold mb-1">Theme</h3>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Choose your preferred color scheme
+                    Choose when to use light or dark appearance, and which theme to use for each.
                   </p>
                   {!themingAvailable ? (
                     <div
@@ -445,159 +630,55 @@ function SettingsDialogContent({
                       </p>
                     </div>
                   ) : (
-                    <div
-                      role="radiogroup"
-                      aria-label="Theme selection"
-                      className="grid grid-cols-3 gap-3 max-w-lg"
-                      onKeyDown={handleThemeKeyDown}
-                    >
-                      {themes.map((t, i) => {
-                        const selected =
-                          !t.error &&
-                          resolveThemeId(
-                            theme,
-                            themes.map((o) => o.id),
-                          ) === t.id
-                        return (
+                    <>
+                      <div
+                        role="radiogroup"
+                        aria-label="Appearance mode"
+                        className="flex gap-2 mb-6"
+                      >
+                        {(["dark", "light", "system"] as const).map((m) => (
                           <button
-                            key={t.id}
-                            ref={(el) => {
-                              themeCardRefs.current[i] = el
-                            }}
+                            key={m}
                             type="button"
                             role="radio"
-                            aria-checked={selected}
-                            aria-disabled={t.error ? true : undefined}
-                            aria-label={`${t.name} theme`}
-                            disabled={Boolean(t.error)}
-                            tabIndex={focusedThemeIndex === i ? 0 : -1}
+                            aria-checked={mode === m}
+                            aria-label={m === "system" ? "Follow system appearance" : `${m} mode`}
                             onClick={() => {
-                              // disabled already blocks the native click, but an
-                              // invalid entry must never select or capture —
-                              // belt and suspenders.
-                              if (t.error) return
                               if (getAnalyticsEnabled()) {
                                 safeCapture("app_setting_changed", {
-                                  setting: "theme",
-                                  old_value: theme,
-                                  new_value: t.id,
+                                  setting: "theme_mode",
+                                  old_value: mode,
+                                  new_value: m,
                                 })
                               }
-                              onThemeChange(t.id)
+                              setMode(m)
                             }}
                             className={cn(
-                              "relative rounded-lg border-2 p-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                              t.error && "cursor-not-allowed border-transparent opacity-60",
-                              !t.error &&
-                                (selected
-                                  ? "cursor-pointer border-primary ring-1 ring-primary/30"
-                                  : "cursor-pointer border-transparent hover:border-muted-foreground/30"),
+                              "rounded-md border px-3 py-1.5 text-sm capitalize transition-colors",
+                              mode === m
+                                ? "border-primary bg-primary/10"
+                                : "border-border hover:bg-accent",
                             )}
                           >
-                            {t.preview ? (
-                              <div
-                                className="rounded-md overflow-hidden aspect-[4/3]"
-                                style={{ backgroundColor: t.preview.background }}
-                              >
-                                {/* Header bar */}
-                                <div
-                                  className="flex items-center gap-1 px-2 py-1.5"
-                                  style={{ borderBottom: `1px solid ${t.preview.secondary}` }}
-                                >
-                                  <div className="flex gap-0.5">
-                                    <div
-                                      className="w-1.5 h-1.5 rounded-full"
-                                      style={{ backgroundColor: t.preview.primary, opacity: 0.8 }}
-                                    />
-                                    <div
-                                      className="w-1.5 h-1.5 rounded-full"
-                                      style={{ backgroundColor: t.preview.primary, opacity: 0.5 }}
-                                    />
-                                    <div
-                                      className="w-1.5 h-1.5 rounded-full"
-                                      style={{ backgroundColor: t.preview.primary, opacity: 0.3 }}
-                                    />
-                                  </div>
-                                  <div
-                                    className="h-1.5 w-8 rounded-sm ml-1"
-                                    style={{
-                                      backgroundColor: t.preview.mutedForeground,
-                                      opacity: 0.4,
-                                    }}
-                                  />
-                                </div>
-                                {/* Content rows */}
-                                <div className="px-2 py-1.5 space-y-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <div
-                                      className="h-1.5 w-6 rounded-sm"
-                                      style={{ backgroundColor: t.preview.primary, opacity: 0.7 }}
-                                    />
-                                    <div
-                                      className="h-1.5 flex-1 rounded-sm"
-                                      style={{
-                                        backgroundColor: t.preview.mutedForeground,
-                                        opacity: 0.3,
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    <div
-                                      className="h-1.5 w-6 rounded-sm"
-                                      style={{ backgroundColor: t.preview.secondary }}
-                                    />
-                                    <div
-                                      className="h-1.5 flex-1 rounded-sm"
-                                      style={{
-                                        backgroundColor: t.preview.mutedForeground,
-                                        opacity: 0.2,
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    <div
-                                      className="h-1.5 w-6 rounded-sm"
-                                      style={{ backgroundColor: t.preview.secondary }}
-                                    />
-                                    <div
-                                      className="h-1.5 w-3/4 rounded-sm"
-                                      style={{
-                                        backgroundColor: t.preview.mutedForeground,
-                                        opacity: 0.2,
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            ) : (
-                              // Invalid theme: no colours to preview. Show why it
-                              // failed instead of hiding the entry or rendering a
-                              // broken mini-UI (task-12-addendum requirement).
-                              <div className="rounded-md aspect-[4/3] border border-dashed border-destructive/40 p-2 flex items-center">
-                                <p className="text-[10px] leading-tight text-destructive">
-                                  {t.error}
-                                </p>
-                              </div>
-                            )}
-                            {/* Selected indicator */}
-                            {selected && (
-                              <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
-                                <Check className="w-2.5 h-2.5 text-primary-foreground" />
-                              </div>
-                            )}
-                            {/* Theme label */}
-                            <div
-                              className={cn(
-                                "text-xs text-center mt-2 pb-1 font-medium",
-                                selected ? "text-foreground" : "text-muted-foreground",
-                              )}
-                            >
-                              {t.name}
-                            </div>
+                            {m === "system" ? "System" : m}
                           </button>
-                        )
-                      })}
-                    </div>
+                        ))}
+                      </div>
+                      <ThemeSlotGrid
+                        label="Dark"
+                        themes={darkThemes}
+                        selectedId={darkThemeId}
+                        onSelect={(id) => setThemeForAppearance("dark", id)}
+                        open={open}
+                      />
+                      <ThemeSlotGrid
+                        label="Light"
+                        themes={lightThemes}
+                        selectedId={lightThemeId}
+                        onSelect={(id) => setThemeForAppearance("light", id)}
+                        open={open}
+                      />
+                    </>
                   )}
                 </div>
 

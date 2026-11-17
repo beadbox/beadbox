@@ -18,12 +18,10 @@ import {
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { safeCapture } from "../lib/posthog-safe"
 import type { Filters, SortOption } from "../lib/types"
-import { useThemePreference } from "./use-theme-preference"
 
 export function usePreferences() {
   // beadbox-sdd/2026-11-13-runtime-themes task 11: theme preference is a
@@ -33,21 +31,10 @@ export function usePreferences() {
   // keeps usePreferences's independent call sites in sync with any change
   // made through the store, including from use-theme.ts itself.
   //
-  // beadbox-sdd/2026-11-17-appearance-mode task 4 (ruling B): the store now
-  // has two slots (dark/light) plus a mode, but SettingsDialog still shows
-  // a single grid at this point in the plan (Task 5 moves it to the new
-  // model and removes these two exports along with its props). `theme` is
-  // the derived id for whichever appearance is CURRENTLY resolved, and
-  // `handleThemeChange` assigns a new id to that same currently-resolved
-  // slot — preserving both names, types and behaviour for the single-grid
-  // dialog so none of its seven call sites need to change here.
-  const { activeThemeId: theme, appearance, setThemeForAppearance } = useThemePreference()
-  const handleThemeChange = useCallback(
-    (id: ThemeId) => {
-      setThemeForAppearance(appearance, id)
-    },
-    [appearance, setThemeForAppearance],
-  )
+  // beadbox-sdd/2026-11-17-appearance-mode task 5: the settings dialog now
+  // reads/writes the two-slot store directly via useThemePreference(), so
+  // usePreferences no longer derives or exposes a `theme`/`handleThemeChange`
+  // pair for it.
   const [zoomLevel, setZoomLevelState] = useState(100)
   const [isTauri, setIsTauri] = useState(false)
   const isTauriRef = useRef(false)
@@ -194,8 +181,6 @@ export function usePreferences() {
     setFilters,
     sort,
     setSort,
-    theme,
-    handleThemeChange,
     zoomLevel,
     handleZoomChange,
     filterBarVisible,

@@ -31,7 +31,6 @@ import { useHasTrains } from "@/hooks/use-has-trains"
 import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { useActiveWorkspace } from "../hooks/use-active-workspace"
 import { useAppHealth } from "../hooks/use-app-health"
-import { useThemePreference } from "../hooks/use-theme-preference"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import {
   getAnalyticsEnabled,
@@ -47,7 +46,6 @@ import {
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { safeCapture } from "../lib/posthog-safe"
@@ -209,17 +207,6 @@ export function FormulasView() {
   // Settings
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
-  // beadbox-sdd/2026-11-17-appearance-mode task 4 (ruling B): `theme` is
-  // the derived id for the currently-resolved appearance; `handleThemeChange`
-  // assigns a new id to that same slot — see use-preferences.ts for the
-  // identical derivation.
-  const { activeThemeId: theme, appearance, setThemeForAppearance } = useThemePreference()
-  const handleThemeChange = useCallback(
-    (id: ThemeId) => {
-      setThemeForAppearance(appearance, id)
-    },
-    [appearance, setThemeForAppearance],
-  )
   const [zoomLevel, setZoomLevelState] = useState(100)
   const isTauriRef = useRef(false)
   const [vimEnabled, setVimEnabledState] = useState(true)
@@ -838,8 +825,6 @@ export function FormulasView() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        theme={theme}
-        onThemeChange={handleThemeChange}
         zoomLevel={zoomLevel}
         onZoomChange={handleZoomChange}
         databasePath={databasePath}

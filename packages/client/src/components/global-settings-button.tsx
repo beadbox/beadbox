@@ -52,8 +52,6 @@ export function GlobalSettingsButton() {
       <SettingsDialog
         open={open}
         onOpenChange={setOpen}
-        theme={prefs.theme}
-        onThemeChange={prefs.handleThemeChange}
         zoomLevel={prefs.zoomLevel}
         onZoomChange={prefs.handleZoomChange}
         vimNavigationEnabled={prefs.vimEnabled}

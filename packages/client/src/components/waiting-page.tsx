@@ -381,8 +381,6 @@ export function WaitingPage() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        theme={prefs.theme}
-        onThemeChange={prefs.handleThemeChange}
         zoomLevel={prefs.zoomLevel}
         onZoomChange={prefs.handleZoomChange}
         databasePath={dbPath}

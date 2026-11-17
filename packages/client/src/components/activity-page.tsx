@@ -10,7 +10,6 @@ import { useAppHealth } from "../hooks/use-app-health"
 import { useCrossFilter } from "../hooks/use-cross-filter"
 import { useDevConsole } from "../hooks/use-dev-console"
 import { useDevConsoleTaps } from "../hooks/use-dev-console-taps"
-import { useThemePreference } from "../hooks/use-theme-preference"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import { deriveAgentStates, derivePipelineStages, toCanonicalStage } from "../lib/activity-utils"
 import {
@@ -24,7 +23,6 @@ import {
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeId,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
@@ -107,17 +105,6 @@ function ActivityViewer() {
   // Settings and app-level state
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
-  // beadbox-sdd/2026-11-17-appearance-mode task 4 (ruling B): `theme` is
-  // the derived id for the currently-resolved appearance; `handleThemeChange`
-  // assigns a new id to that same slot — see use-preferences.ts for the
-  // identical derivation.
-  const { activeThemeId: theme, appearance, setThemeForAppearance } = useThemePreference()
-  const handleThemeChange = useCallback(
-    (id: ThemeId) => {
-      setThemeForAppearance(appearance, id)
-    },
-    [appearance, setThemeForAppearance],
-  )
   const [zoomLevel, setZoomLevelState] = useState(100)
   const isTauriRef = useRef(false)
   const [vimEnabled, setVimEnabledState] = useState(true)
@@ -746,8 +733,6 @@ function ActivityViewer() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        theme={theme}
-        onThemeChange={handleThemeChange}
         zoomLevel={zoomLevel}
         onZoomChange={handleZoomChange}
         databasePath={currentWorkspace?.databasePath}

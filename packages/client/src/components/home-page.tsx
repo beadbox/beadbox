@@ -4,25 +4,11 @@ import { getStatusDisplayConfig } from "@/components/bead-detail-helpers"
 import { BeadDetailPanel } from "@/components/bead-detail-panel"
 import { BeadTable } from "@/components/bead-table"
 import { BeadTableBulkToolbar } from "@/components/bead-table-bulk-toolbar"
+import { DevConsole } from "@/components/dev-console"
 import { EpicTree } from "@/components/epic-tree"
 import { FilterBar, type Filters } from "@/components/filter-bar"
 import { GroupedStatusView } from "@/components/grouped-status-view"
 import { Header } from "@/components/header"
-import {
-  getAnalyticsEnabled,
-  getArchiveExpanded,
-  markAllBeadsRead,
-  markBeadRead,
-  setArchiveExpanded,
-} from "@/lib/local-storage"
-import { summarizeBulkStatus } from "@/lib/bulk-status-summary"
-import { safeCapture } from "@/lib/posthog-safe"
-import { isMoleculePresentation } from "@/lib/molecule-presentation"
-import { rpc } from "@/lib/rpc"
-import { sortEpics } from "@/lib/sort"
-import { useSubscriptionChangeSignal } from "@/lib/subscribe"
-
-import { DevConsole } from "@/components/dev-console"
 import { useBdHealth, useWorkspaceGate } from "@/components/startup-gate"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { useAppHealth } from "@/hooks/use-app-health"
@@ -31,11 +17,24 @@ import { useBeadSelection } from "@/hooks/use-bead-selection"
 import { useDevConsole } from "@/hooks/use-dev-console"
 import { useDevConsoleTaps } from "@/hooks/use-dev-console-taps"
 import { useEpicNavigation } from "@/hooks/use-epic-navigation"
-import { usePreferences } from "@/hooks/use-preferences"
 import { useLabelChoiceForWorkspace } from "@/hooks/use-label-choice-for-workspace"
+import { usePreferences } from "@/hooks/use-preferences"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { useViewport } from "@/hooks/use-viewport"
 import { useWorkspaceLifecycle } from "@/hooks/use-workspace-lifecycle"
+import { summarizeBulkStatus } from "@/lib/bulk-status-summary"
+import {
+  getAnalyticsEnabled,
+  getArchiveExpanded,
+  markAllBeadsRead,
+  markBeadRead,
+  setArchiveExpanded,
+} from "@/lib/local-storage"
+import { isMoleculePresentation } from "@/lib/molecule-presentation"
+import { safeCapture } from "@/lib/posthog-safe"
+import { rpc } from "@/lib/rpc"
+import { sortEpics } from "@/lib/sort"
+import { useSubscriptionChangeSignal } from "@/lib/subscribe"
 import type { Bead, Epic } from "@/lib/types"
 
 // Resolved at call time, not import time: an import-time binding captures
@@ -211,8 +210,6 @@ function BeadsEpicsViewer() {
     filters,
     sort,
     setSort,
-    theme,
-    handleThemeChange,
     zoomLevel,
     handleZoomChange,
     filterBarVisible,
@@ -357,11 +354,23 @@ function BeadsEpicsViewer() {
     ? (typesByWorkspace[currentWorkspace.id] ?? readTypeFilter(currentWorkspace.id))
     : "all"
   const typeOptions = useMemo(
-    () => [...new Set([...availableTypes, ...epics.map((epic) => epic.type), ...flattenEpicsToBeads(epics).map((bead) => bead.type)])],
+    () => [
+      ...new Set([
+        ...availableTypes,
+        ...epics.map((epic) => epic.type),
+        ...flattenEpicsToBeads(epics).map((bead) => bead.type),
+      ]),
+    ],
     [availableTypes, epics],
   )
   const filteredEpics = useMemo(
-    () => filterEpics(epics, { ...filters, type: selectedType, includeSystem }, rigNames, availableStatuses),
+    () =>
+      filterEpics(
+        epics,
+        { ...filters, type: selectedType, includeSystem },
+        rigNames,
+        availableStatuses,
+      ),
     [epics, filters, rigNames, selectedType, includeSystem, availableStatuses],
   )
   const sortedEpics = useMemo(() => sortEpics(filteredEpics, sort), [filteredEpics, sort])
@@ -625,7 +634,9 @@ function BeadsEpicsViewer() {
   const blocksLoadIdRef = useRef(0)
   // Set when the server could not compute blocked-by for this workspace, so the
   // tree says so instead of reading as "nothing is blocked" (beadbox-01f.5).
-  const [blocksDegraded, setBlocksDegraded] = useState<{ dbPath: string; message: string } | null>(null)
+  const [blocksDegraded, setBlocksDegraded] = useState<{ dbPath: string; message: string } | null>(
+    null,
+  )
   const [blocksRetry, setBlocksRetry] = useState(0)
   const [epicEpoch, setEpicEpoch] = useState(0)
 
@@ -641,22 +652,24 @@ function BeadsEpicsViewer() {
     const loadId = ++blocksLoadIdRef.current
     const dbPath = currentWorkspace.databasePath
 
-    getBlocksDependencies(dbPath).then(({ degraded }) => {
-      if (blocksLoadIdRef.current !== loadId) return // stale
-      // The server says when blockedBy could not be computed instead of
-      // returning an empty map that reads as "nothing is blocked" (beadbox-01f.6).
-      if (degraded) {
-        console.warn(`[blocks] blocked-by unavailable (${degraded.reason}): ${degraded.message}`)
-        setBlocksDegraded({ dbPath, message: degraded.message })
-        return
-      }
-      setBlocksDegraded(null)
-    }).catch((error: unknown) => {
-      if (blocksLoadIdRef.current !== loadId) return // stale
-      const message = error instanceof Error ? error.message : String(error)
-      console.warn(`[blocks] blocked-by unavailable: ${message}`)
-      setBlocksDegraded({ dbPath, message })
-    })
+    getBlocksDependencies(dbPath)
+      .then(({ degraded }) => {
+        if (blocksLoadIdRef.current !== loadId) return // stale
+        // The server says when blockedBy could not be computed instead of
+        // returning an empty map that reads as "nothing is blocked" (beadbox-01f.6).
+        if (degraded) {
+          console.warn(`[blocks] blocked-by unavailable (${degraded.reason}): ${degraded.message}`)
+          setBlocksDegraded({ dbPath, message: degraded.message })
+          return
+        }
+        setBlocksDegraded(null)
+      })
+      .catch((error: unknown) => {
+        if (blocksLoadIdRef.current !== loadId) return // stale
+        const message = error instanceof Error ? error.message : String(error)
+        console.warn(`[blocks] blocked-by unavailable: ${message}`)
+        setBlocksDegraded({ dbPath, message })
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- epics.length tracks structural changes; the tree's contents are not read here
   }, [isLoading, currentWorkspace?.databasePath, epics.length, epicEpoch, blocksRetry])
 
@@ -791,7 +804,11 @@ function BeadsEpicsViewer() {
       if (ids.length === 0) return
       setBulkPending("status")
       try {
-        const result = await rpc.beads.updateBeadsStatus(ids, status, currentWorkspace?.databasePath)
+        const result = await rpc.beads.updateBeadsStatus(
+          ids,
+          status,
+          currentWorkspace?.databasePath,
+        )
         const summary = summarizeBulkStatus(result.results, getStatusDisplayConfig(status).label)
         if (summary.ok) {
           toast.success(summary.title)
@@ -1029,8 +1046,13 @@ function BeadsEpicsViewer() {
         style={devConsole.open ? { marginBottom: devConsole.height } : undefined}
       >
         {typeCatalogError && (
-          <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-            <span>Could not load issue types: {typeCatalogError}. Type changes are unavailable.</span>
+          <div
+            role="alert"
+            className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+          >
+            <span>
+              Could not load issue types: {typeCatalogError}. Type changes are unavailable.
+            </span>
             <button
               type="button"
               onClick={retryAvailableTypes}
@@ -1042,8 +1064,14 @@ function BeadsEpicsViewer() {
           </div>
         )}
         {blocksDegraded && blocksDegraded.dbPath === currentWorkspace?.databasePath && (
-          <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-            <span>Blocked-by markers are unavailable: {blocksDegraded.message}. The tree does not show what is blocked.</span>
+          <div
+            role="alert"
+            className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+          >
+            <span>
+              Blocked-by markers are unavailable: {blocksDegraded.message}. The tree does not show
+              what is blocked.
+            </span>
             <button
               type="button"
               onClick={() => setBlocksRetry((n) => n + 1)}
@@ -1067,7 +1095,11 @@ function BeadsEpicsViewer() {
               selectedType={selectedType}
               onTypeChange={(type) => {
                 if (!currentWorkspace) return
-                try { localStorage.setItem(`beadbox:issue-type:${currentWorkspace.id}`, type) } catch { /* storage may be unavailable */ }
+                try {
+                  localStorage.setItem(`beadbox:issue-type:${currentWorkspace.id}`, type)
+                } catch {
+                  /* storage may be unavailable */
+                }
                 setTypesByWorkspace((current) => ({ ...current, [currentWorkspace.id]: type }))
               }}
               includeSystem={includeSystem}
@@ -1403,8 +1435,6 @@ function BeadsEpicsViewer() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        theme={theme}
-        onThemeChange={handleThemeChange}
         zoomLevel={zoomLevel}
         onZoomChange={handleZoomChange}
         databasePath={currentWorkspace?.databasePath}
