@@ -16,6 +16,20 @@ function ratio(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05)
 }
 
+// The eight foreground/background pairs every theme must supply. Shared by
+// every test below that walks "all eight pairs" so none of them can drift
+// from what the others check.
+const COLOR_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["background", "foreground"],
+  ["card", "cardForeground"],
+  ["popover", "popoverForeground"],
+  ["primary", "primaryForeground"],
+  ["secondary", "secondaryForeground"],
+  ["muted", "mutedForeground"],
+  ["accent", "accentForeground"],
+  ["destructive", "destructiveForeground"],
+]
+
 describe("built-in themes", () => {
   test("both validate", () => {
     expect(validateTheme(dark, { id: "beadbox-dark" }).ok).toBe(true)
@@ -38,37 +52,29 @@ describe("built-in themes", () => {
   test("no foreground equals its own background", () => {
     for (const theme of [dark, light]) {
       const c = theme.colors as Record<string, string>
-      for (const pair of [
-        ["background", "foreground"],
-        ["card", "cardForeground"],
-        ["popover", "popoverForeground"],
-        ["primary", "primaryForeground"],
-        ["secondary", "secondaryForeground"],
-        ["muted", "mutedForeground"],
-        ["accent", "accentForeground"],
-        ["destructive", "destructiveForeground"],
-      ]) {
-        expect(c[pair[0]]).not.toBe(c[pair[1]])
+      for (const [bg, fg] of COLOR_PAIRS) {
+        expect(c[bg]).not.toBe(c[fg])
       }
     }
   })
 
   test("light theme meets WCAG AA (4.5:1)", () => {
     const c = light.colors as Record<string, string>
-    expect(ratio(c.background, c.foreground)).toBeGreaterThanOrEqual(4.5)
-    expect(ratio(c.primary, c.primaryForeground)).toBeGreaterThanOrEqual(4.5)
-    expect(ratio(c.destructive, c.destructiveForeground)).toBeGreaterThanOrEqual(4.5)
+    for (const [bg, fg] of COLOR_PAIRS) {
+      expect(ratio(c[bg], c[fg])).toBeGreaterThanOrEqual(4.5)
+    }
   })
 
   // beadbox-dark.json must reproduce the shipped 0.25.2+ palette byte-for-byte so that
   // selecting it is a visual no-op. Two pairs (destructive 3.44:1, muted 4.07:1) are below AA
   // in the shipped app today. Raising them would visibly restyle buttons (destructive would need
   // black text, impossible against #ef4444). That redesign is out of scope; this test guards
-  // only that dark meets AA for large text and non-text UI (3:1).
+  // only that dark meets AA for large text and non-text UI (3:1), walking every pair against
+  // that lower bar rather than a hand-picked subset.
   test("dark theme meets AA for large text (3:1); two pairs are pre-existing sub-AA", () => {
     const c = dark.colors as Record<string, string>
-    expect(ratio(c.background, c.foreground)).toBeGreaterThanOrEqual(3.0)
-    expect(ratio(c.primary, c.primaryForeground)).toBeGreaterThanOrEqual(3.0)
-    expect(ratio(c.destructive, c.destructiveForeground)).toBeGreaterThanOrEqual(3.0)
+    for (const [bg, fg] of COLOR_PAIRS) {
+      expect(ratio(c[bg], c[fg])).toBeGreaterThanOrEqual(3.0)
+    }
   })
 })
