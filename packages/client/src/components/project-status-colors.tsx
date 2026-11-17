@@ -28,7 +28,7 @@ export function ProjectStatusColors({ sources }: { sources: readonly StatusColor
     const update = () => setSurface(currentThemeSurface(el))
     update()
     const observer = new MutationObserver(update)
-    observer.observe(el, { attributes: true, attributeFilter: ["class"] })
+    observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] })
     return () => observer.disconnect()
   }, [])
   return (

@@ -73,7 +73,7 @@ export function StatusColorsMount() {
     const update = () => statusColorStore.set({ surface: currentThemeSurface(el) })
     update()
     const observer = new MutationObserver(update)
-    observer.observe(el, { attributes: true, attributeFilter: ["class"] })
+    observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] })
     return () => observer.disconnect()
   }, [])
 
