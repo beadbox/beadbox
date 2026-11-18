@@ -345,6 +345,18 @@ describe("buildTypeColorCss", () => {
     expect(css).not.toMatch(/\/ 0\.\d{5,}\)/)
   })
 
+  // epic-tree's bead-type ICONS use the "text" role, not "badge": they are
+  // lucide svgs with stroke="currentColor", so a `color:` rule on the svg
+  // paints them. They carry no colour class of their own any more, so if this
+  // role went missing they would silently inherit the parent's colour.
+  test("emits a text-role rule for the types epic-tree draws as icons", () => {
+    const css = buildTypeColorCss(DARK)
+    for (const t of ["convoy", "molecule", "milestone", "epic"]) {
+      expect(DEFAULT_TYPE_HEX[t]).toBeDefined()
+      expect(css).toContain(`[data-type="${t}"][data-type-role="text"]{color:`)
+    }
+  })
+
   test("derives different text per surface", () => {
     const dark = buildTypeColorCss(DARK)
     const light = buildTypeColorCss("#ffffff")
