@@ -123,15 +123,15 @@ const NOW_DASH = "2 3"
 const NOW_CLASS = "stroke-foreground/40"
 const CONNECTOR_CLASS = "stroke-muted-foreground"
 const MARKER_CLASS: Record<GanttMarker["relation"], string> = {
-  "blocked-by": "fill-amber-500",
+  "blocked-by": "fill-warning",
   blocks: "fill-muted-foreground",
 }
 
 const BAR_CLASS: Record<BarStyle, string> = {
   waiting: "fill-transparent stroke-muted-foreground",
-  blocked: "fill-transparent stroke-red-500",
-  working: "fill-blue-500 stroke-blue-500",
-  done: "fill-emerald-500/70 stroke-emerald-500/70",
+  blocked: "fill-transparent stroke-destructive",
+  working: "fill-info stroke-info",
+  done: "fill-success/70 stroke-success/70",
 }
 
 type Line =

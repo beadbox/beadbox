@@ -149,7 +149,7 @@ export function EditConnectionDialog({
           </label>
 
           {error && (
-            <div className="flex items-start gap-2 text-sm text-amber-400">
+            <div className="flex items-start gap-2 text-sm text-warning-text">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>

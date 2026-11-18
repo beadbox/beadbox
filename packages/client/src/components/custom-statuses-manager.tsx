@@ -182,7 +182,7 @@ export function CustomStatusesManager({
           </Button>
         </div>
         {error && (
-          <p id="new-status-error" className="text-xs text-red-400">
+          <p id="new-status-error" className="text-xs text-destructive-text">
             {error}
           </p>
         )}
@@ -231,7 +231,7 @@ export function CustomStatusesManager({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-red-400 hover:text-red-300"
+                  className="h-7 w-7 text-destructive-text/80 hover:text-destructive-text"
                   onClick={() => handleRemove(i)}
                   aria-label={`Remove ${name}`}
                   title="Beads already using this status keep the label as a dangling value."

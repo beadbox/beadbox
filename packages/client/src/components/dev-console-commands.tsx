@@ -16,9 +16,9 @@ function formatTime(ts: number): string {
 }
 
 function durationClass(ms: number): string {
-  if (ms < 200) return "text-green-500"
-  if (ms <= 500) return "text-yellow-500"
-  return "text-red-500"
+  if (ms < 200) return "text-success-text"
+  if (ms <= 500) return "text-warning-text"
+  return "text-destructive-text"
 }
 
 function CommandEntry({ event }: { event: BdCommandEvent }) {
@@ -44,7 +44,7 @@ function CommandEntry({ event }: { event: BdCommandEvent }) {
         {isError ? (
           <span className="text-destructive font-semibold">ERR</span>
         ) : (
-          <span className="text-green-500 font-semibold">OK</span>
+          <span className="text-success-text font-semibold">OK</span>
         )}
         {event.resultSummary && (
           <span className="text-muted-foreground">({event.resultSummary})</span>
@@ -64,7 +64,7 @@ function CommandEntry({ event }: { event: BdCommandEvent }) {
           {isTruncated && !expanded && (
             <button
               onClick={() => setExpanded(true)}
-              className="block mt-1 text-blue-400 hover:text-blue-300 text-xs"
+              className="block mt-1 text-info-text/80 hover:text-info-text text-xs"
               data-testid="show-all-toggle"
             >
               Show all ({stdoutLines.length} lines)

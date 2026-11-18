@@ -16,22 +16,27 @@ interface PipelineFlowProps {
   loading?: boolean
 }
 
+// Pre-stylesheet fallbacks only. Every tile below carries data-status with
+// the "stage" role and its label the "text" role, so the injected stylesheet
+// supplies the real hue — including any colour chosen in Settings. These are
+// what shows in the window before the custom-status list loads, tokenised so
+// that window is legible in a light theme too.
 const STAGE_COLORS: Record<string, string> = {
-  backlog: "bg-zinc-500/10 border-zinc-500/25",
-  open: "bg-white/10 border-white/30",
-  in_progress: "bg-amber-500/20 border-amber-500/40",
-  ready_for_qa: "bg-purple-500/20 border-purple-500/40",
-  ready_to_ship: "bg-emerald-500/20 border-emerald-500/40",
-  closed: "bg-zinc-600/20 border-zinc-500/40",
+  backlog: "bg-muted/30 border-border",
+  open: "bg-foreground/10 border-foreground/30",
+  in_progress: "bg-warning/20 border-warning/40",
+  ready_for_qa: "bg-info/20 border-info/40",
+  ready_to_ship: "bg-success/20 border-success/40",
+  closed: "bg-muted/40 border-border",
 }
 
 const STAGE_TEXT_COLORS: Record<string, string> = {
-  backlog: "text-zinc-500",
-  open: "text-white",
-  in_progress: "text-amber-400",
-  ready_for_qa: "text-purple-400",
-  ready_to_ship: "text-emerald-400",
-  closed: "text-zinc-400",
+  backlog: "text-muted-foreground",
+  open: "text-foreground",
+  in_progress: "text-warning-text",
+  ready_for_qa: "text-info-text",
+  ready_to_ship: "text-success-text",
+  closed: "text-muted-foreground/70",
 }
 
 // beadbox-8k3: STAGE_LABELS removed — labels are now derived dynamically
@@ -143,7 +148,7 @@ export function PipelineFlow({
                   data-status-role="stage"
                   className={cn(
                     "flex-1 min-w-[140px] rounded-lg border px-4 py-3 flex flex-col items-center justify-center",
-                    STAGE_COLORS[name] ?? "bg-blue-500/20 border-blue-500/40",
+                    STAGE_COLORS[name] ?? "bg-info/20 border-info/40",
                     "opacity-50",
                   )}
                 >
@@ -152,7 +157,7 @@ export function PipelineFlow({
                     data-status-role="text"
                     className={cn(
                       "text-xs font-medium uppercase tracking-wide mb-3",
-                      STAGE_TEXT_COLORS[name] ?? "text-blue-400",
+                      STAGE_TEXT_COLORS[name] ?? "text-info-text",
                     )}
                   >
                     {getStatusDisplayLabel(name)}
@@ -178,7 +183,7 @@ export function PipelineFlow({
                     onClick={() => onStageClick(stage.name)}
                     className={cn(
                       "flex-1 min-w-[140px] rounded-lg border px-4 py-3 text-left transition-all cursor-pointer",
-                      STAGE_COLORS[stage.name] ?? "bg-blue-500/20 border-blue-500/40",
+                      STAGE_COLORS[stage.name] ?? "bg-info/20 border-info/40",
                       selected && "ring-2 ring-primary ring-offset-1 ring-offset-background",
                       dimmed && "opacity-40",
                       pulsing && "animate-pipeline-pulse",
@@ -194,7 +199,7 @@ export function PipelineFlow({
                         data-status-role="text"
                         className={cn(
                           "text-xs font-medium uppercase tracking-wide",
-                          STAGE_TEXT_COLORS[stage.name] ?? "text-blue-400",
+                          STAGE_TEXT_COLORS[stage.name] ?? "text-info-text",
                         )}
                       >
                         {getStatusDisplayLabel(stage.name)}
@@ -206,7 +211,7 @@ export function PipelineFlow({
                       data-status-role="text"
                       className={cn(
                         "text-2xl font-bold tabular-nums",
-                        STAGE_TEXT_COLORS[stage.name] ?? "text-blue-400",
+                        STAGE_TEXT_COLORS[stage.name] ?? "text-info-text",
                       )}
                     >
                       {stage.count}

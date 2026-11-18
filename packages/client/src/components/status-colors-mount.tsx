@@ -19,6 +19,7 @@ import {
 } from "../lib/status-colors"
 import {
   currentThemeForeground,
+  currentThemeMutedForeground,
   currentThemeSurface,
   statusColorStore,
   useStatusColors,
@@ -83,6 +84,7 @@ export function StatusColorsMount() {
       statusColorStore.set({
         surface: currentThemeSurface(el),
         foreground: currentThemeForeground(el),
+        mutedForeground: currentThemeMutedForeground(el),
       })
     update()
     const observer = new MutationObserver(update)

@@ -114,9 +114,11 @@
   --color-info-text: var(--bb-info-text);
   --color-success: var(--bb-success);
   --color-success-text: var(--bb-success-text);
-  /* `destructive` itself is authored (COLOR_KEYS); only its tinted-text
-     companion is derived, for error badges that tint rather than fill. */
+  /* `destructive` and `primary` are themselves authored (COLOR_KEYS); only
+     their tinted-text companions are derived, for pills that tint rather
+     than fill. */
   --color-destructive-text: var(--bb-destructive-text);
+  --color-primary-text: var(--bb-primary-text);
 
   --radius-sm: var(--bb-radius-sm);
   --radius-md: var(--bb-radius-md);
@@ -163,6 +165,7 @@
   --bb-success: #10b981;
   --bb-success-text: #28c08e;
   --bb-destructive-text: #f47c7c;
+  --bb-primary-text: #22c55e;
 
   --bb-radius-sm: calc(0.625rem - 4px);
   --bb-radius-md: calc(0.625rem - 2px);

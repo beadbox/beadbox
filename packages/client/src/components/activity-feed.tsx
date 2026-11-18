@@ -614,7 +614,7 @@ export function ActivityFeed({
   if (error && events.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
-        <AlertTriangle className="h-8 w-8 text-amber-400 mb-3" />
+        <AlertTriangle className="h-8 w-8 text-warning-text mb-3" />
         <p className="text-sm font-medium text-foreground mb-1">Could not load recent activity</p>
         <p className="text-xs text-muted-foreground mb-4 max-w-sm">{error}</p>
         <button
@@ -715,7 +715,7 @@ export function ActivityFeed({
               className={cn(
                 "text-sm truncate",
                 isNavigable
-                  ? "text-blue-400/80 group-hover:text-blue-400 group-hover:underline"
+                  ? "text-info-text/80 group-hover:text-info-text group-hover:underline"
                   : "text-foreground",
               )}
             >
@@ -727,7 +727,7 @@ export function ActivityFeed({
           <span className="text-xs text-muted-foreground/60 shrink-0 whitespace-nowrap">
             ({extractActorFromMessage(event)} {getCompactAction(event)})
           </span>
-          {isDeleted && <span className="text-xs text-amber-400/80 shrink-0">(deleted)</span>}
+          {isDeleted && <span className="text-xs text-warning-text/80 shrink-0">(deleted)</span>}
         </div>
 
         {/* Timestamp */}
@@ -775,7 +775,7 @@ export function ActivityFeed({
             <Filter className="h-3 w-3" />
             <span className="hidden sm:inline">Filter</span>
             {activeFilterCount > 0 && !filterPanelOpen && (
-              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-500 text-white text-[9px] font-bold">
+              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-info text-white text-[9px] font-bold">
                 {activeFilterCount}
               </span>
             )}
@@ -884,12 +884,12 @@ export function ActivityFeed({
           {filterChips.map((chip) => (
             <span
               key={chip.key}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 text-[11px] font-medium"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-info/15 text-info-text text-[11px] font-medium"
             >
               {chip.label}
               <button
                 onClick={chip.onRemove}
-                className="hover:text-blue-200 transition-colors"
+                className="hover:text-info-text transition-colors"
                 aria-label={`Remove ${chip.label} filter`}
               >
                 <X className="h-3 w-3" />
@@ -911,9 +911,9 @@ export function ActivityFeed({
           onClick={flushPendingEvents}
           className={cn(
             "sticky top-0 z-20 w-full flex items-center justify-center gap-2",
-            "bg-blue-500/15 text-blue-400 border-b border-blue-500/30",
+            "bg-info/15 text-info-text border-b border-info/30",
             "px-3 py-2 text-sm font-medium",
-            "hover:bg-blue-500/25 transition-colors cursor-pointer",
+            "hover:bg-info/25 transition-colors cursor-pointer",
           )}
         >
           <ChevronUp className="h-3.5 w-3.5" />

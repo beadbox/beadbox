@@ -689,12 +689,12 @@ function ActivityViewer() {
               <div className="px-4 pb-2">
                 <Badge
                   variant="secondary"
-                  className="inline-flex items-center gap-1.5 text-xs bg-blue-500/15 text-blue-400 border-blue-500/30 hover:bg-blue-500/25"
+                  className="inline-flex items-center gap-1.5 text-xs bg-info/15 text-info-text border-info/30 hover:bg-info/25"
                 >
                   {filterChipLabel}
                   <button
                     onClick={clearFilter}
-                    className="hover:text-blue-200 transition-colors"
+                    className="hover:text-info-text transition-colors"
                     aria-label="Clear cross-filter"
                   >
                     <X className="h-3 w-3" />

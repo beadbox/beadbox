@@ -379,7 +379,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                 onCopy={() => captureDetailPanelAction("copy_id", bead.type)}
               />
               {bead.externalRef && (
-                <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">
+                <span className="px-1.5 py-0.5 rounded bg-info/20 text-info-text font-medium">
                   {bead.externalRef}
                 </span>
               )}
@@ -425,7 +425,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-medium hover:bg-indigo-500/30 transition-colors"
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-info/20 text-info-text font-medium hover:bg-info/30 transition-colors"
                       >
                         <ExternalLink className="h-3 w-3" />
                         <span className="truncate max-w-[200px]">{mutations.specId}</span>
@@ -433,7 +433,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                     ) : (
                       <button
                         onClick={handleSpecIdView}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-medium hover:bg-indigo-500/30 transition-colors cursor-pointer"
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-info/20 text-info-text font-medium hover:bg-info/30 transition-colors cursor-pointer"
                       >
                         <FileText className="h-3 w-3" />
                         <span className="truncate max-w-[200px]">{mutations.specId}</span>
@@ -725,8 +725,8 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                         className={cn(
                           "w-full rounded-sm transition-all hover:opacity-100",
                           comments.focusedCommentIndex === null
-                            ? "bg-blue-500 opacity-100"
-                            : "bg-blue-500/30 opacity-60 hover:bg-blue-500/50",
+                            ? "bg-info opacity-100"
+                            : "bg-info/30 opacity-60 hover:bg-info/50",
                         )}
                         style={{
                           height: `${Math.max(16, Math.min(40, Math.floor((mutations.description?.length || 0) / 50) + 16))}px`,
@@ -799,7 +799,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
               }}
               disabled={mutations.fieldStates.status.isSaving || !advanceTargetStatus}
               className={cn(
-                "w-full bg-emerald-600 hover:bg-emerald-500 text-white",
+                "w-full bg-success hover:bg-success/90 text-primary-foreground",
                 isMobile && "min-h-[44px]",
               )}
             >

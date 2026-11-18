@@ -211,10 +211,10 @@ function InstalledContent({ platform }: { platform: string | null }) {
   if (platform === "darwin") {
     return (
       <div className="space-y-4">
-        <div className="flex items-start gap-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-          <Check className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 p-3 rounded-lg bg-success/10 border border-success/20">
+          <Check className="h-5 w-5 text-success-text shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-medium text-green-400">Download complete</p>
+            <p className="text-sm font-medium text-success-text">Download complete</p>
             <p className="text-sm text-muted-foreground mt-1">
               The disk image has been opened. Drag <strong>Beadbox</strong> to your Applications
               folder to update.
@@ -228,10 +228,10 @@ function InstalledContent({ platform }: { platform: string | null }) {
   if (platform === "linux") {
     return (
       <div className="space-y-4">
-        <div className="flex items-start gap-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-          <Check className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 p-3 rounded-lg bg-success/10 border border-success/20">
+          <Check className="h-5 w-5 text-success-text shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-medium text-green-400">Download complete</p>
+            <p className="text-sm font-medium text-success-text">Download complete</p>
             <p className="text-sm text-muted-foreground mt-1">
               The AppImage has been downloaded and made executable. Replace your current AppImage
               with the new one to update.
@@ -245,10 +245,10 @@ function InstalledContent({ platform }: { platform: string | null }) {
   if (platform === "win32") {
     return (
       <div className="space-y-4">
-        <div className="flex items-start gap-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-          <Check className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 p-3 rounded-lg bg-success/10 border border-success/20">
+          <Check className="h-5 w-5 text-success-text shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-medium text-green-400">Installer launched</p>
+            <p className="text-sm font-medium text-success-text">Installer launched</p>
             <p className="text-sm text-muted-foreground mt-1">
               Follow the installation wizard to complete the update.
             </p>
@@ -260,9 +260,9 @@ function InstalledContent({ platform }: { platform: string | null }) {
 
   // Fallback
   return (
-    <div className="flex items-start gap-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-      <Check className="h-5 w-5 text-green-500 shrink-0 mt-0.5" />
-      <p className="text-sm font-medium text-green-400">Update downloaded successfully.</p>
+    <div className="flex items-start gap-3 p-3 rounded-lg bg-success/10 border border-success/20">
+      <Check className="h-5 w-5 text-success-text shrink-0 mt-0.5" />
+      <p className="text-sm font-medium text-success-text">Update downloaded successfully.</p>
     </div>
   )
 }

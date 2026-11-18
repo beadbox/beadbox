@@ -79,7 +79,7 @@ function formatVars(text: string): React.ReactNode[] {
     part.startsWith("{{") ? (
       <span
         key={i}
-        className="text-[11px] font-mono px-1 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+        className="text-[11px] font-mono px-1 py-0.5 rounded bg-info/15 text-info-text border border-info/25 mx-0.5"
       >
         {part.slice(2, -2)}
       </span>
@@ -160,7 +160,7 @@ function MoleculeCardItem({
               <div
                 className={cn(
                   "h-full rounded-full transition-all",
-                  pct === 100 ? "bg-green-500" : pct > 0 ? "bg-blue-500" : "bg-muted-foreground/30",
+                  pct === 100 ? "bg-success" : pct > 0 ? "bg-info" : "bg-muted-foreground/30",
                 )}
                 style={{ width: `${pct}%` }}
               />
@@ -171,8 +171,8 @@ function MoleculeCardItem({
           </div>
           {mol.progress.inProgress > 0 && (
             <div className="flex items-center gap-1 mt-1">
-              <Activity className="h-3 w-3 text-blue-400" />
-              <span className="text-[10px] text-blue-400">
+              <Activity className="h-3 w-3 text-info-text" />
+              <span className="text-[10px] text-info-text">
                 {mol.progress.inProgress} in progress
               </span>
             </div>
@@ -562,7 +562,7 @@ export function FormulasView() {
               </div>
             ) : formulasError ? (
               <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
-                <AlertTriangle className="h-5 w-5 text-amber-400" />
+                <AlertTriangle className="h-5 w-5 text-warning-text" />
                 <p className="text-sm text-center px-4">{formulasError}</p>
                 <button
                   onClick={fetchFormulas}
@@ -642,7 +642,7 @@ export function FormulasView() {
                             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
                             <span className="font-mono text-foreground">{name}</span>
                             {v.required && (
-                              <span className="text-[10px] text-amber-400/80">required</span>
+                              <span className="text-[10px] text-warning-text/80">required</span>
                             )}
                             {v.default && (
                               <span className="text-muted-foreground/60">= {v.default}</span>
@@ -669,13 +669,13 @@ export function FormulasView() {
                   <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Step Graph
                   </span>
-                  <div className="flex items-center bg-zinc-800/50 rounded-md p-0.5">
+                  <div className="flex items-center bg-muted/50 rounded-md p-0.5">
                     <button
                       onClick={() => setViewMode("tree")}
                       className={cn(
                         "p-1 rounded transition-colors",
                         viewMode === "tree"
-                          ? "bg-zinc-700 text-foreground"
+                          ? "bg-muted text-foreground"
                           : "text-muted-foreground hover:text-foreground",
                       )}
                       title="Tree view"
@@ -687,7 +687,7 @@ export function FormulasView() {
                       className={cn(
                         "p-1 rounded transition-colors",
                         viewMode === "dag"
-                          ? "bg-zinc-700 text-foreground"
+                          ? "bg-muted text-foreground"
                           : "text-muted-foreground hover:text-foreground",
                       )}
                       title="Graph view"

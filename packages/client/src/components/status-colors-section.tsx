@@ -235,7 +235,7 @@ function StatusColorRow({
         maxLength={7}
         aria-label={`${label} color hex`}
         aria-invalid={invalid ? "true" : "false"}
-        className="h-7 w-20 shrink-0 rounded-md border border-input bg-background px-2 text-xs font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[invalid=true]:border-red-400"
+        className="h-7 w-20 shrink-0 rounded-md border border-input bg-background px-2 text-xs font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[invalid=true]:border-destructive"
       />
     </li>
   )

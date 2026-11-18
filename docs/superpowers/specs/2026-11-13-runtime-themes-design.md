@@ -482,7 +482,9 @@ families but six semantic roles reused throughout — `formula-dag`'s
 | neutral chrome | ~133 | existing `muted` / `border` / `card` |
 | status, priority, bead-type keyed | ~88 | the status-colour machinery |
 
-The sweep is being done in phases, main view first. See §7.
+The sweep was done in phases, main view first, and is complete: **721 -> 16**.
+The 16 that remain are deliberate — 12 entries of identity palettes and 4
+mentions in prose comments (see "What stays a literal" in §7).
 
 ## §7 Semantic tone tokens (amended 2026-11-17)
 
@@ -556,6 +558,47 @@ unchanged — `amber-500` IS `#f59e0b` at the same alpha.
 
 A badge config's `className` is now the PRE-STYLESHEET fallback only, written
 in tokens, since status rules appear only once the custom-status list loads.
+
+### Derived text applies to `primary` too
+
+`primary` and `destructive` are both authored in COLOR_KEYS and both get a
+derived `-text` companion without becoming new authorable tokens. For
+`primary` this was forced by measurement, not symmetry: the GitHub gate pills
+in `lib/waiting.ts` needed a value distinguishable from the three tones, and
+bare `text-primary` on its own 15% tint measures 5.01:1 on the dark card but
+only **4.09:1** on a white one. The derived companion is 4.85:1 there.
+
+### What stays a literal
+
+Three kinds of colour are deliberately NOT tokenised:
+
+1. **Identity palettes** — `authorColors` (comment authors), `ACCENT_COLORS`
+   (formula step index), the `border-l-*` cycles in `epic-tree`,
+   `epic-tree-skeleton` and `bead-table`. Their purpose is that adjacent
+   entries DIFFER; collapsing them onto three tones makes two authors share a
+   stripe. A bulk conversion did exactly that mid-sweep — six author colours
+   became two repeated ones, and `epic-tree`'s five became three — so
+   `__tests__/identity-palettes.test.ts` now asserts each list has no repeated
+   entry. A 2-4px saturated 500 reads on a light card as well as a dark one,
+   and there is no token vocabulary for "author #4".
+2. **Graph edge arrowheads** — React Flow serialises `markerEnd.color` into an
+   SVG presentation attribute, where `var()` does not resolve, so the value is
+   read from the token in JS (`currentThemeEdgeColor`). Edge STROKES use
+   `var(--bb-muted-foreground)` in an inline style and so follow a theme switch
+   immediately; only arrowheads carry a snapshot, refreshed on next layout.
+3. **Prose** — token names inside comments. The bare-tone source scan matches
+   comment text too, so comments say "the bare tone token as text" rather than
+   naming the class.
+
+### A hover must still change something
+
+Collapsing shade pairs onto one token silently killed hovers:
+`text-emerald-400 hover:text-emerald-300` became `text-success-text
+hover:text-success-text`, which does nothing. Eight shipped that way before a
+test caught them. A tone hover now differs from its base — by alpha on a text
+colour (`text-warning-text/80 hover:text-warning-text`) or shadcn's `/90` on a
+solid fill — and `identity-palettes.test.ts` asserts no `X hover:X` pair
+survives on a tone token.
 
 ### `open`'s default follows the theme
 

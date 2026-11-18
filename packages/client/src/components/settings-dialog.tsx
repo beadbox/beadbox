@@ -1358,11 +1358,11 @@ function platformLabel(platform: string): string {
 function StatusIcon({ status }: { status: VersionCheck["status"] }) {
   switch (status) {
     case "ok":
-      return <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+      return <CheckCircle2 className="h-4 w-4 text-success-text shrink-0" />
     case "warning":
-      return <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+      return <AlertTriangle className="h-4 w-4 text-warning-text shrink-0" />
     case "error":
-      return <X className="h-4 w-4 text-red-400 shrink-0" />
+      return <X className="h-4 w-4 text-destructive-text shrink-0" />
     default:
       return <AlertTriangle className="h-4 w-4 text-muted-foreground shrink-0" />
   }
@@ -1427,9 +1427,9 @@ function DiagnosticsPanel({ databasePath }: { databasePath?: string }) {
 
       {/* Error state */}
       {result?.error && (
-        <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm">
-          <CircleX className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
-          <span className="text-red-300">{result.error}</span>
+        <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm">
+          <CircleX className="h-4 w-4 text-destructive-text shrink-0 mt-0.5" />
+          <span className="text-destructive-text">{result.error}</span>
         </div>
       )}
 
@@ -1438,11 +1438,11 @@ function DiagnosticsPanel({ databasePath }: { databasePath?: string }) {
         <div className="space-y-3">
           <div className="flex items-center gap-3 text-sm">
             <span className="text-muted-foreground">
-              Diagnostics: <span className="text-green-500">{result.passed} passed</span>
+              Diagnostics: <span className="text-success-text">{result.passed} passed</span>
               {result.warnings > 0 && (
                 <>
                   ,{" "}
-                  <span className="text-amber-400">
+                  <span className="text-warning-text">
                     {result.warnings} warning{result.warnings !== 1 ? "s" : ""}
                   </span>
                 </>
@@ -1450,7 +1450,7 @@ function DiagnosticsPanel({ databasePath }: { databasePath?: string }) {
               {result.errors > 0 && (
                 <>
                   ,{" "}
-                  <span className="text-red-400">
+                  <span className="text-destructive-text">
                     {result.errors} error{result.errors !== 1 ? "s" : ""}
                   </span>
                 </>
@@ -1494,8 +1494,8 @@ function DiagnosticCheckCard({
 }) {
   const [expanded, setExpanded] = useState(false)
   const isError = check.status === "fail"
-  const borderColor = isError ? "border-red-500/30" : "border-amber-500/30"
-  const iconColor = isError ? "text-red-400" : "text-amber-400"
+  const borderColor = isError ? "border-destructive/30" : "border-warning/30"
+  const iconColor = isError ? "text-destructive-text" : "text-warning-text"
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
@@ -1651,7 +1651,7 @@ function HelpTabContent({
                           <div className="text-xs mt-1 flex items-center gap-1.5">
                             <span
                               className={
-                                row.check.status === "error" ? "text-red-400" : "text-amber-400"
+                                row.check.status === "error" ? "text-destructive-text" : "text-warning-text"
                               }
                             >
                               {row.check.message}
@@ -1766,7 +1766,7 @@ function HelpTabContent({
                 <h4 className="font-medium mb-1">Epic Tree Cache</h4>
                 <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
                   <span>Status:</span>
-                  <span className={cacheStats.epicCached ? "text-green-400" : "text-amber-400"}>
+                  <span className={cacheStats.epicCached ? "text-success-text" : "text-warning-text"}>
                     {cacheStats.epicCached ? "Cached" : "Empty"}
                   </span>
                   {cacheStats.epicDbPath && (

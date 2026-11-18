@@ -106,7 +106,7 @@ export function FormulaPourModal({ open, onOpenChange, formula, dbPath }: Formul
                     <div>
                       <label className="text-sm text-foreground mb-1 block">
                         {name}
-                        {v.required && <span className="text-amber-400 ml-0.5">*</span>}
+                        {v.required && <span className="text-warning-text ml-0.5">*</span>}
                       </label>
                       <input
                         type="text"
@@ -115,12 +115,12 @@ export function FormulaPourModal({ open, onOpenChange, formula, dbPath }: Formul
                         placeholder={v.default || ""}
                         className={`w-full px-3 py-2 text-sm rounded-md border bg-muted text-foreground ${
                           validationErrors.has(name)
-                            ? "border-red-500/50 ring-1 ring-red-500/30"
+                            ? "border-destructive/50 ring-1 ring-destructive/30"
                             : "border-border"
                         }`}
                       />
                       {validationErrors.has(name) && (
-                        <p className="text-xs text-red-400 mt-0.5">Required</p>
+                        <p className="text-xs text-destructive-text mt-0.5">Required</p>
                       )}
                     </div>
                   </TooltipTrigger>

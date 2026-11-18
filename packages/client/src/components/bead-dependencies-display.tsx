@@ -35,7 +35,7 @@ export function BeadDependenciesDisplay({
               <button
                 onClick={() => onNavigate?.(dep.id)}
                 className={cn(
-                  "text-xs px-2 py-0.5 rounded-l bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors",
+                  "text-xs px-2 py-0.5 rounded-l bg-destructive/10 text-destructive-text hover:bg-destructive/20 transition-colors",
                   isMobile && "min-h-[44px]",
                 )}
                 title={dep.title}
@@ -47,7 +47,7 @@ export function BeadDependenciesDisplay({
                   <button
                     onClick={() => onRemove(dep.id, "blockedBy")}
                     className={cn(
-                      "text-xs px-1 py-0.5 rounded-r bg-red-500/10 text-red-400/60 hover:text-red-300 hover:bg-red-500/30 transition-colors border-l border-red-500/20",
+                      "text-xs px-1 py-0.5 rounded-r bg-destructive/10 text-destructive-text/60 hover:text-destructive-text hover:bg-destructive/30 transition-colors border-l border-destructive/20",
                       isMobile && "min-h-[44px] min-w-[44px] flex items-center justify-center",
                     )}
                   >
@@ -68,7 +68,7 @@ export function BeadDependenciesDisplay({
               <button
                 onClick={() => onNavigate?.(dep.id)}
                 className={cn(
-                  "text-xs px-2 py-0.5 rounded-l bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors",
+                  "text-xs px-2 py-0.5 rounded-l bg-warning/10 text-warning-text hover:bg-warning/20 transition-colors",
                   isMobile && "min-h-[44px]",
                 )}
                 title={dep.title}
@@ -80,7 +80,7 @@ export function BeadDependenciesDisplay({
                   <button
                     onClick={() => onRemove(dep.id, "blocks")}
                     className={cn(
-                      "text-xs px-1 py-0.5 rounded-r bg-amber-500/10 text-amber-400/60 hover:text-amber-300 hover:bg-amber-500/30 transition-colors border-l border-amber-500/20",
+                      "text-xs px-1 py-0.5 rounded-r bg-warning/10 text-warning-text/60 hover:text-warning-text hover:bg-warning/30 transition-colors border-l border-warning/20",
                       isMobile && "min-h-[44px] min-w-[44px] flex items-center justify-center",
                     )}
                   >

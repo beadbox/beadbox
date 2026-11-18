@@ -147,13 +147,13 @@ export function InitWorkspaceDialog({
           </div>
 
           {error && (
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-md p-3">
+            <div className="bg-warning/10 border border-warning/20 rounded-md p-3">
               <div className="flex items-start gap-2">
-                <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                <AlertCircle className="h-4 w-4 text-warning-text shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm text-amber-300">{error}</p>
+                  <p className="text-sm text-warning-text">{error}</p>
                   {fixCommand && (
-                    <code className="block mt-1.5 text-xs bg-amber-500/10 text-amber-400/80 rounded px-2 py-1 font-mono">
+                    <code className="block mt-1.5 text-xs bg-warning/10 text-warning-text/80 rounded px-2 py-1 font-mono">
                       {fixCommand}
                     </code>
                   )}

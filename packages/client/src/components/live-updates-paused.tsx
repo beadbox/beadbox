@@ -12,12 +12,12 @@ export function LiveUpdatesPausedBanner() {
   if (!paused) return null
 
   return (
-    <div role="status" className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2">
+    <div role="status" className="bg-warning/15 border-b border-warning/30 px-4 py-2">
       <div className="flex items-center justify-between max-w-screen-xl mx-auto gap-3">
-        <div className="flex items-center gap-2 text-amber-400 text-sm min-w-0">
+        <div className="flex items-center gap-2 text-warning-text text-sm min-w-0">
           <WifiOff className="h-4 w-4 shrink-0" />
           <span className="font-medium">Live updates paused.</span>
-          <span className="text-amber-400/80 truncate">
+          <span className="text-warning-text/80 truncate">
             Changes made elsewhere won't appear until you refresh.
           </span>
         </div>
@@ -26,8 +26,8 @@ export function LiveUpdatesPausedBanner() {
           onClick={requestManualRefresh}
           className={cn(
             "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 shrink-0 text-sm font-medium",
-            "text-amber-300 hover:text-amber-200 hover:bg-amber-500/20",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50",
+            "text-warning-text/80 hover:text-warning-text hover:bg-warning/20",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/50",
             "transition-colors",
           )}
         >

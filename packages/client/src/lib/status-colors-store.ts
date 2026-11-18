@@ -11,6 +11,9 @@ import {
   THEME_SURFACES,
 } from "./status-colors"
 
+/** The dark palette's --bb-muted-foreground, the fallback for the getter below. */
+export const DEFAULT_MUTED_FOREGROUND = "#a1a1aa"
+
 export interface StatusColorState {
   workspaceId: string | null
   /** Every status of the project: bd's built-ins, then status.custom in order. */
@@ -27,6 +30,13 @@ export interface StatusColorState {
    * rather than baked (see FOREGROUND_DEFAULT_STATUSES).
    */
   foreground: string
+  /**
+   * The theme's muted foreground. Needed by the formula graphs, whose SVG
+   * edges and marker arrowheads take a colour VALUE, not a class: React Flow
+   * writes markerEnd.color into an SVG presentation attribute, where var()
+   * does not resolve. So the value has to be read in JS.
+   */
+  mutedForeground: string
 }
 
 export interface ResolvedStatusColors extends StatusColorState {
@@ -52,6 +62,7 @@ let state: ResolvedStatusColors = resolve({
   customs: null,
   surface: THEME_SURFACES.gray.card,
   foreground: DEFAULT_STATUS_HEX.open,
+  mutedForeground: DEFAULT_MUTED_FOREGROUND,
 })
 const listeners = new Set<() => void>()
 
@@ -108,6 +119,30 @@ export function currentThemeSurface(el: Element = document.documentElement): str
  */
 export function currentThemeForeground(el: Element = document.documentElement): string {
   return readThemeVar(el, "--bb-foreground") || DEFAULT_STATUS_HEX.open
+}
+
+export function currentThemeMutedForeground(el: Element = document.documentElement): string {
+  return readThemeVar(el, "--bb-muted-foreground") || DEFAULT_MUTED_FOREGROUND
+}
+
+/**
+ * `--bb-muted-foreground` as a concrete colour VALUE at the given alpha, for
+ * the one place a class or var() will not do: React Flow serialises
+ * markerEnd.color into an SVG presentation attribute, and var() does not
+ * resolve there.
+ *
+ * Edge STROKES use `var(--bb-muted-foreground)` in an inline style instead,
+ * so they follow a theme switch immediately; only arrowheads carry this
+ * snapshot, and they refresh on the next layout.
+ */
+export function currentThemeEdgeColor(alpha = 0.5, el: Element = document.documentElement): string {
+  const v = currentThemeMutedForeground(el).trim()
+  const hex = /^#[0-9a-fA-F]{6}$/.test(v)
+    ? ([1, 3, 5].map((i) => Number.parseInt(v.slice(i, i + 2), 16)) as [number, number, number])
+    : null
+  const rgb = v.match(/^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})/)
+  const [r, g, b] = hex ?? (rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : [161, 161, 170])
+  return `rgb(${r} ${g} ${b} / ${alpha})`
 }
 
 function readThemeVar(el: Element, name: string): string {

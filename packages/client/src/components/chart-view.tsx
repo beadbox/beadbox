@@ -233,7 +233,7 @@ export function ChartView() {
         {blocksQuery.data?.degraded && (
           <div
             role="alert"
-            className="flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-300"
+            className="flex items-center justify-between gap-3 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-text dark:text-warning-text"
           >
             <span>
               Blocked-by markers are unavailable: {blocksQuery.data.degraded.message}. The chart
@@ -242,7 +242,7 @@ export function ChartView() {
             <button
               type="button"
               onClick={() => void blocksQuery.refetch()}
-              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-amber-500/20"
+              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-warning/20"
             >
               Retry
             </button>

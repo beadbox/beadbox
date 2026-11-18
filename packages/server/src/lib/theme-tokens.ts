@@ -54,14 +54,15 @@ export const DEFAULT_TONE_HEX: Readonly<Record<ToneKey, string>> = {
 
 /**
  * Tokens that receive a DERIVED `-text` companion: the three tones plus
- * `destructive`, which is already authorable in COLOR_KEYS.
+ * `destructive` and `primary`, both already authorable in COLOR_KEYS.
  *
- * `destructive` is the shadcn semantic for a SOLID fill, paired with
- * `destructiveForeground` for text ON that fill. Error badges here are
- * tinted, not solid, so they need text readable against a 20% tint instead —
- * the same problem the tones have. Deriving it adds no authorable token.
+ * `destructive` and `primary` are shadcn semantics for a SOLID fill, paired
+ * with a `*Foreground` for text ON that fill. Tinted pills here need text
+ * readable against a 20% tint instead — the same problem the tones have, and
+ * measurably: `text-primary` on its own 15% tint is 5.01:1 on the dark card
+ * but only 4.09:1 on a white one. Deriving adds no authorable token.
  */
-export const TEXT_DERIVED_KEYS = [...TONE_KEYS, "destructive"] as const
+export const TEXT_DERIVED_KEYS = [...TONE_KEYS, "destructive", "primary"] as const
 
 export const RADIUS_KEYS = ["sm", "md", "lg", "xl"] as const
 export const FONT_KEYS = ["sans", "mono"] as const

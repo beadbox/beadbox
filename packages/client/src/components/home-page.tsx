@@ -1025,15 +1025,15 @@ function BeadsEpicsViewer() {
       <IncompatibilityBanner bdCheck={bdCheck} onOpenSettings={handleOpenSettingsToHelp} />
 
       {flockBanner && (
-        <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2">
+        <div className="bg-warning/15 border-b border-warning/30 px-4 py-2">
           <div className="flex items-center justify-between max-w-screen-xl mx-auto">
-            <div className="flex items-center gap-2 text-amber-400">
+            <div className="flex items-center gap-2 text-warning-text">
               <RefreshCw className="h-3.5 w-3.5 animate-spin shrink-0" />
               <span className="text-sm">Workspace busy, data may be outdated</span>
             </div>
             <button
               onClick={() => setFlockBanner(false)}
-              className="text-amber-400/70 hover:text-amber-300 text-xs px-2 py-1 rounded hover:bg-amber-500/20 transition-colors"
+              className="text-warning-text/70 hover:text-warning-text text-xs px-2 py-1 rounded hover:bg-warning/20 transition-colors"
             >
               Dismiss
             </button>
@@ -1048,7 +1048,7 @@ function BeadsEpicsViewer() {
         {typeCatalogError && (
           <div
             role="alert"
-            className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+            className="mb-3 flex items-center justify-between gap-3 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-text"
           >
             <span>
               Could not load issue types: {typeCatalogError}. Type changes are unavailable.
@@ -1057,7 +1057,7 @@ function BeadsEpicsViewer() {
               type="button"
               onClick={retryAvailableTypes}
               disabled={typeCatalogRetrying}
-              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-60"
+              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-warning/20 disabled:cursor-wait disabled:opacity-60"
             >
               {typeCatalogRetrying ? "Retrying…" : "Retry"}
             </button>
@@ -1066,7 +1066,7 @@ function BeadsEpicsViewer() {
         {blocksDegraded && blocksDegraded.dbPath === currentWorkspace?.databasePath && (
           <div
             role="alert"
-            className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+            className="mb-3 flex items-center justify-between gap-3 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-text"
           >
             <span>
               Blocked-by markers are unavailable: {blocksDegraded.message}. The tree does not show
@@ -1075,7 +1075,7 @@ function BeadsEpicsViewer() {
             <button
               type="button"
               onClick={() => setBlocksRetry((n) => n + 1)}
-              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-amber-500/20"
+              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-warning/20"
             >
               Retry
             </button>
@@ -1480,7 +1480,7 @@ function BeadsEpicsViewer() {
             <AlertDialogAction
               autoFocus
               disabled={isDeleting}
-              className="bg-red-600 hover:bg-red-700 text-white"
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
               onClick={(e) => {
                 e.preventDefault()
                 if (deleteConfirmId) {
@@ -1544,7 +1544,7 @@ function BeadsEpicsViewer() {
               {epicCloseConfirm?.action === "close" ? "Close" : "Archive"} epic only
             </AlertDialogAction>
             <AlertDialogAction
-              className="bg-amber-600 hover:bg-amber-700"
+              className="bg-warning hover:bg-warning/90"
               onClick={handleEpicCloseWithChildren}
             >
               {epicCloseConfirm?.action === "close" ? "Close" : "Archive"} children too

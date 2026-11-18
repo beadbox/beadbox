@@ -65,15 +65,15 @@ const markdownComponents: Components = {
   ),
   em: ({ children }) => <em className="italic">{children}</em>,
   code: ({ children }) => (
-    <code className="px-1.5 py-0.5 rounded bg-slate-700 text-emerald-400 text-xs font-mono">
+    <code className="px-1.5 py-0.5 rounded bg-muted text-success-text text-xs font-mono">
       {children}
     </code>
   ),
   pre: ({ children }) => (
-    <pre className="p-3 rounded bg-slate-800 overflow-x-auto my-2 text-sm">{children}</pre>
+    <pre className="p-3 rounded bg-muted overflow-x-auto my-2 text-sm">{children}</pre>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="border-l-2 border-slate-500 pl-3 my-2 text-muted-foreground italic">
+    <blockquote className="border-l-2 border-border pl-3 my-2 text-muted-foreground italic">
       {children}
     </blockquote>
   ),

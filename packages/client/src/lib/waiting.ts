@@ -3,13 +3,17 @@
 
 import { formatRelativeTime } from "./activity-utils"
 
-// Human gates use the same amber pill as the formula views; the other
-// types get their own colours here so they can be told apart.
+// Human gates use the same warning pill as the formula views; the other types
+// get their own token so they can be told apart. The GitHub types take
+// `primary` — not a tone, because they are neither a warning nor an error, and
+// the three tones are already spoken for by human/timer. Its text uses the
+// derived companion: bare `text-primary` on its own 15% tint measures 4.09:1
+// on a white card.
 const GATE_TYPE_CLASS: Record<string, string> = {
-  human: "bg-amber-500/15 text-amber-400 border-amber-500/20",
-  timer: "bg-sky-500/15 text-sky-400 border-sky-500/20",
-  "gh:run": "bg-violet-500/15 text-violet-400 border-violet-500/20",
-  "gh:pr": "bg-violet-500/15 text-violet-400 border-violet-500/20",
+  human: "bg-warning/15 text-warning-text border-warning/20",
+  timer: "bg-info/15 text-info-text border-info/20",
+  "gh:run": "bg-primary/15 text-primary-text border-primary/20",
+  "gh:pr": "bg-primary/15 text-primary-text border-primary/20",
 }
 const DEFAULT_GATE_CLASS = "bg-muted text-muted-foreground border-border"
 

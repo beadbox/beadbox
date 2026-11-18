@@ -35,7 +35,7 @@ export function LoadErrorEmpty({
   const isTimeout = error.message.includes("timeout")
   return (
     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-4">
-      <AlertTriangle className="h-8 w-8 text-amber-400" />
+      <AlertTriangle className="h-8 w-8 text-warning-text" />
       <div className="text-center space-y-1">
         <p className="text-sm font-medium text-foreground">Unable to load workspace</p>
         <p className="text-xs">

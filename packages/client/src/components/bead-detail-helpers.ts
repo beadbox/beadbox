@@ -92,6 +92,13 @@ export function getStatusDisplayConfig(status: string): {
  */
 export const TYPE_BADGE_CLASS = "bg-muted/40 text-muted-foreground border-border"
 
+/**
+ * One left-border colour per comment author, picked by hash. IDENTITY colours,
+ * not semantic roles: collapsing them onto tone tokens would make two authors
+ * share a stripe, which is the one thing this list exists to prevent. Left as
+ * literals — a 2px saturated border reads on a light card as well as a dark
+ * one, and there is no token vocabulary for "author #4".
+ */
 const authorColors = [
   "border-l-emerald-500",
   "border-l-blue-500",

@@ -399,6 +399,8 @@ export const DEFAULT_TYPE_HEX: Readonly<Record<string, string>> = {
   rig: "#f97316",
   convoy: "#84cc16",
   event: "#f43f5e",
+  // epic-tree draws a milestone's Flag in sky; it had no entry here.
+  milestone: "#38bdf8",
 }
 
 export function buildTypeColorCss(surface: string): string {

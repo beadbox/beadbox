@@ -26,7 +26,7 @@ function formatDescription(text: string): React.ReactNode[] {
       return (
         <span
           key={i}
-          className="px-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25"
+          className="px-0.5 rounded bg-info/15 text-info-text border border-info/25"
         >
           {part.slice(2, -2)}
         </span>
@@ -34,7 +34,7 @@ function formatDescription(text: string): React.ReactNode[] {
     }
     if (/^(\/|~\/|\w+\/)/.test(part) && part.includes("/")) {
       return (
-        <span key={i} className="px-0.5 rounded bg-blue-900/20 text-blue-200">
+        <span key={i} className="px-0.5 rounded bg-info/10 text-info-text">
           {part}
         </span>
       )
@@ -62,16 +62,16 @@ const overlayStyles: Record<
   StepOverlay["status"],
   { bg: string; border: string; ring?: string; animate?: string }
 > = {
-  complete: { bg: "bg-green-500/10", border: "border-green-500/60", ring: "ring-green-500/30" },
+  complete: { bg: "bg-success/10", border: "border-success/60", ring: "ring-success/30" },
   in_progress: {
-    bg: "bg-blue-500/10",
-    border: "border-blue-500/60",
-    ring: "ring-blue-500/30",
+    bg: "bg-info/10",
+    border: "border-info/60",
+    ring: "ring-info/30",
     animate: "animate-pulse",
   },
-  blocked: { bg: "bg-amber-500/10", border: "border-amber-500/60", ring: "ring-amber-500/30" },
+  blocked: { bg: "bg-warning/10", border: "border-warning/60", ring: "ring-warning/30" },
   pending: { bg: "bg-card/50 opacity-60", border: "border-border/30" },
-  failed: { bg: "bg-red-500/10", border: "border-red-500/60", ring: "ring-red-500/30" },
+  failed: { bg: "bg-destructive/10", border: "border-destructive/60", ring: "ring-destructive/30" },
 }
 
 // ---------------------------------------------------------------------------
@@ -147,10 +147,10 @@ function NodeCard({
             style
               ? cn(style.bg, style.border, style.ring && `ring-1 ${style.ring}`, style.animate)
               : cn(
-                  "bg-[#27272a] hover:bg-[#2e2e32]",
+                  "bg-card hover:bg-muted/50",
                   selected
                     ? "border-primary/50 ring-1 ring-primary/30"
-                    : "border-[#3f3f46] hover:border-[#52525b]",
+                    : "border-border hover:border-muted-foreground/50",
                 ),
             selected && style && "ring-2 ring-primary/40",
           )}
@@ -174,7 +174,7 @@ function NodeCard({
                       part.startsWith("{{") ? (
                         <span
                           key={i}
-                          className="text-[11.5px] font-mono px-1 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+                          className="text-[11.5px] font-mono px-1 py-0.5 rounded bg-info/15 text-info-text border border-info/25 mx-0.5"
                         >
                           {part.slice(2, -2)}
                         </span>
@@ -187,34 +187,34 @@ function NodeCard({
                 <div className="flex items-center gap-1.5 shrink-0">
                   <StepCountBadge stepId={step.id} />
                   {overlay?.status === "complete" && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/20">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-success/15 text-success-text border border-success/20">
                       completed
                     </span>
                   )}
                   {overlay?.assignee && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-background text-muted-foreground">
                       @{overlay.assignee}
                     </span>
                   )}
                   {!overlay?.assignee && step.assignee && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-background text-muted-foreground">
                       @{step.assignee}
                     </span>
                   )}
                   {gateType === "human" && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-warning/15 text-warning-text border border-warning/20">
                       human
                     </span>
                   )}
                   {gateType === "conditional" && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-info/15 text-info-text border border-info/20">
                       conditional
                     </span>
                   )}
                 </div>
               </div>
               {step.description && (
-                <p className="mt-1.5 w-full text-[14.3px] text-zinc-400 rounded-md bg-black/20 px-2.5 py-1.5 whitespace-pre-line">
+                <p className="mt-1.5 w-full text-[14.3px] text-muted-foreground rounded-md bg-black/20 px-2.5 py-1.5 whitespace-pre-line">
                   {formatDescription(collapseNewlines(step.description.trim()).slice(0, 200))}
                   {step.description.trim().length > 400 ? "..." : ""}
                 </p>
@@ -279,18 +279,18 @@ function SequentialGroup({
 
   return (
     <div
-      className="rounded-xl border border-[#3f3f46] bg-[#1e1e21] shadow-[0_2px_8px_rgba(0,0,0,0.3)] p-3"
+      className="rounded-xl border border-border bg-background shadow-[0_2px_8px_rgba(0,0,0,0.3)] p-3"
       style={{ width: "100%" }}
     >
       <div className="flex items-center gap-2 mb-2">
-        <ArrowDownNarrowWide className="h-3 w-3 text-zinc-500" />
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-500">
+        <ArrowDownNarrowWide className="h-3 w-3 text-muted-foreground" />
+        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-muted-foreground">
           Sequential
         </span>
-        <span className="text-[10px] text-zinc-600">{chain.length} steps</span>
+        <span className="text-[10px] text-muted-foreground/70">{chain.length} steps</span>
         <Tooltip>
           <TooltipTrigger asChild>
-            <CircleHelp className="h-3 w-3 text-zinc-600 cursor-default" />
+            <CircleHelp className="h-3 w-3 text-muted-foreground/70 cursor-default" />
           </TooltipTrigger>
           <TooltipContent side="right" className="max-w-[220px] text-xs">
             These steps run one after another in order. Each must complete before the next begins.
@@ -345,18 +345,18 @@ function ParallelGroup({
 }) {
   return (
     <div
-      className="rounded-xl border border-[#3f3f46] bg-[#1e1e21] shadow-[0_2px_8px_rgba(0,0,0,0.3)] p-3"
+      className="rounded-xl border border-border bg-background shadow-[0_2px_8px_rgba(0,0,0,0.3)] p-3"
       style={{ width: "100%" }}
     >
       <div className="flex items-center gap-2 mb-2">
-        <Columns2 className="h-3 w-3 text-zinc-500" />
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-500">
+        <Columns2 className="h-3 w-3 text-muted-foreground" />
+        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-muted-foreground">
           Parallel
         </span>
-        <span className="text-[10px] text-zinc-600">{group.length} tasks</span>
+        <span className="text-[10px] text-muted-foreground/70">{group.length} tasks</span>
         <Tooltip>
           <TooltipTrigger asChild>
-            <CircleHelp className="h-3 w-3 text-zinc-600 cursor-default" />
+            <CircleHelp className="h-3 w-3 text-muted-foreground/70 cursor-default" />
           </TooltipTrigger>
           <TooltipContent side="right" className="max-w-[220px] text-xs">
             These steps run in parallel. They share the same dependencies and can execute
@@ -398,20 +398,20 @@ function GateGroup({
 }) {
   return (
     <div
-      className="rounded-xl border border-amber-500/30 bg-[#1e1e21] shadow-[0_2px_8px_rgba(0,0,0,0.3)] p-3"
+      className="rounded-xl border border-warning/30 bg-background shadow-[0_2px_8px_rgba(0,0,0,0.3)] p-3"
       style={{ width: "100%" }}
     >
       <div className="flex items-center gap-2 mb-2">
-        <ShieldCheck className="h-3 w-3 text-amber-500/70" />
-        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-500/70">
+        <ShieldCheck className="h-3 w-3 text-warning-text/70" />
+        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-warning-text/70">
           Gate
         </span>
-        <span className="text-[10px] text-zinc-600">
+        <span className="text-[10px] text-muted-foreground/70">
           {group.length} {group.length === 1 ? "checkpoint" : "checkpoints"}
         </span>
         <Tooltip>
           <TooltipTrigger asChild>
-            <CircleHelp className="h-3 w-3 text-zinc-600 cursor-default" />
+            <CircleHelp className="h-3 w-3 text-muted-foreground/70 cursor-default" />
           </TooltipTrigger>
           <TooltipContent side="right" className="max-w-[220px] text-xs">
             A gate pauses the workflow until a condition is met (human approval or automated check).

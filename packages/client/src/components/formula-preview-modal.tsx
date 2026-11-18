@@ -94,7 +94,7 @@ export function FormulaPreviewModal({
                       <div>
                         <label className="text-xs text-muted-foreground mb-0.5 block">
                           {name}
-                          {v.required && <span className="text-amber-400 ml-0.5">*</span>}
+                          {v.required && <span className="text-warning-text ml-0.5">*</span>}
                         </label>
                         <input
                           type="text"
@@ -120,7 +120,7 @@ export function FormulaPreviewModal({
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           ) : error ? (
-            <div className="text-sm text-red-400 py-4 px-2">{error}</div>
+            <div className="text-sm text-destructive-text py-4 px-2">{error}</div>
           ) : cooked ? (
             cooked.steps.map((step) => (
               <div key={step.id} className="border border-border/50 rounded-md px-3 py-2.5">
@@ -135,8 +135,8 @@ export function FormulaPreviewModal({
                     <span
                       className={`text-[10px] px-1.5 py-0.5 rounded border ${
                         step.gate.type === "human"
-                          ? "bg-amber-500/15 text-amber-400 border-amber-500/20"
-                          : "bg-blue-500/15 text-blue-400 border-blue-500/20"
+                          ? "bg-warning/15 text-warning-text border-warning/20"
+                          : "bg-info/15 text-info-text border-info/20"
                       }`}
                     >
                       {step.gate.type}

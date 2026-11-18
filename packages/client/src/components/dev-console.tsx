@@ -269,12 +269,12 @@ function eventColor(event: WsLifecycleEvent["event"]): string {
   switch (event) {
     case "connected":
     case "recovered":
-      return "text-green-500"
+      return "text-success-text"
     case "disconnected":
     case "polling_error":
       return "text-destructive"
     case "reconnecting":
-      return "text-yellow-500"
+      return "text-warning-text"
     case "heartbeat":
       return "text-muted-foreground/50"
     default:

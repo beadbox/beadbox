@@ -200,7 +200,7 @@ function LocalPathTab({
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 text-sm text-amber-400">
+        <div className="flex items-start gap-2 text-sm text-warning-text">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
@@ -454,7 +454,7 @@ function ServerTab({
               className="flex items-center justify-between rounded-md border border-border px-3 py-2"
             >
               <div className="flex items-center gap-2 text-sm">
-                <span className="text-green-400">&#9679;</span>
+                <span className="text-success-text">&#9679;</span>
                 <span className="font-mono text-foreground">
                   {r.host}:{r.port}
                 </span>
@@ -558,7 +558,7 @@ function ServerTab({
           })}
         </div>
         {addError && (
-          <div className="flex items-start gap-2 text-sm text-amber-400">
+          <div className="flex items-start gap-2 text-sm text-warning-text">
             <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
             <span>{addError}</span>
           </div>
@@ -585,11 +585,11 @@ function ServerTab({
         <code className="text-[11px] bg-muted px-1 py-0.5 rounded">bd init</code> locally, close
         this and use the path field above instead.
       </p>
-      {scanError && <p className="text-xs text-amber-400">Scan: {scanError}</p>}
+      {scanError && <p className="text-xs text-warning-text">Scan: {scanError}</p>}
       {!scanError && scanResults.length > 0 && null}
 
       {discoverError && (
-        <div className="flex items-start gap-2 text-sm text-amber-400 mb-2">
+        <div className="flex items-start gap-2 text-sm text-warning-text mb-2">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>{discoverError}</span>
         </div>

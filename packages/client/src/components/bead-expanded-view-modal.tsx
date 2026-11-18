@@ -104,7 +104,7 @@ export function BeadExpandedViewModal({
           <div className="flex items-center gap-3 text-xs text-muted-foreground mt-2 flex-wrap">
             <CopyableId id={bead.id} className="text-xs" />
             {bead.externalRef && (
-              <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">
+              <span className="px-1.5 py-0.5 rounded bg-info/20 text-info-text font-medium">
                 {bead.externalRef}
               </span>
             )}
@@ -114,13 +114,13 @@ export function BeadExpandedViewModal({
                   href={specId}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-medium hover:bg-indigo-500/30 transition-colors"
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-info/20 text-info-text font-medium hover:bg-info/30 transition-colors"
                 >
                   <ExternalLink className="h-3 w-3" />
                   <span className="truncate max-w-[200px]">{specId}</span>
                 </a>
               ) : (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-medium">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-info/20 text-info-text font-medium">
                   <FileText className="h-3 w-3" />
                   <span className="truncate max-w-[200px]">{specId}</span>
                 </span>
@@ -147,11 +147,11 @@ export function BeadExpandedViewModal({
             <span className="text-border">|</span>
             <span
               className={cn(
-                priority === "critical" && "text-red-400",
-                priority === "high" && "text-orange-400",
-                priority === "medium" && "text-yellow-400",
-                priority === "low" && "text-slate-400",
-                priority === "backlog" && "text-zinc-500",
+                priority === "critical" && "text-destructive-text",
+                priority === "high" && "text-warning-text",
+                priority === "medium" && "text-warning-text",
+                priority === "low" && "text-muted-foreground",
+                priority === "backlog" && "text-muted-foreground",
               )}
             >
               {priority === "critical"
@@ -202,7 +202,7 @@ export function BeadExpandedViewModal({
                 <span
                   className={cn(
                     "inline-flex items-center gap-1",
-                    new Date(deferUntil) > new Date() ? "text-amber-400" : "text-zinc-400",
+                    new Date(deferUntil) > new Date() ? "text-warning-text" : "text-muted-foreground",
                   )}
                 >
                   <PauseCircle className="h-3 w-3" />
@@ -214,7 +214,7 @@ export function BeadExpandedViewModal({
                 </span>
               )}
               {estimatedMinutes && (
-                <span className="inline-flex items-center gap-1 text-zinc-400">
+                <span className="inline-flex items-center gap-1 text-muted-foreground">
                   <Timer className="h-3 w-3" />
                   Est:{" "}
                   {estimatedMinutes >= 60
@@ -295,7 +295,7 @@ export function BeadExpandedViewModal({
                           onOpenChange(false)
                           onBeadNavigate?.(dep.id)
                         }}
-                        className="text-xs px-2 py-0.5 rounded-l bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                        className="text-xs px-2 py-0.5 rounded-l bg-destructive/10 text-destructive-text hover:bg-destructive/20 transition-colors"
                         title={dep.title}
                       >
                         {dep.id}
@@ -305,7 +305,7 @@ export function BeadExpandedViewModal({
                           <TooltipTrigger asChild>
                             <button
                               onClick={() => onRemoveDependency(dep.id, "blockedBy")}
-                              className="text-xs px-1 py-0.5 rounded-r bg-red-500/10 text-red-400/60 hover:text-red-300 hover:bg-red-500/30 transition-colors border-l border-red-500/20"
+                              className="text-xs px-1 py-0.5 rounded-r bg-destructive/10 text-destructive-text/60 hover:text-destructive-text hover:bg-destructive/30 transition-colors border-l border-destructive/20"
                             >
                               <X className="h-2.5 w-2.5" />
                             </button>
@@ -327,7 +327,7 @@ export function BeadExpandedViewModal({
                           onOpenChange(false)
                           onBeadNavigate?.(dep.id)
                         }}
-                        className="text-xs px-2 py-0.5 rounded-l bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors"
+                        className="text-xs px-2 py-0.5 rounded-l bg-warning/10 text-warning-text hover:bg-warning/20 transition-colors"
                         title={dep.title}
                       >
                         {dep.id}
@@ -337,7 +337,7 @@ export function BeadExpandedViewModal({
                           <TooltipTrigger asChild>
                             <button
                               onClick={() => onRemoveDependency(dep.id, "blocks")}
-                              className="text-xs px-1 py-0.5 rounded-r bg-amber-500/10 text-amber-400/60 hover:text-amber-300 hover:bg-amber-500/30 transition-colors border-l border-amber-500/20"
+                              className="text-xs px-1 py-0.5 rounded-r bg-warning/10 text-warning-text/60 hover:text-warning-text hover:bg-warning/30 transition-colors border-l border-warning/20"
                             >
                               <X className="h-2.5 w-2.5" />
                             </button>

@@ -46,17 +46,17 @@ export function IncompatibilityBanner({ bdCheck, onOpenSettings }: Incompatibili
   const message = `Your beads CLI (${bdCheck.version}) is below the minimum required by Beadbox (v${MIN_BD_VERSION}). Some features may not work.`
 
   return (
-    <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-3">
+    <div className="bg-warning/15 border-b border-warning/30 px-4 py-3">
       <div className="flex items-center justify-between max-w-screen-xl mx-auto gap-3">
-        <div className="flex items-start gap-2 text-amber-400 flex-1 min-w-0">
+        <div className="flex items-start gap-2 text-warning-text flex-1 min-w-0">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <div className="text-sm">
             <span className="font-medium">{message}</span>
             <button
               onClick={onOpenSettings}
               className={cn(
-                "ml-2 text-amber-300 hover:text-amber-200 underline underline-offset-2 font-medium",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 rounded-sm",
+                "ml-2 text-warning-text/80 hover:text-warning-text underline underline-offset-2 font-medium",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/50 rounded-sm",
               )}
             >
               How to update
@@ -67,8 +67,8 @@ export function IncompatibilityBanner({ bdCheck, onOpenSettings }: Incompatibili
           onClick={handleDismiss}
           className={cn(
             "inline-flex items-center justify-center rounded-md min-h-[44px] min-w-[44px] shrink-0",
-            "text-amber-400/70 hover:text-amber-300 hover:bg-amber-500/20",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50",
+            "text-warning-text/70 hover:text-warning-text hover:bg-warning/20",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/50",
             "transition-colors",
           )}
         >

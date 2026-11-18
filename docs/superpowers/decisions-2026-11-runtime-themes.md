@@ -821,4 +821,45 @@ the alpha was dropped, having matched only the pre-color-mix fallback rule, and
 claimed the hover variants were missing, having not accounted for the `:hover`
 suffix). Cost if wrong: nothing — this check is pure verification.
 
-<!-- 57 decision blocks -->
+Decision 58 — identity palettes stay literal. Reasoning: `authorColors`,
+`ACCENT_COLORS` and the three `border-l-*` cycles exist so adjacent entries
+DIFFER; there is no token for "author #4", and a 2-4px saturated 500 border
+reads on a light card as well as a dark one. Cost if wrong: a theme cannot
+retint those stripes. Learned the hard way — see Decision 59.
+
+Decision 59 — a bulk family-to-token conversion is not safe on its own, and
+needs a duplicate check, not just a leftover count. Reasoning: the converter
+flattened `authorColors` from six distinct colours to two repeated ones,
+`epic-tree`'s five-entry cycle to three (`border-l-info` x3), and
+`epic-tree-skeleton`'s three to two. My first verification counted REMAINING
+literals, which correctly read 1 for epic-tree and so looked clean — the
+damage was in what had already been converted, not in what was left.
+`__tests__/identity-palettes.test.ts` now asserts distinctness, and caught the
+epic-tree case the moment it was written. Cost if wrong: two authors share a
+stripe, silently, in a list whose entire purpose is distinctness.
+
+Decision 60 — a tone hover must differ from its base. Reasoning: collapsing
+shade pairs onto one token turned `text-emerald-400 hover:text-emerald-300`
+into `text-success-text hover:text-success-text`, an inert hover. Eight
+shipped before a scan found them. Text colours now dim the base
+(`/80 hover:` full) and solid fills use shadcn's `/90` on hover. Cost if
+wrong: links stop responding to the pointer, which no test asserting class
+strings would ever notice.
+
+Decision 61 — derive a `-text` companion for `primary` as well. Reasoning:
+forced by measurement, not symmetry. The GitHub gate pills needed a value
+distinguishable from all three tones, and bare `text-primary` on its own 15%
+tint is 5.01:1 on the dark card but 4.09:1 on white — under 4.5. The derived
+value is 4.85:1. Still no new AUTHORABLE token. Cost if wrong: one more
+derived var to clear on theme apply.
+
+Decision 62 — verify the whole sweep against the BUILT CSS, class by class.
+Reasoning: 220 distinct token colour classes now carry the UI, and every test
+asserts class strings, so a class Tailwind never generated would pass
+everything and render nothing. All 220 were confirmed present in the built
+stylesheet. The seven initially flagged as missing were my own regex failing
+on the `!` important prefix and on compound variants like
+`dark:aria-invalid:`, not real gaps. Cost if wrong: nothing — verification
+only.
+
+<!-- 62 decision blocks -->

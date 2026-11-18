@@ -12,6 +12,7 @@ import {
   useReactFlow,
 } from "@xyflow/react"
 import { useCallback, useEffect, useRef } from "react"
+import { currentThemeEdgeColor } from "../lib/status-colors-store"
 import "@xyflow/react/dist/style.css"
 // Dynamic import: elkjs bundled build is CJS and must be lazy-loaded in client components
 const getElk = () => import("elkjs/lib/elk.bundled.js").then((m) => new m.default())
@@ -22,6 +23,12 @@ import type { FormulaStep, StepOverlay } from "../lib/types"
 import { cn } from "../lib/utils"
 import { StepCountBadge } from "./step-count-badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
+
+/**
+ * Edge stroke, as a token reference so a theme switch repaints it without a
+ * relayout. strokeOpacity carries the 50% the old `#52525b80` encoded.
+ */
+const EDGE_STROKE = { stroke: "var(--bb-muted-foreground)", strokeOpacity: 0.5, strokeWidth: 1.5 }
 
 // ---------------------------------------------------------------------------
 // ELK layout engine (singleton)
@@ -297,7 +304,9 @@ async function layoutNestedSteps(steps: FormulaStep[]): Promise<{ nodes: Node[];
     return { x: n?.x ?? 0, y: n?.y ?? 0 }
   }
 
-  const edgeColor = "#52525b80" // zinc-600 at 50% opacity
+  // Arrowheads need a literal (see currentThemeEdgeColor); strokes use the
+  // token directly via EDGE_STROKE so they follow a theme switch live.
+  const edgeColor = currentThemeEdgeColor()
   return {
     nodes: [
       { id: "__start__", type: "terminal", position: at("__start__"), data: { label: "Start" } },
@@ -328,7 +337,7 @@ async function layoutNestedSteps(steps: FormulaStep[]): Promise<{ nodes: Node[];
         type: "smoothstep",
         animated: false,
         markerEnd: { type: "arrowclosed" as const, color: edgeColor, width: 12, height: 12 },
-        style: { stroke: edgeColor, strokeWidth: 1.5 },
+        style: EDGE_STROKE,
       }
     }),
   }
@@ -540,8 +549,10 @@ export async function layoutFormulaSteps(
 
   const startElk = laid.children?.find((c) => c.id === "__start__")
   const endElk = laid.children?.find((c) => c.id === "__end__")
-  const edgeColor = "#52525b80" // zinc-600 at 50% opacity
-  const edgeStyle = { stroke: edgeColor, strokeWidth: 1.5 }
+  // Arrowheads need a literal (see currentThemeEdgeColor); strokes use the
+  // token directly via EDGE_STROKE so they follow a theme switch live.
+  const edgeColor = currentThemeEdgeColor()
+  const edgeStyle = EDGE_STROKE
 
   const nodes: Node[] = [
     {
@@ -618,23 +629,28 @@ const overlayStyles: Record<
   StepOverlay["status"],
   { border: string; bg: string; ring: string; animate?: string }
 > = {
-  complete: { border: "border-green-500/60", bg: "bg-green-500/10", ring: "ring-green-500/30" },
+  complete: { border: "border-success/60", bg: "bg-success/10", ring: "ring-success/30" },
   in_progress: {
-    border: "border-blue-500/60",
-    bg: "bg-blue-500/10",
-    ring: "ring-blue-500/30",
+    border: "border-info/60",
+    bg: "bg-info/10",
+    ring: "ring-info/30",
     animate: "animate-pulse",
   },
-  blocked: { border: "border-amber-500/60", bg: "bg-amber-500/10", ring: "ring-amber-500/30" },
+  blocked: { border: "border-warning/60", bg: "bg-warning/10", ring: "ring-warning/30" },
   pending: { border: "border-border/30", bg: "bg-card/50 opacity-60", ring: "" },
-  failed: { border: "border-red-500/60", bg: "bg-red-500/10", ring: "ring-red-500/30" },
+  failed: { border: "border-destructive/60", bg: "bg-destructive/10", ring: "ring-destructive/30" },
 }
 
 // ---------------------------------------------------------------------------
 // Custom step node for React Flow
 // ---------------------------------------------------------------------------
 
-// Accent color per step index (cycles through a palette)
+/**
+ * Accent color per step index (cycles through a palette). Deliberately left as
+ * literal hex: these are identity colours for "step 1 vs step 2", not semantic
+ * roles, and at 500-level saturation they read on a light card as well as a
+ * dark one. A theme cannot retint them, which is the accepted trade.
+ */
 const ACCENT_COLORS = [
   "#22c55e", // green
   "#3b82f6", // blue
@@ -666,7 +682,7 @@ function StepNodeComponent({ data }: { data: StepNodeData }) {
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
       <Tooltip>
         <TooltipTrigger asChild>
@@ -679,10 +695,10 @@ function StepNodeComponent({ data }: { data: StepNodeData }) {
               style
                 ? cn(style.bg, style.border, style.ring && `ring-1 ${style.ring}`, style.animate)
                 : cn(
-                    "bg-[#27272a] hover:bg-[#2e2e32]",
+                    "bg-card hover:bg-muted/50",
                     selected
                       ? "border-primary/50 ring-1 ring-primary/30"
-                      : "border-[#3f3f46] hover:border-[#52525b]",
+                      : "border-border hover:border-muted-foreground/50",
                   ),
               selected && style && "ring-2 ring-primary/40",
             )}
@@ -709,7 +725,7 @@ function StepNodeComponent({ data }: { data: StepNodeData }) {
                       part.startsWith("{{") ? (
                         <span
                           key={i}
-                          className="text-[11.5px] font-mono px-1 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+                          className="text-[11.5px] font-mono px-1 py-0.5 rounded bg-info/15 text-info-text border border-info/25 mx-0.5"
                         >
                           {part.slice(2, -2)}
                         </span>
@@ -722,22 +738,22 @@ function StepNodeComponent({ data }: { data: StepNodeData }) {
                 <div className="flex items-center gap-1.5 shrink-0">
                   <StepCountBadge stepId={step.id} />
                   {overlay?.assignee && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-background text-muted-foreground">
                       @{overlay.assignee}
                     </span>
                   )}
                   {!overlay?.assignee && step.assignee && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-background text-muted-foreground">
                       @{step.assignee}
                     </span>
                   )}
                   {gateType === "human" && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-warning/15 text-warning-text border border-warning/20">
                       human
                     </span>
                   )}
                   {gateType === "conditional" && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-info/15 text-info-text border border-info/20">
                       conditional
                     </span>
                   )}
@@ -765,7 +781,7 @@ function StepNodeComponent({ data }: { data: StepNodeData }) {
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
     </>
   )
@@ -787,21 +803,21 @@ function StepGroupNodeComponent({ data }: { data: StepGroupData }) {
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
       <div
-        className="rounded-xl border border-[#3f3f46] bg-[#1e1e21] shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+        className="rounded-xl border border-border bg-background shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
         style={{ width: NODE_WIDTH, padding: GROUP_PADDING }}
       >
         <div className="flex items-center gap-1.5 mb-2 px-1">
-          <Columns2 className="h-3 w-3 text-zinc-500" />
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <Columns2 className="h-3 w-3 text-muted-foreground" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Parallel
           </span>
-          <span className="text-[10px] text-zinc-600">{group.steps.length} tasks</span>
+          <span className="text-[10px] text-muted-foreground/70">{group.steps.length} tasks</span>
           <Tooltip>
             <TooltipTrigger asChild>
-              <CircleHelp className="h-3 w-3 text-zinc-600 cursor-default" />
+              <CircleHelp className="h-3 w-3 text-muted-foreground/70 cursor-default" />
             </TooltipTrigger>
             <TooltipContent side="right" className="max-w-[220px] text-xs">
               These steps run in parallel. They share the same dependencies and can execute
@@ -834,10 +850,10 @@ function StepGroupNodeComponent({ data }: { data: StepGroupData }) {
                             style.animate,
                           )
                         : cn(
-                            "bg-[#27272a] hover:bg-[#2e2e32]",
+                            "bg-card hover:bg-muted/50",
                             isSelected
                               ? "border-primary/50 ring-1 ring-primary/30"
-                              : "border-[#3f3f46]/50 hover:border-[#52525b]",
+                              : "border-border/50 hover:border-muted-foreground/50",
                           ),
                       isSelected && style && "ring-2 ring-primary/40",
                     )}
@@ -863,7 +879,7 @@ function StepGroupNodeComponent({ data }: { data: StepGroupData }) {
                               part.startsWith("{{") ? (
                                 <span
                                   key={pi}
-                                  className="text-[10.5px] font-mono px-0.5 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+                                  className="text-[10.5px] font-mono px-0.5 py-0.5 rounded bg-info/15 text-info-text border border-info/25 mx-0.5"
                                 >
                                   {part.slice(2, -2)}
                                 </span>
@@ -876,22 +892,22 @@ function StepGroupNodeComponent({ data }: { data: StepGroupData }) {
                         <div className="flex items-center gap-1 shrink-0">
                           <StepCountBadge stepId={step.id} compact />
                           {stepOverlay?.assignee && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-background text-muted-foreground">
                               @{stepOverlay.assignee}
                             </span>
                           )}
                           {!stepOverlay?.assignee && step.assignee && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-background text-muted-foreground">
                               @{step.assignee}
                             </span>
                           )}
                           {gateType === "human" && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-warning/15 text-warning-text border border-warning/20">
                               human
                             </span>
                           )}
                           {gateType === "conditional" && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-info/15 text-info-text border border-info/20">
                               conditional
                             </span>
                           )}
@@ -916,7 +932,7 @@ function StepGroupNodeComponent({ data }: { data: StepGroupData }) {
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
     </>
   )
@@ -938,21 +954,21 @@ function SeqGroupNodeComponent({ data }: { data: SeqGroupData }) {
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
       <div
-        className="rounded-xl border border-[#3f3f46] bg-[#1e1e21] shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+        className="rounded-xl border border-border bg-background shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
         style={{ width: NODE_WIDTH, padding: GROUP_PADDING }}
       >
         <div className="flex items-center gap-1.5 mb-2 px-1">
-          <ArrowDownNarrowWide className="h-3 w-3 text-zinc-500" />
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <ArrowDownNarrowWide className="h-3 w-3 text-muted-foreground" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Sequential
           </span>
-          <span className="text-[10px] text-zinc-600">{group.steps.length} steps</span>
+          <span className="text-[10px] text-muted-foreground/70">{group.steps.length} steps</span>
           <Tooltip>
             <TooltipTrigger asChild>
-              <CircleHelp className="h-3 w-3 text-zinc-600 cursor-default" />
+              <CircleHelp className="h-3 w-3 text-muted-foreground/70 cursor-default" />
             </TooltipTrigger>
             <TooltipContent side="right" className="max-w-[220px] text-xs">
               These steps run one after another in order. Each must complete before the next begins.
@@ -984,10 +1000,10 @@ function SeqGroupNodeComponent({ data }: { data: SeqGroupData }) {
                             style.animate,
                           )
                         : cn(
-                            "bg-[#27272a] hover:bg-[#2e2e32]",
+                            "bg-card hover:bg-muted/50",
                             isSelected
                               ? "border-primary/50 ring-1 ring-primary/30"
-                              : "border-[#3f3f46]/50 hover:border-[#52525b]",
+                              : "border-border/50 hover:border-muted-foreground/50",
                           ),
                       isSelected && style && "ring-2 ring-primary/40",
                     )}
@@ -1013,7 +1029,7 @@ function SeqGroupNodeComponent({ data }: { data: SeqGroupData }) {
                               part.startsWith("{{") ? (
                                 <span
                                   key={pi}
-                                  className="text-[10.5px] font-mono px-0.5 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+                                  className="text-[10.5px] font-mono px-0.5 py-0.5 rounded bg-info/15 text-info-text border border-info/25 mx-0.5"
                                 >
                                   {part.slice(2, -2)}
                                 </span>
@@ -1026,22 +1042,22 @@ function SeqGroupNodeComponent({ data }: { data: SeqGroupData }) {
                         <div className="flex items-center gap-1 shrink-0">
                           <StepCountBadge stepId={step.id} compact />
                           {stepOverlay?.assignee && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-background text-muted-foreground">
                               @{stepOverlay.assignee}
                             </span>
                           )}
                           {!stepOverlay?.assignee && step.assignee && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-background text-muted-foreground">
                               @{step.assignee}
                             </span>
                           )}
                           {gateType === "human" && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-warning/15 text-warning-text border border-warning/20">
                               human
                             </span>
                           )}
                           {gateType === "conditional" && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-info/15 text-info-text border border-info/20">
                               conditional
                             </span>
                           )}
@@ -1066,7 +1082,7 @@ function SeqGroupNodeComponent({ data }: { data: SeqGroupData }) {
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
     </>
   )
@@ -1088,23 +1104,23 @@ function GateGroupNodeComponent({ data }: { data: GateGroupData }) {
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
       <div
-        className="rounded-xl border border-amber-500/30 bg-[#1e1e21] shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+        className="rounded-xl border border-warning/30 bg-background shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
         style={{ width: NODE_WIDTH, padding: GROUP_PADDING }}
       >
         <div className="flex items-center gap-1.5 mb-2 px-1">
-          <ShieldCheck className="h-3 w-3 text-amber-500/70" />
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-500/70">
+          <ShieldCheck className="h-3 w-3 text-warning-text/70" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-warning-text/70">
             Gate
           </span>
-          <span className="text-[10px] text-zinc-600">
+          <span className="text-[10px] text-muted-foreground/70">
             {group.steps.length} {group.steps.length === 1 ? "checkpoint" : "checkpoints"}
           </span>
           <Tooltip>
             <TooltipTrigger asChild>
-              <CircleHelp className="h-3 w-3 text-zinc-600 cursor-default" />
+              <CircleHelp className="h-3 w-3 text-muted-foreground/70 cursor-default" />
             </TooltipTrigger>
             <TooltipContent side="right" className="max-w-[220px] text-xs">
               A gate pauses the workflow until a condition is met (human approval or automated
@@ -1137,10 +1153,10 @@ function GateGroupNodeComponent({ data }: { data: GateGroupData }) {
                             style.animate,
                           )
                         : cn(
-                            "bg-[#27272a] hover:bg-[#2e2e32]",
+                            "bg-card hover:bg-muted/50",
                             isSelected
                               ? "border-primary/50 ring-1 ring-primary/30"
-                              : "border-[#3f3f46]/50 hover:border-[#52525b]",
+                              : "border-border/50 hover:border-muted-foreground/50",
                           ),
                       isSelected && style && "ring-2 ring-primary/40",
                     )}
@@ -1166,7 +1182,7 @@ function GateGroupNodeComponent({ data }: { data: GateGroupData }) {
                               part.startsWith("{{") ? (
                                 <span
                                   key={pi}
-                                  className="text-[10.5px] font-mono px-0.5 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+                                  className="text-[10.5px] font-mono px-0.5 py-0.5 rounded bg-info/15 text-info-text border border-info/25 mx-0.5"
                                 >
                                   {part.slice(2, -2)}
                                 </span>
@@ -1179,22 +1195,22 @@ function GateGroupNodeComponent({ data }: { data: GateGroupData }) {
                         <div className="flex items-center gap-1 shrink-0">
                           <StepCountBadge stepId={step.id} compact />
                           {stepOverlay?.assignee && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-background text-muted-foreground">
                               @{stepOverlay.assignee}
                             </span>
                           )}
                           {!stepOverlay?.assignee && step.assignee && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-[#1e1e21] text-muted-foreground">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-background text-muted-foreground">
                               @{step.assignee}
                             </span>
                           )}
                           {gateType === "human" && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-warning/15 text-warning-text border border-warning/20">
                               human
                             </span>
                           )}
                           {gateType === "conditional" && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-info/15 text-info-text border border-info/20">
                               conditional
                             </span>
                           )}
@@ -1219,7 +1235,7 @@ function GateGroupNodeComponent({ data }: { data: GateGroupData }) {
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
     </>
   )
@@ -1264,12 +1280,12 @@ function NestedStepNodeComponent({ data }: { data: NestedStepData }) {
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
       <div
         data-testid="formula-step-group"
         data-step-group-id={step.id}
-        className="rounded-xl border border-[#3f3f46] bg-[#1e1e21] shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+        className="rounded-xl border border-border bg-background shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
         style={{ width: NODE_WIDTH, padding: GROUP_PADDING }}
       >
         <button
@@ -1289,17 +1305,17 @@ function NestedStepNodeComponent({ data }: { data: NestedStepData }) {
           <span className="text-sm font-medium text-foreground truncate">
             <TitleWithVars
               title={step.title}
-              varClassName="text-[11.5px] font-mono px-1 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+              varClassName="text-[11.5px] font-mono px-1 py-0.5 rounded bg-info/15 text-info-text border border-info/25 mx-0.5"
             />
           </span>
-          <span className="text-[10px] text-zinc-600 shrink-0">
+          <span className="text-[10px] text-muted-foreground/70 shrink-0">
             {children.length} {children.length === 1 ? "task" : "tasks"}
           </span>
           <span className="ml-auto flex items-center gap-1 shrink-0">
             {cyclicStep && (
               <span
                 title="This step's tasks and another step's tasks need each other"
-                className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20"
+                className="text-[10px] px-1 py-0.5 rounded bg-destructive/15 text-destructive-text border border-destructive/20"
               >
                 cycle
               </span>
@@ -1309,7 +1325,7 @@ function NestedStepNodeComponent({ data }: { data: NestedStepData }) {
         </button>
         <div className="space-y-1">
           {children.length === 0 && (
-            <p className="text-[12px] text-zinc-600 px-1 py-1.5">No tasks in this step</p>
+            <p className="text-[12px] text-muted-foreground/70 px-1 py-1.5">No tasks in this step</p>
           )}
           {children.map((child, i) => (
             <Tooltip key={child.id}>
@@ -1319,24 +1335,24 @@ function NestedStepNodeComponent({ data }: { data: NestedStepData }) {
                   data-step-id={child.id}
                   onClick={() => onClick?.(child.id)}
                   className={cn(
-                    "w-full rounded-md border text-left transition-all overflow-hidden bg-[#27272a] hover:bg-[#2e2e32]",
+                    "w-full rounded-md border text-left transition-all overflow-hidden bg-card hover:bg-muted/50",
                     selectedStepId === child.id
                       ? "border-primary/50 ring-1 ring-primary/30"
-                      : "border-[#3f3f46]/50 hover:border-[#52525b]",
+                      : "border-border/50 hover:border-muted-foreground/50",
                   )}
                 >
                   <div className="flex items-center gap-2 min-w-0 px-2.5 py-1.5">
-                    <span className="text-[9px] font-mono text-zinc-500 shrink-0 w-4 text-right">
+                    <span className="text-[9px] font-mono text-muted-foreground shrink-0 w-4 text-right">
                       {i + 1}
                     </span>
                     <span className="text-[13px] font-medium text-foreground truncate">
                       <TitleWithVars
                         title={child.title}
-                        varClassName="text-[10.5px] font-mono px-0.5 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+                        varClassName="text-[10.5px] font-mono px-0.5 py-0.5 rounded bg-info/15 text-info-text border border-info/25 mx-0.5"
                       />
                     </span>
                     {cyclic.includes(child.id) && (
-                      <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20 shrink-0">
+                      <span className="text-[10px] px-1 py-0.5 rounded bg-destructive/15 text-destructive-text border border-destructive/20 shrink-0">
                         cycle
                       </span>
                     )}
@@ -1358,7 +1374,7 @@ function NestedStepNodeComponent({ data }: { data: NestedStepData }) {
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+        className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
       />
     </>
   )
@@ -1372,17 +1388,17 @@ function TerminalNodeComponent({ data }: { data: { label: string } }) {
         <Handle
           type="target"
           position={Position.Top}
-          className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+          className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
         />
       )}
-      <div className="w-8 h-8 rounded-full bg-[#27272a] border border-[#3f3f46] flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.3)]">
+      <div className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.3)]">
         {isStart ? (
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <polygon points="3,1 10,6 3,11" fill="#71717a" />
+            <polygon points="3,1 10,6 3,11" className="fill-muted-foreground" />
           </svg>
         ) : (
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <rect x="2" y="2" width="8" height="8" rx="1" fill="#71717a" />
+            <rect x="2" y="2" width="8" height="8" rx="1" className="fill-muted-foreground" />
           </svg>
         )}
       </div>
@@ -1390,7 +1406,7 @@ function TerminalNodeComponent({ data }: { data: { label: string } }) {
         <Handle
           type="source"
           position={Position.Bottom}
-          className="!bg-zinc-500/50 !border-0 !w-1.5 !h-1.5"
+          className="!bg-muted-foreground/50 !border-0 !w-1.5 !h-1.5"
         />
       )}
     </>

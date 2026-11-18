@@ -971,7 +971,7 @@ function RegistryQuarantineScreen({
 }) {
   return (
     <div className="h-full flex items-center justify-center bg-background p-6">
-      <div role="alert" className="max-w-lg space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-5 text-sm">
+      <div role="alert" className="max-w-lg space-y-3 rounded-lg border border-warning/40 bg-warning/10 p-5 text-sm">
         <h2 className="text-base font-semibold text-foreground">Your workspace list could not be read</h2>
         <p className="text-muted-foreground">
           Beadbox could not read <code className="font-mono">{quarantine.registryPath}</code> ({quarantine.reason}).

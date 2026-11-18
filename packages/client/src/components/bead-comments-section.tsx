@@ -169,7 +169,7 @@ export function CommentsSection({
                               onDeleteComment(comment.id)
                             }}
                             className={cn(
-                              "p-1 rounded hover:bg-red-500/20 text-muted-foreground/40 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100",
+                              "p-1 rounded hover:bg-destructive/20 text-muted-foreground/40 hover:text-destructive-text transition-colors opacity-0 group-hover:opacity-100",
                               isMobile &&
                                 "min-h-[44px] min-w-[44px] flex items-center justify-center opacity-100",
                             )}

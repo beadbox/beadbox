@@ -117,7 +117,7 @@ export function MoleculePhaseView({
               <span
                 className={cn(
                   "ml-auto font-mono tabular-nums",
-                  allComplete ? "text-emerald-400/60" : "text-muted-foreground/60",
+                  allComplete ? "text-success-text/60" : "text-muted-foreground/60",
                 )}
               >
                 {phase.closedCount}/{phase.totalCount}

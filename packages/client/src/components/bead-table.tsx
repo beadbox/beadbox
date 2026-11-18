@@ -161,6 +161,8 @@ function computeWaves(beads: Bead[], sourceForBead?: SourceForBead): Wave[] {
 // Depth-based left border colors for nested subtasks
 const depthBorderColors = [
   "",
+  // Identity colours, like authorColors in bead-detail-helpers: distinctness
+  // is the point, so these stay literal rather than collapsing onto tones.
   "border-l-2 border-l-blue-500/50",
   "border-l-2 border-l-cyan-500/50",
   "border-l-2 border-l-teal-500/50",
