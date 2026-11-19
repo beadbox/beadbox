@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Run the real smoke's check/report sections without launching a native app."""
 from pathlib import Path
+import json
 import os
 import subprocess
 import tempfile
 import unittest
 
 SCRIPT = Path(__file__).with_name("packaged-smoke.sh")
+# The first smoke targets (beadbox-79a): what v0.33.0's rc needed checked by hand.
+TARGETS = ["all-projects", "status-colors-gray"]
+VIEWS_OK = [{"target": t, "ok": True, "detail": "as expected"} for t in TARGETS]
 
 
 class SmokeGates(unittest.TestCase):
-    def smoke(self, failed_gate="", missing_check=False, refetch_at=30, list_only=False):
+    def smoke(self, failed_gate="", missing_check=False, refetch_at=30, list_only=False, views=None):
         text = SCRIPT.read_text()
         reporting = text[text.index("failures=0"):text.index("# ---------------------------------------------------------------------------\n# Seed:")]
         checks = text[text.index("# (a) The sidecar booted."):text.index('screencapture -x')]
@@ -50,6 +54,11 @@ if [ "$FAILED_GATE" != tree ]; then
   echo '[debug:cascade9] getEpicsCore N=1 db=smoke-workspace' >> "$LOG"
 fi
 [ "$FAILED_GATE" = subscription ] || echo '[change-detector] starting for smoke-workspace' >> "$LOG"
+# beadbox-79a: the release's named smoke targets and what the app reported
+# for each from inside its WebView (one [smoke-view] JSON line per target).
+SMOKE_TARGETS=$PWD/smoke-targets.json
+printf '%s\n' "$TARGETS_JSON" > "$SMOKE_TARGETS"
+[ -z "$VIEW_LINES" ] || printf '%s\n' "$VIEW_LINES" >> "$LOG"
 '''
         # The five checks outside this extracted section retain their accounting.
         other_checks = '\n'.join('pass "' + name + '"' for name in
@@ -59,7 +68,9 @@ fi
         with tempfile.TemporaryDirectory(prefix="smoke-gates-") as tmp:
             result = subprocess.run(["bash", "-uo", "pipefail", "-c",
                                      reporting + setup + checks + other_checks + '\n' + finish],
-                                    cwd=tmp, env=dict(os.environ, FAILED_GATE=failed_gate, REFETCH_AT=str(refetch_at), LIST_ONLY="yes" if list_only else "no"),
+                                    cwd=tmp, env=dict(os.environ, FAILED_GATE=failed_gate, REFETCH_AT=str(refetch_at), LIST_ONLY="yes" if list_only else "no",
+                                             TARGETS_JSON=json.dumps({"targets": [{"id": t} for t in TARGETS]}),
+                                             VIEW_LINES="\n".join("[smoke-view] " + json.dumps(v) for v in (VIEWS_OK if views is None else views))),
                                     text=True, capture_output=True, timeout=10)
         print(f"gate={failed_gate or 'live-update-only'} missing={missing_check}: exit={result.returncode}\n{result.stdout}")
         return result
@@ -96,6 +107,28 @@ fi
         result = self.smoke(missing_check=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("FAIL  harness:", result.stdout)
+
+    # beadbox-79a: a release whose changed view is broken or blank must not pass.
+    def test_named_views_that_render_as_expected_pass(self):
+        result = self.smoke()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for target in TARGETS:
+            self.assertIn("PASS  view: " + target, result.stdout)
+
+    def test_a_blank_or_broken_changed_view_fails_the_smoke(self):
+        # The app boots and serves the tree, but the All projects view never
+        # reports from the WebView (it threw, or rendered nothing).
+        result = self.smoke(views=[VIEWS_OK[1]])
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FAIL  view: all-projects", result.stdout)
+
+    def test_a_wrong_computed_color_fails_the_smoke(self):
+        wrong = {"target": "status-colors-gray", "ok": False,
+                 "detail": "badge background rgba(59, 130, 246, 0.2), want rgba(255, 0, 0, 0.2)"}
+        result = self.smoke(views=[VIEWS_OK[0], wrong])
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FAIL  view: status-colors-gray", result.stdout)
+        self.assertIn("want rgba(255, 0, 0, 0.2)", result.stdout)
 
 
 if __name__ == "__main__":
