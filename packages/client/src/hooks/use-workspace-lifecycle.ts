@@ -107,8 +107,17 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   const refreshInFlightRef = useRef<{
     key: string
     dirty: boolean
+    // Local edits the current read can be trusted to include.
+    edits: number
     promise: Promise<void> | null
   } | null>(null)
+  // Counts edits made in this window (the optimistic tree updates callers
+  // apply through the returned setEpics). An edit's write reaches bd before
+  // the caller asks for a reload, so only a read that starts after a reload
+  // request can include it: editsReloadedRef is localEditsRef as of the
+  // latest loadEpics call.
+  const localEditsRef = useRef(0)
+  const editsReloadedRef = useRef(0)
   const mountedRef = useRef(true)
   // One trailing timer and one dirty bit bound hidden refresh work.
   // 30s keeps background data useful at at most two refresh starts per minute.
@@ -143,6 +152,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     [currentWorkspace?.id, clearHiddenRefresh],
   )
   const [epics, setEpics] = useState<Epic[]>([])
+  const setEpicsLocal = useCallback<typeof setEpics>((update) => {
+    localEditsRef.current++
+    setEpics(update)
+  }, [])
   const [treeRevision, setTreeRevision] = useState(0)
   const {
     availableTypes,
@@ -736,14 +749,19 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
   latestFetchRef.current = { key: refreshKey, fetch: fetchEpics }
   const loadEpics = useCallback((initialLoad = false): Promise<void> => {
     refreshDirtyRef.current = true
+    const reloadedBefore = editsReloadedRef.current
+    editsReloadedRef.current = localEditsRef.current
     if (!mountedRef.current) return Promise.resolve()
     const request = latestFetchRef.current
     const current = refreshInFlightRef.current
     if (current?.key === request.key) {
-      // The queued refresh may follow a local write. Keep its optimistic
-      // tree visible until the follow-up reads that write; the older reply
-      // must not publish data, errors, or cache entries from before it.
-      loadGenRef.current++
+      // A read that started before a local edit must not publish over it:
+      // keep the optimistic tree until the follow-up reads that write. A
+      // change from elsewhere is different. The read in flight is still the
+      // newest tree this window has, so it publishes and the follow-up
+      // brings the rest; discarding it on every notification would leave a
+      // busy board, visible or hidden, never showing a reply.
+      if (current.edits !== localEditsRef.current) loadGenRef.current++
       current.dirty = true
       return current.promise ?? Promise.resolve()
     }
@@ -763,7 +781,13 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
       clearTimeout(hiddenTimerRef.current)
       hiddenTimerRef.current = null
     }
-    const flight = { key: request.key, dirty: true, promise: null as Promise<void> | null }
+    const flight = {
+      key: request.key,
+      dirty: true,
+      edits: reloadedBefore,
+      promise: null as Promise<void> | null,
+    }
+    let firstRead = true
     refreshInFlightRef.current = flight
     const drain = async () => {
       while (
@@ -780,6 +804,10 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
         }
         initialLoad = false
         flight.dirty = false
+        // The first read starts inside this call, so it can include only the
+        // edits reloaded before it; a follow-up starts after later requests.
+        if (!firstRead) flight.edits = editsReloadedRef.current
+        firstRead = false
         refreshDirtyRef.current = false
         await latestFetchRef.current.fetch()
       }
@@ -974,7 +1002,7 @@ export function useWorkspaceLifecycle(opts: UseWorkspaceLifecycleOpts) {
     typeCatalogRetrying,
     retryAvailableTypes,
     epics,
-    setEpics,
+    setEpics: setEpicsLocal,
     treeRevision,
     isLoading,
     isRefreshing,

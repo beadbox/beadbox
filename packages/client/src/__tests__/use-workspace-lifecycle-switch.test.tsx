@@ -840,3 +840,110 @@ test("a local edit survives a superseded read and the coalesced follow-up still 
   expect(seen.current?.isLoading).toBe(false)
   expect(getEpics).toHaveBeenCalledTimes(3)
 })
+
+test("a change notification during a tree read does not discard that read", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<(value: unknown) => void> = []
+  const { seen } = mountLifecycle({
+    treeRequest: () => new Promise((resolve) => pending.push(resolve)),
+  })
+  await waitFor(() => expect(pending.length).toBe(1))
+  await act(async () => pending[0]({ success: true, epics: [epic("t0")] }))
+  act(() => {
+    void seen.current?.loadEpics()
+  })
+  await waitFor(() => expect(pending.length).toBe(2))
+  const shown: Array<string | undefined> = []
+  for (let n = 1; n <= 3; n++) {
+    // A write elsewhere lands while read n is in flight. Nothing was edited
+    // here, so the reply is still the newest tree this window has seen.
+    act(() => {
+      void seen.current?.loadEpics()
+    })
+    await act(async () => pending[n]({ success: true, epics: [epic(`t${n}`)] }))
+    await waitFor(() => expect(pending.length).toBe(n + 2))
+    shown.push(seen.current?.epics[0]?.id)
+  }
+  expect(shown).toEqual(["t1", "t2", "t3"])
+})
+
+test("the first tree read of a workspace shows when a notification lands during it", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<(value: unknown) => void> = []
+  const { seen } = mountLifecycle({
+    treeRequest: () => new Promise((resolve) => pending.push(resolve)),
+  })
+  await waitFor(() => expect(pending.length).toBe(1))
+  act(() => {
+    void seen.current?.loadEpics()
+  })
+  await act(async () => pending[0]({ success: true, epics: [epic("first")] }))
+  await waitFor(() => expect(pending.length).toBe(2))
+  expect(seen.current?.epics[0]?.id).toBe("first")
+})
+
+test("a hidden tree read shows its reply when a notification lands during it", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<(value: unknown) => void> = []
+  let defer = false
+  const { seen } = mountLifecycle({
+    treeRequest: () =>
+      defer
+        ? new Promise((resolve) => pending.push(resolve))
+        : Promise.resolve({ success: true, epics: [epic("shown")] }),
+  })
+  await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("shown"))
+  await waitFor(() => expect(seen.current?.isLoading).toBe(false))
+  defer = true
+  const clock = hiddenClock()
+  try {
+    // The first hidden change starts a read at once.
+    act(() => {
+      hide()
+      void seen.current?.loadEpics()
+    })
+    await act(async () => {})
+    expect(pending.length).toBe(1)
+    // A second write elsewhere lands while that read is in flight.
+    act(() => {
+      void seen.current?.loadEpics()
+    })
+    await act(async () => pending[0]({ success: true, epics: [epic("background")] }))
+    await act(async () => {})
+    expect(seen.current?.epics[0]?.id).toBe("background")
+    expect(seen.current?.isLoading).toBe(false)
+    // The second change waits for the capped trailing read; it is not lost.
+    expect(pending.length).toBe(1)
+    expect(clock.pending()).toBe(1)
+  } finally {
+    clock.restore()
+  }
+})
+
+test("a read begun while a local write is in progress yields to that write's reload", async () => {
+  setWorkspaceCookie(alpha.id)
+  const pending: Array<(value: unknown) => void> = []
+  const { seen } = mountLifecycle({
+    treeRequest: () => new Promise((resolve) => pending.push(resolve)),
+  })
+  await waitFor(() => expect(pending.length).toBe(1))
+  await act(async () => pending[0]({ success: true, epics: [epic("original")] }))
+  // The user edits: the optimistic tree shows while bd takes the write.
+  act(() => {
+    seen.current?.setEpics([epic("edited")])
+  })
+  // A change from elsewhere starts a read before that write has landed.
+  act(() => {
+    void seen.current?.loadEpics()
+  })
+  await waitFor(() => expect(pending.length).toBe(2))
+  // The write lands and the edit issues its own reload.
+  act(() => {
+    void seen.current?.loadEpics()
+  })
+  await act(async () => pending[1]({ success: true, epics: [epic("original")] }))
+  await waitFor(() => expect(pending.length).toBe(3))
+  expect(seen.current?.epics[0]?.id).toBe("edited")
+  await act(async () => pending[2]({ success: true, epics: [epic("persisted-edit")] }))
+  await waitFor(() => expect(seen.current?.epics[0]?.id).toBe("persisted-edit"))
+})
