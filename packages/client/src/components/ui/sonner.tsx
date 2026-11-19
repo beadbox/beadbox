@@ -2,19 +2,24 @@
 // (P2.3 / bb-cqpc.3).
 //
 // Differences from the Next.js version:
-// - Removed the next-themes useTheme() call. `theme="dark"` is set here and
-//   only here (the root route renders <Toaster /> without the prop, so this
-//   is the single place that decides it).
+// - Replaced the next-themes useTheme() call with Beadbox's own
+//   useThemePreference(), the single source for the resolved appearance.
 // - Stripped the "use client" directive. Vite SPA, no RSC boundary.
 //
-// On theming: the toast BODY is theme-aware — the three --normal-* overrides
-// below resolve through --bb-popover/--bb-popover-foreground/--bb-border, so
-// a runtime theme swap repaints it. Sonner's own `theme` prop is a separate
-// axis: it drives the library's internal greys (close button, description
-// text), which stay dark-tuned even on a light theme. Making those follow
-// the active theme's appearance means mapping appearance -> "light"/"dark"
-// here; it is a visible change to the toast's own chrome and was left out of
-// the runtime-themes branch deliberately rather than by oversight.
+// On theming, there are two axes and both are now handled. The toast BODY is
+// theme-aware through the three --normal-* overrides below, which resolve
+// through --bb-popover/--bb-popover-foreground/--bb-border, so a runtime
+// theme swap repaints it. Sonner's own `theme` prop is separate: it drives
+// the library's INTERNAL greys (close button, description text), which it
+// does not expose as variables.
+//
+// That prop was hardcoded "dark" while light mode was being built, which left
+// toast chrome dark-tuned on a light theme — the one surface the palette
+// sweep could not reach, because the colours live inside the library. It now
+// takes the resolved appearance, so it follows a mode switch and the system
+// preference like everything else. `appearance` is exactly "dark" | "light",
+// which is a subset of Sonner's own "light" | "dark" | "system", so it maps
+// across with no translation.
 //
 // The --bb-* variables come from the theme tokens in
 // packages/client/src/index.css, where :root carries defaults and
@@ -24,10 +29,13 @@
 
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
+import { useThemePreference } from "@/hooks/use-theme-preference"
+
 const Toaster = ({ ...props }: ToasterProps) => {
+  const { appearance } = useThemePreference()
   return (
     <Sonner
-      theme="dark"
+      theme={appearance}
       className="toaster group"
       style={
         {
