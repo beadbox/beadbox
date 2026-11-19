@@ -13,6 +13,10 @@ test("a new comment never moves the thread; no jump pill; keyboard still scrolls
 
   await openTree(page, ws)
   await openDetail(page, target)
+  // WKWebView (the real app) has no CSS scroll anchoring; Chromium does, and it
+  // would hide a jump caused by a comment inserted above the reader. Turn it
+  // off so this test sees what the app's own code does, as WebKit would.
+  await page.addStyleTag({ content: "* { overflow-anchor: none !important; }" })
   await expect(page.getByText("Seed comment 24.", { exact: false })).toBeVisible()
 
   // Scroll the thread's container to its middle and pick the comment in view.

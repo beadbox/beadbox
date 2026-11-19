@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { CommentSortOrder } from "@/lib/local-storage"
 import type { Comment } from "@/lib/types"
 
@@ -69,6 +69,59 @@ export function useCommentNavigation({
   useEffect(() => {
     setFocusedCommentIndex(null)
   }, [bead?.id])
+
+  // beadbox-9sa: keep the reader's place when comments arrive. The comment at
+  // the top of the view keeps its offset from the thread's top across a change
+  // to the list (WKWebView has no CSS scroll anchoring to do it for us), so a
+  // comment inserted above the reader never moves what they are reading. Only
+  // the user's own scrolling (wheel, keyboard, minimap) moves the thread.
+  const anchorRef = useRef<{ id: string; offset: number } | null>(null)
+  const anchorBeadRef = useRef<string | undefined>(undefined)
+  const sortedRef = useRef(sortedComments)
+
+  const captureAnchor = useCallback(() => {
+    const container = scrollContainerRef.current
+    anchorRef.current = null
+    if (!container) return
+    const top = container.getBoundingClientRect().top
+    const bottom = top + container.clientHeight
+    const list = sortedRef.current
+    for (let i = 0; i < list.length; i++) {
+      const el = commentRefs.current[i]
+      if (!el) continue
+      const r = el.getBoundingClientRect()
+      if (r.bottom > top && r.top < bottom) {
+        anchorRef.current = { id: list[i].id, offset: r.top - top }
+        return
+      }
+    }
+  }, [scrollContainerRef])
+
+  // Follow the user's scrolling, so the anchor is always the comment they see.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the scroll container is re-created when the bead changes, so the listener must re-attach then
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    container.addEventListener("scroll", captureAnchor, { passive: true })
+    return () => container.removeEventListener("scroll", captureAnchor)
+  }, [bead?.id, scrollContainerRef, captureAnchor])
+
+  // After the list changes, put the anchor comment back where it was, before paint.
+  useLayoutEffect(() => {
+    sortedRef.current = sortedComments
+    const container = scrollContainerRef.current
+    const anchor = anchorRef.current
+    if (container && anchor && anchorBeadRef.current === bead?.id) {
+      const i = sortedComments.findIndex((c) => c.id === anchor.id)
+      const el = i >= 0 ? commentRefs.current[i] : null
+      if (el) {
+        const delta = el.getBoundingClientRect().top - container.getBoundingClientRect().top - anchor.offset
+        if (Math.abs(delta) >= 1) container.scrollTop += delta
+      }
+    }
+    anchorBeadRef.current = bead?.id
+    captureAnchor()
+  }, [sortedComments, bead?.id, scrollContainerRef, captureAnchor])
 
   // Reset focus when panel loses focus
   useEffect(() => {
