@@ -481,7 +481,7 @@ function AppearanceModeSelector({
 
   return (
     <div className="mb-6">
-      {/* Visible caption (final whole-plan review, Fix 5): without this,
+      {/* Visible caption: without this,
           nothing distinguishes this row (WHEN to render dark/light) from
           the Dark/Light theme grids below it (WHICH theme per slot) except
           an aria-label a sighted user never sees — reading the three

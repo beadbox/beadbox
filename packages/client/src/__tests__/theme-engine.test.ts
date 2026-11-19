@@ -69,7 +69,7 @@ describe("applyTheme", () => {
     expect(document.documentElement.style.getPropertyValue("--bb-background")).toBe("")
   })
 
-  // Task 11 addendum: applyTheme now delegates the class toggle to
+  // applyTheme now delegates the class toggle to
   // theme.ts's applyThemeClass instead of toggling the class itself, but
   // the ordering contract (tokens written, THEN class toggled) must be
   // unchanged — the status-colour MutationObserver is filtered to

@@ -153,7 +153,7 @@ export function defaultThemeIdFor(appearance: Appearance): ThemeId {
 // mismatch the other and make setThemeForAppearance below reject an id that
 // validates and lists fine.
 
-// beadbox-sdd/2026-11-13-runtime-themes task 11: the theme preference is
+// The theme preference is
 // observed by multiple independent call sites (use-theme.ts, usePreferences,
 // and whatever else reads it), so a write here must notify all of them —
 // mirrors lib/workspace-cookie.ts's module-scoped EventTarget pub/sub.
@@ -201,7 +201,7 @@ export function resolveThemeId(
   return availableIds.includes(stored) ? stored : defaultThemeIdFor(appearance)
 }
 
-// --- Appearance mode (beadbox-sdd/2026-11-17-appearance-mode task 1) ---
+// --- Appearance mode ---
 //
 // A second axis on top of the single theme id above: the user picks a MODE
 // (dark / light / follow the system) and assigns a theme to each of the dark

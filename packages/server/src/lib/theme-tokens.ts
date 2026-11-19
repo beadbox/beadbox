@@ -27,25 +27,15 @@ export const COLOR_KEYS = [
 ] as const
 
 /**
- * Semantic tone colours: warning, info, success. Optional, unlike
- * COLOR_KEYS — none of the 19 required tokens expresses these roles, and
- * before they existed ~424 call sites hardcoded a Tailwind palette literal
- * (`bg-amber-500/15 text-amber-400`), which no theme could reach.
- *
- * A theme may omit them; DEFAULT_TONE_HEX then applies, so every theme file
- * written before these tokens existed stays valid. `destructive` already
- * covers the error tone and is deliberately NOT duplicated here.
- *
- * One hex per tone serves BOTH appearances: the readable text colour is
- * DERIVED per surface by the engine (see toneTextVarName), never authored.
+ * Semantic tone colours. Optional, unlike COLOR_KEYS: a theme may omit them
+ * and DEFAULT_TONE_HEX applies, so theme files predating them stay valid.
+ * `destructive` covers the error tone and is not duplicated here. One hex
+ * per tone serves both appearances — the text value is derived per surface
+ * (toneTextVarName), never authored.
  */
 export const TONE_KEYS = ["warning", "info", "success"] as const
 
-/**
- * The tone values a theme gets when it declares none. These are the Tailwind
- * shades the hardcoded call sites used (amber-500 / blue-500 / emerald-500),
- * so an existing theme keeps the look it had before tone tokens existed.
- */
+/** Defaults when a theme declares no tones: amber-500 / blue-500 / emerald-500. */
 export const DEFAULT_TONE_HEX: Readonly<Record<ToneKey, string>> = {
   warning: "#f59e0b",
   info: "#3b82f6",
@@ -53,14 +43,10 @@ export const DEFAULT_TONE_HEX: Readonly<Record<ToneKey, string>> = {
 }
 
 /**
- * Tokens that receive a DERIVED `-text` companion: the three tones plus
- * `destructive` and `primary`, both already authorable in COLOR_KEYS.
- *
- * `destructive` and `primary` are shadcn semantics for a SOLID fill, paired
- * with a `*Foreground` for text ON that fill. Tinted pills here need text
- * readable against a 20% tint instead — the same problem the tones have, and
- * measurably: `text-primary` on its own 15% tint is 5.01:1 on the dark card
- * but only 4.09:1 on a white one. Deriving adds no authorable token.
+ * Tokens getting a derived `-text` companion. `destructive` and `primary`
+ * are shadcn semantics for a SOLID fill, paired with a `*Foreground`; tinted
+ * pills need text readable against the tint instead — bare `text-primary` on
+ * its own 15% tint measures 4.09:1 on white. Adds no authorable token.
  */
 export const TEXT_DERIVED_KEYS = [...TONE_KEYS, "destructive", "primary"] as const
 
@@ -82,15 +68,12 @@ export interface Theme {
 }
 
 /**
- * The theme-id slug format: a lowercase letter or digit, then up to 63 more
- * lowercase letters, digits, underscores or hyphens. The single source for
- * this shape — theme-validate.ts's validateTheme() and the client's
- * local-storage.ts (getThemePrefs, setThemeForAppearance, getLegacyThemeId)
- * both import it, so neither can drift from the other.
+ * The single source for the theme-id slug shape; validateTheme() and
+ * local-storage.ts both import it so they cannot drift.
  *
  * theme-files.ts keeps its OWN copy (ID_RE) on purpose: that one gates a
- * filesystem path built from the id, and stays independent as
- * defence-in-depth — never DRY that one away into this constant.
+ * filesystem path, and stays independent as defence-in-depth. Never DRY it
+ * away into this constant.
  */
 export const THEME_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
@@ -100,11 +83,8 @@ export function cssVarName(key: string): string {
 }
 
 /**
- * The DERIVED readable-text variable for a tone: `warning` ->
- * `--bb-warning-text`. Never authored in a theme file — theme-engine.ts
- * computes it from the tone's base hex against the theme's `card` surface
- * via readableTextColor, which is what makes one authored hex work in both
- * appearances.
+ * `warning` -> `--bb-warning-text`. Never authored: theme-engine.ts derives
+ * it from the base hex against the theme's `card` via readableTextColor.
  */
 export function toneTextVarName(key: TextDerivedKey): string {
   return `--bb-${key}-text`

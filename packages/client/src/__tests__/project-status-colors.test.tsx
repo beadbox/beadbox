@@ -88,7 +88,7 @@ test("a project that leaves the registry drops its block", async () => {
   expect(sheet("a")?.textContent).toContain("rgb(255 0 0 / 0.2)")
 })
 
-// Fix 1 (final whole-branch review): the MutationObserver here used to
+// The MutationObserver here used to
 // watch only attributeFilter: ["class"], but the surface it tracks
 // (--bb-card) is written to <html>'s `style` by applyTheme, never to its
 // class. A style-only change -- exactly what a same-appearance theme

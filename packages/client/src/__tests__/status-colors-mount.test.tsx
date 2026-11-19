@@ -1,5 +1,4 @@
-// Fix 1 (final whole-branch review, 2026-11-13 runtime-themes): the
-// MutationObserver in StatusColorsMount used to watch only
+// The MutationObserver in StatusColorsMount used to watch only
 // attributeFilter: ["class"]. currentThemeSurface() reads the --bb-card
 // custom property, which applyTheme writes to the element's `style`, not
 // its class -- so a theme change that doesn't flip the class (dark -> dark,

@@ -32,7 +32,7 @@ describe("resolveThemeId", () => {
   })
 
   test("an unknown id falls back to the default for its own appearance", () => {
-    // final whole-plan review, Fix 1: the fallback must land inside the
+    // The fallback must land inside the
     // grid being rendered — an unresolvable id in the light grid must
     // resolve to the LIGHT default, not always the dark one, or no card
     // in that grid would ever show as selected.

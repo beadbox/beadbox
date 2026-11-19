@@ -1,25 +1,14 @@
 // Sonner Toaster wrapper for the SPA. Ported from components/ui/sonner.tsx
 // (P2.3 / bb-cqpc.3).
 //
-// Differences from the Next.js version:
-// - Replaced the next-themes useTheme() call with Beadbox's own
-//   useThemePreference(), the single source for the resolved appearance.
-// - Stripped the "use client" directive. Vite SPA, no RSC boundary.
+// Differences from the Next.js version: useThemePreference() replaces
+// next-themes' useTheme(), and the "use client" directive is gone (Vite SPA,
+// no RSC boundary).
 //
-// On theming, there are two axes and both are now handled. The toast BODY is
-// theme-aware through the three --normal-* overrides below, which resolve
-// through --bb-popover/--bb-popover-foreground/--bb-border, so a runtime
-// theme swap repaints it. Sonner's own `theme` prop is separate: it drives
-// the library's INTERNAL greys (close button, description text), which it
-// does not expose as variables.
-//
-// That prop was hardcoded "dark" while light mode was being built, which left
-// toast chrome dark-tuned on a light theme — the one surface the palette
-// sweep could not reach, because the colours live inside the library. It now
-// takes the resolved appearance, so it follows a mode switch and the system
-// preference like everything else. `appearance` is exactly "dark" | "light",
-// which is a subset of Sonner's own "light" | "dark" | "system", so it maps
-// across with no translation.
+// Two axes: the toast BODY follows the --normal-* overrides below, so tokens
+// repaint it; Sonner's `theme` prop separately drives the library's internal
+// greys (close button, description text), which it does not expose as
+// variables — so only the prop can reach them.
 //
 // The --bb-* variables come from the theme tokens in
 // packages/client/src/index.css, where :root carries defaults and

@@ -81,36 +81,18 @@ export function useTheme(): {
   const [available] = useState(() => isThemingAvailable())
   const queryClient = useQueryClient()
 
-  // One-time migration of the pre-§6 single-id preference. The migration
-  // logic itself does not live in local-storage.ts: choosing which slot a
-  // legacy id belongs in needs the theme's `appearance`, which only the
-  // loaded theme list knows.
+  // One-time migration of the pre-§6 single-id preference. It lives here,
+  // not in local-storage.ts, because picking a legacy id's slot needs the
+  // theme's `appearance`, which only the loaded list knows.
   //
-  // Migrates only when the new three-value key has never been written
-  // (hasThemePrefs() false). If prefs already exist, they are the newer
-  // intent and a stale legacy id must not overwrite them — getThemePrefs()
-  // returns DEFAULT_THEME_PREFS both when prefs were never written and when
-  // they were written AS the defaults, so hasThemePrefs() (which reads
-  // persisted storage directly) is what tells the two apart.
-  //
-  // No ref guards this effect — both checks above are already durable
-  // across a remount: a completed migration clears the legacy key, and its
-  // own writes make hasThemePrefs() true. A ref set before the async work
-  // resolves would make StrictMode's double-invoke a permanent no-op: the
-  // first pass's result is cancelled, and the second pass would see the
-  // ref already set and skip entirely, so the migration would never
-  // actually land in dev (main.tsx wraps the app in <StrictMode>). Each
-  // invocation's own `cancelled` flag is what keeps a cancelled first pass
-  // from acting on its (eventually resolved) result.
-  //
-  // Calls listThemesWithStatus() directly rather than going through
-  // queryClient.fetchQuery(themesQueryKey, listThemes): the StrictMode
-  // dedup that gave the old code was a nice-to-have, not a correctness
-  // requirement (each invocation is independently idempotent via its own
-  // `cancelled` flag), and listThemes()'s plain ThemeEntry[] result can't
-  // carry the degraded/genuinely-empty distinction this migration needs
-  // (final whole-plan review, Fix 3) without a second, incompatible shape
-  // under the same react-query cache key.
+  // Gated on hasThemePrefs(), not getThemePrefs(): the latter returns
+  // DEFAULT_THEME_PREFS both when prefs were never written and when they
+  // were written AS the defaults, and a stale legacy id must not overwrite
+  // real intent. Deliberately NOT ref-guarded — a ref set before the async
+  // work resolves makes StrictMode's double-invoke a permanent no-op, so the
+  // migration never lands in dev. Each invocation's `cancelled` flag covers
+  // the remount instead. Uses listThemesWithStatus() because listThemes()
+  // cannot carry the degraded-vs-genuinely-empty distinction this needs.
   useEffect(() => {
     const legacyId = getLegacyThemeId()
     if (!legacyId || hasThemePrefs()) return
@@ -235,9 +217,9 @@ export function useTheme(): {
       if (isHotReloadReapply && theme.id !== activeThemeId) return
       // Checked AFTER the id-guard above, not before: this guard targets a
       // DIFFERENT failure mode — same id, but the file's own `appearance`
-      // field was edited to no longer match the slot it is assigned to
-      // (final whole-plan review, Fix 1). The id-guard above never refuses
-      // that case (the id is unchanged), so it falls through to here
+      // field was edited to no longer match the slot it is assigned to. The
+      // id-guard above never refuses that case (the id is unchanged), so it
+      // falls through to here
       // regardless of ordering; loadTheme's own fallback paths, in turn,
       // always return a theme whose appearance already matches what was
       // asked for, so this guard never second-guesses the id-guard's
@@ -275,16 +257,11 @@ export function useTheme(): {
           if (disposed) return
           for (const line of data.split("\n")) {
             if (!line.startsWith(THEMES_CHANGED_PREFIX)) continue
-            // The invalidate must run BEFORE the fetchQuery: query-client.ts
-            // sets a global staleTime of 30s, so the synchronous invalidate
-            // is what marks themesQueryKey stale. Without it running first,
-            // fetchQuery would just serve the cached (up to 30s stale)
-            // entries instead of re-reading the directory — swapping this
-            // order silently breaks hot reload. This invalidation is also
-            // the error-reporting channel: it is what makes
-            // settings-dialog.tsx's picker show (or clear) a rejection
-            // reason per ThemeEntry.error, not merely a nice-to-have
-            // refresh.
+            // Invalidate BEFORE fetchQuery: query-client.ts sets a global 30s
+            // staleTime, so without the synchronous invalidate marking
+            // themesQueryKey stale, fetchQuery serves the cache and hot
+            // reload silently stops working. It also carries
+            // ThemeEntry.error to the picker, so it is not just a refresh.
             void queryClient.invalidateQueries({ queryKey: themesQueryKey })
             void queryClient
               .fetchQuery({ queryKey: themesQueryKey, queryFn: listThemes })

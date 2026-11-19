@@ -24,14 +24,14 @@ import { safeCapture } from "../lib/posthog-safe"
 import type { Filters, SortOption } from "../lib/types"
 
 export function usePreferences() {
-  // beadbox-sdd/2026-11-13-runtime-themes task 11: theme preference is a
-  // single observable store (local-storage.ts), not local state here —
+  // The theme preference is a single observable store (local-storage.ts),
+  // not local state here —
   // see use-theme-preference.ts for the subscription-only hook and
   // use-theme.ts for the hook that owns the apply-to-<html> effect. This
   // keeps usePreferences's independent call sites in sync with any change
   // made through the store, including from use-theme.ts itself.
   //
-  // beadbox-sdd/2026-11-17-appearance-mode task 5: the settings dialog now
+  // The settings dialog now
   // reads/writes the two-slot store directly via useThemePreference(), so
   // usePreferences no longer derives or exposes a `theme`/`handleThemeChange`
   // pair for it.
@@ -134,8 +134,7 @@ export function usePreferences() {
 
   // Load zoom, vim navigation, and update preferences on mount. Theme is
   // not hydrated here at all: usePreferences no longer derives or exposes
-  // theme state (beadbox-sdd/2026-11-17-appearance-mode task 5) — a
-  // component that needs it calls use-theme-preference.ts's
+  // theme state — a component that needs it calls use-theme-preference.ts's
   // useThemePreference() directly, which owns its own
   // useSyncExternalStore subscription to local-storage.ts's getThemePrefs.
   useEffect(() => {

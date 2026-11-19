@@ -19,7 +19,7 @@ import { rpc } from "./rpc"
  * conversion. Keep the two in sync: adding a field here that the server does
  * not send will be `undefined` at runtime.
  *
- * `appearance` is nullable (final whole-plan review, Fix 2): a user theme
+ * `appearance` is nullable: a user theme
  * file that is not even valid JSON carries no recoverable appearance, so
  * the server reports `null` rather than guessing "dark". A null appearance
  * always comes with `error` set — such an entry can never be selected, only
@@ -45,7 +45,7 @@ export const BUILTIN_THEMES: readonly Theme[] = [darkJson as Theme, lightJson as
 
 /**
  * The built-in theme for a given appearance slot — the shared fallback
- * (final whole-plan review, Fix 1) used both by loadTheme's failure path and
+ * used both by loadTheme's failure path and
  * by use-theme.ts's apply-effect appearance-mismatch guard. Always
  * resolves: BUILTIN_THEMES ships exactly one dark and one light entry, and
  * defaultThemeIdFor only ever names one of their ids.
@@ -103,8 +103,8 @@ export async function listThemes(): Promise<ThemeEntry[]> {
 /**
  * Same merge as listThemes, but also reports whether the sidecar read
  * degraded to built-ins-only rather than genuinely returning an
- * empty/absent list. (final whole-plan review, Fix 3): the legacy
- * single-id migration needs this — a degraded read is not proof the
+ * empty/absent list. The legacy single-id migration needs this: a degraded
+ * read is not proof the
  * legacy theme id is uninstalled, and treating it as such would clear the
  * legacy key with no way to retry, discarding the user's preference.
  */

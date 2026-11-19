@@ -1,5 +1,5 @@
-// Task 11: wiring the stored theme preference into app startup.
-// beadbox-sdd/2026-11-17-appearance-mode task 4: the single stored theme
+// Wiring the stored theme preference into app startup.
+// The single stored theme
 // id became a MODE (dark/light/system) plus a theme assigned to each of
 // the dark and light slots. useTheme() now exposes the theme actually
 // rendered (activeThemeId) and the resolved appearance, not a raw
@@ -104,7 +104,7 @@ afterEach(() => {
   queryClient.clear()
 })
 
-// ─── Hot-reload test helpers (task 13) ─────────────────────────────────────
+// ─── Hot-reload test helpers ─────────────────────────────────────
 
 interface ThemesRpcMocks {
   list: ReturnType<typeof mock>
@@ -363,7 +363,7 @@ describe("useTheme", () => {
   })
 })
 
-// ─── Task 4: legacy single-id migration ────────────────────────────────────
+// ─── Legacy single-id migration ────────────────────────────────────
 //
 // Pre-§6 installs stored one theme id under "beads-theme". On first launch
 // after the upgrade, that id must be adopted into whichever slot matches
@@ -426,7 +426,7 @@ describe("useTheme legacy migration", () => {
     // A working (non-throwing) themes list that just doesn't contain
     // "uninstalled" — this test is about a successful read that genuinely
     // lacks the id, not a degraded sidecar read (see the next test for
-    // that; final whole-plan review, Fix 3 distinguishes the two).
+    // that).
     installThemesRpcMock()
     localStorage.setItem("beads-theme", "uninstalled")
     _resetThemePreferenceForTests()
@@ -446,7 +446,7 @@ describe("useTheme legacy migration", () => {
     expect(localStorage.getItem("beads-theme")).toBeNull()
   })
 
-  // final whole-plan review, Fix 3: a legacy id naming a real USER theme
+  // A legacy id naming a real USER theme
   // (not a built-in, which is always resolvable regardless of the sidecar)
   // must survive a degraded read — the sidecar failing on this exact launch
   // is not proof the theme is uninstalled, and clearing the legacy key here
@@ -490,7 +490,7 @@ describe("useTheme legacy migration", () => {
   })
 })
 
-// ─── Task 13: hot reload on file change ────────────────────────────────────
+// ─── Hot reload on file change ────────────────────────────────────
 //
 // Per task-13-addendum: a [THEMES:changed] stderr line (emitted by
 // themes.startWatch(), see packages/server/src/handlers/themes.ts) must
@@ -525,9 +525,8 @@ describe("useTheme hot reload", () => {
     // Simulate the file being edited: still valid, different colours, SAME
     // appearance ("light", matching the slot) — a flipped appearance on an
     // otherwise-valid edit is its own scenario, covered separately below
-    // (final whole-plan review, Fix 1's appearance-mismatch guard would
-    // otherwise refuse this edit too, which is not what this test is
-    // about).
+    // (the appearance-mismatch guard would otherwise refuse this edit too,
+    // which is not what this test is about).
     const v2 = {
       ...lightJson,
       id: "custom1",
@@ -549,7 +548,7 @@ describe("useTheme hot reload", () => {
     expect(rpcMock.startWatch).toHaveBeenCalled()
   })
 
-  // final whole-plan review, Fix 1: the appearance-coherence cluster. A hot
+  // The appearance-coherence cluster. A hot
   // reload must not paint the wrong-appearance theme's tokens under the
   // slot's own resolved appearance class — editing custom1's `appearance`
   // field from "dark" to "light" in place (same id, so the id-based guard
@@ -701,7 +700,7 @@ describe("useTheme hot reload", () => {
     expect(rpcMock.startWatch).not.toHaveBeenCalled()
   })
 
-  // Fix 1 (sidecar restart): the new process boots with
+  // The new process boots with
   // packages/server/src/handlers/themes.ts's stopWatcher back at null, and
   // nothing re-arms the watch unless the client calls startWatch() again
   // against the new process. lib/rpc.ts dispatches "beadbox:sidecar-exit"
@@ -729,8 +728,7 @@ describe("useTheme hot reload", () => {
     })
   })
 
-  // Fix 2 (the race leaves the app stuck on dark, not merely flashing): the
-  // watcher's list refetch can still find the active theme valid (so the
+  // The watcher's list refetch can still find the active theme valid (so the
   // epoch bumps) while a SECOND, invalid save has already landed on disk by
   // the time loadTheme actually reads the file — rpc.themes.get now returns
   // something that fails validateTheme, so loadTheme collapses to
@@ -802,7 +800,7 @@ describe("useTheme hot reload", () => {
     expect(getByTestId("out").textContent).toBe("custom1:true")
   })
 
-  // Fix 3 (listener leak): if this effect's cleanup runs before the
+  // If this effect's cleanup runs before the
   // listenStderrImpl promise resolves — React 18 StrictMode double-invokes
   // effects in dev, and main.tsx wraps the app in <StrictMode> — the real
   // Tauri listener must still be unlistened once attach finally resolves,
@@ -841,7 +839,7 @@ describe("useTheme hot reload", () => {
   })
 })
 
-// ─── Fix 5: the "reason becomes visible" chain, end to end ────────────────
+// ─── The "reason becomes visible" chain, end to end ────────────────
 //
 // settings-theme-picker.test.tsx proves a ThemeEntry.error renders; the
 // tests above prove the active theme stays on screen when its file goes

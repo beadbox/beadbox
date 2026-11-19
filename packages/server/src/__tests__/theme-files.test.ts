@@ -87,7 +87,7 @@ describe("listThemeFiles", () => {
     expect(list.find((e) => e.id === "nord")?.error).toBeUndefined()
   })
 
-  // final whole-plan review, Fix 2: a broken LIGHT theme must not be filed
+  // A broken LIGHT theme must not be filed
   // under "Dark" just because validation failed before fully confirming
   // the theme — the raw, not-yet-validated JSON already names a usable
   // appearance, and losing that is exactly what put a light theme's error

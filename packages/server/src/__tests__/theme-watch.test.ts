@@ -1,4 +1,4 @@
-// Task 13: hot reload. watchThemes() watches the themes directory and
+// Hot reload. watchThemes() watches the themes directory and
 // debounces bursts of fs events into one onChange() call.
 //
 // Per task-13-addendum Override 1: Node's FSWatcher only emits "change",

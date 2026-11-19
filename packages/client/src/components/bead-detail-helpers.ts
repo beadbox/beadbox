@@ -82,22 +82,16 @@ export function getStatusDisplayConfig(status: string): {
 }
 
 /**
- * The tokenised base for a bead-type badge. The per-type HUE now comes from
- * the type stylesheet (DEFAULT_TYPE_HEX, tagged via data-type), which is
- * what gives it readable text on a light card; previously each type carried
- * its own `text-<hue>-400`, correct only on a dark one.
- *
- * This class is what shows for a workspace-defined type with no entry of its
- * own — the neutral that unknown types already drew.
+ * Base class for a bead-type badge; the per-type hue comes from the type
+ * stylesheet via data-type (DEFAULT_TYPE_HEX). This neutral is what a
+ * workspace-defined type with no entry of its own draws.
  */
 export const TYPE_BADGE_CLASS = "bg-muted/40 text-muted-foreground border-border"
 
 /**
- * One left-border colour per comment author, picked by hash. IDENTITY colours,
- * not semantic roles: collapsing them onto tone tokens would make two authors
- * share a stripe, which is the one thing this list exists to prevent. Left as
- * literals — a 2px saturated border reads on a light card as well as a dark
- * one, and there is no token vocabulary for "author #4".
+ * One left-border colour per comment author, by hash. Identity colours, not
+ * semantic roles: do NOT collapse onto tone tokens — two authors would share
+ * a stripe. Literal on purpose; a saturated border reads on either surface.
  */
 const authorColors = [
   "border-l-emerald-500",

@@ -31,10 +31,9 @@ export interface StatusColorState {
    */
   foreground: string
   /**
-   * The theme's muted foreground. Needed by the formula graphs, whose SVG
-   * edges and marker arrowheads take a colour VALUE, not a class: React Flow
-   * writes markerEnd.color into an SVG presentation attribute, where var()
-   * does not resolve. So the value has to be read in JS.
+   * For the formula graphs: React Flow writes markerEnd.color into an SVG
+   * presentation attribute, where var() does not resolve, so arrowheads need
+   * a colour VALUE read in JS rather than a class.
    */
   mutedForeground: string
 }
@@ -113,10 +112,7 @@ export function currentThemeSurface(el: Element = document.documentElement): str
   return readThemeVar(el, "--bb-card") || THEME_SURFACES.gray.card
 }
 
-/**
- * The theme's foreground, read the same way as the surface above. Falls back
- * to the dark literal, which is what `open` has always drawn in.
- */
+/** The theme's foreground — what `open` draws in. */
 export function currentThemeForeground(el: Element = document.documentElement): string {
   return readThemeVar(el, "--bb-foreground") || DEFAULT_STATUS_HEX.open
 }
@@ -126,14 +122,9 @@ export function currentThemeMutedForeground(el: Element = document.documentEleme
 }
 
 /**
- * `--bb-muted-foreground` as a concrete colour VALUE at the given alpha, for
- * the one place a class or var() will not do: React Flow serialises
- * markerEnd.color into an SVG presentation attribute, and var() does not
- * resolve there.
- *
- * Edge STROKES use `var(--bb-muted-foreground)` in an inline style instead,
- * so they follow a theme switch immediately; only arrowheads carry this
- * snapshot, and they refresh on the next layout.
+ * `--bb-muted-foreground` as a concrete value, for arrowheads (see the field
+ * above). Edge STROKES use var() in an inline style and so follow a theme
+ * switch live; only arrowheads carry this snapshot, refreshed on next layout.
  */
 export function currentThemeEdgeColor(alpha = 0.5, el: Element = document.documentElement): string {
   const v = currentThemeMutedForeground(el).trim()

@@ -114,7 +114,7 @@ describe("loadTheme", () => {
   })
 
   test("falls back to the built-in LIGHT theme when a light-slot theme is missing", async () => {
-    // final whole-plan review, Fix 1: loadTheme's failure path must not
+    // loadTheme's failure path must not
     // always collapse to dark — a light slot naming a missing theme must
     // get the light built-in, not dark tokens under a removed .dark class.
     stubRpc({ get: mock(async () => null) })

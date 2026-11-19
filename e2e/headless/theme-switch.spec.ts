@@ -1,4 +1,3 @@
-// Task 14 (runtime themes) + beadbox-sdd/2026-11-17-appearance-mode task 6:
 // end-to-end check the whole feature works in a real browser. Everything
 // below was unit-tested; nothing had yet driven actual UI. Modeled on
 // status-colors.spec.ts's conventions.
@@ -234,7 +233,7 @@ test.describe("theme switching", () => {
   })
 })
 
-// Fix 1 (beadbox-sdd/2026-11-17-appearance-mode final fixes): nothing above
+// Nothing above
 // this point ever seeds a user theme file, so listThemeFiles() always
 // returns [] and every assertion above only ever exercises the two bundled
 // themes — through a path (BUILTIN_ENTRIES) that short-circuits before any

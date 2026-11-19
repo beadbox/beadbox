@@ -31,7 +31,7 @@ export interface ThemeEntry {
   name: string
   /**
    * Null when the file's own declared appearance could not be recovered
-   * (final whole-plan review, Fix 2) — unparseable JSON, or any other shape
+   * — unparseable JSON, or any other shape
    * that never reached the point where `appearance` could be read. Always
    * paired with `error` set: a null-appearance entry can never be slotted,
    * only shown with its error outside both the dark and light grids, so the
@@ -100,7 +100,7 @@ export async function listThemeFiles(): Promise<ThemeEntry[]> {
         id,
         name: id,
         // Unparseable text has no recoverable appearance to read — null,
-        // not a guess (final whole-plan review, Fix 2): guessing "dark"
+        // not a guess: guessing "dark"
         // here is exactly what put a broken light theme's error under the
         // Dark heading while the Light grid showed nothing wrong.
         appearance: null,

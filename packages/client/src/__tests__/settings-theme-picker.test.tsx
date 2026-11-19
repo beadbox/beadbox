@@ -1,4 +1,4 @@
-// beadbox-sdd/2026-11-17-appearance-mode task 5: Settings > General now
+// Settings > General now
 // offers a mode selector (dark / light / follow system) plus one slot grid
 // per appearance, each grid listing only the themes for its own appearance
 // and each grid independently keyboard-operable (its own roving tabIndex,
@@ -304,7 +304,7 @@ describe("theme picker, per-grid behaviour preserved from the single-grid picker
     expect(lightRadios().filter((r) => r.getAttribute("tabindex") === "0")).toHaveLength(1)
   })
 
-  // final whole-plan review, Fix 2: a theme whose own appearance could not
+  // A theme whose own appearance could not
   // be recovered (unparseable JSON) must not be filed under Dark or Light
   // — it belongs in neither grid, so it renders in its own "Unknown
   // appearance" section instead.
@@ -330,7 +330,7 @@ describe("theme picker, per-grid behaviour preserved from the single-grid picker
     expect(lightRadios().some((r) => r.getAttribute("aria-label") === "broken theme")).toBe(false)
   })
 
-  // Task 13: hot reload invalidates themesQueryKey so a changed file's
+  // Hot reload invalidates themesQueryKey so a changed file's
   // error (or updated preview) reaches this picker. That refetch must not
   // yank focus away from a card the user has already arrow-keyed to —
   // task-12-addendum deferred this exact tradeoff to task 13. After the
