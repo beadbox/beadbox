@@ -85,3 +85,4 @@ packages/client/src/__tests__/chart-view.test.tsx                    timeout>=10
 
 # fast: packages/server/src/__tests__/bd-path-shims.test.ts spawn 0.2 four isolated synthetic executables, no real database or timed waits
 # fast: packages/server/src/__tests__/bd-path-consumers.test.ts deadline 1.5 synthetic poll restart with a bounded 1.2 s observation, no real database
+# fast: packages/server/src/__tests__/subscribe.newest-wins.test.ts spawn 1.5 (local) fake bd and real poll shells counted with ps, 5 s hang guards on events that arrive in milliseconds, no real database

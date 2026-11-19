@@ -124,7 +124,10 @@ describe("subscribe leak gate", () => {
     expect(_activeIds()).toEqual([])
   })
 
-  test("multiple subscriptions on same workspace each clean up", async () => {
+  // beadbox-0b6: a start that missed the client's deadline still reaches this
+  // process, and the client never learns its id. Every such start used to leave
+  // a detector running for good (four at once after one restart on the QA Mac).
+  test("the newest start for a workspace replaces the earlier ones", async () => {
     const workspace = await bdInit()
     const beadsDir = join(workspace, ".beads")
 
@@ -138,16 +141,46 @@ describe("subscribe leak gate", () => {
     const b = await start(beadsDir)
     const c = await start(beadsDir)
 
-    expect(_activeIds().length).toBe(baselineActive + 3)
     expect(new Set([a.id, b.id, c.id]).size).toBe(3)
+    expect(_activeIds().length).toBe(baselineActive + 1)
+    expect(_activeIds()).toContain(c.id)
 
     await sleep(150)
+    // The client may still stop one it believes is live: a no-op, not a throw.
     await stop(a.id)
     await stop(b.id)
+    expect(_activeIds()).toContain(c.id)
     await stop(c.id)
     await sleep(150)
 
     expect(_activeIds().length).toBe(baselineActive)
     expect(activeHandleCount() - baselineHandles).toBeLessThanOrEqual(0)
+  }, 20_000)
+
+  test("starts in flight together leave only the newest", async () => {
+    const workspace = await bdInit()
+    const beadsDir = join(workspace, ".beads")
+    _setWriter(() => {})
+    const baselineActive = _activeIds().length
+
+    const [, , last] = await Promise.all([start(beadsDir), start(beadsDir), start(beadsDir)])
+
+    expect(_activeIds().length).toBe(baselineActive + 1)
+    expect(_activeIds()).toContain(last.id)
+    await stop(last.id)
+  }, 20_000)
+
+  test("different workspaces keep their own detectors", async () => {
+    const one = join(await bdInit(), ".beads")
+    const two = join(await bdInit(), ".beads")
+    _setWriter(() => {})
+    const baselineActive = _activeIds().length
+
+    const a = await start(one)
+    const b = await start(two)
+
+    expect(_activeIds().length).toBe(baselineActive + 2)
+    await stop(a.id)
+    await stop(b.id)
   }, 20_000)
 })
