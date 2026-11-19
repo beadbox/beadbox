@@ -45,6 +45,7 @@ import {
   replaceWorkspace as registryReplaceWorkspace,
   setActiveWorkspace as registrySetActiveWorkspace,
   removeWorkspaceFromRegistry,
+  reorderWorkspaces,
   scaffoldDirFor,
   type ServerConnection,
   serverPasswordKey,
@@ -53,6 +54,7 @@ import {
   updateWorkspaceStatusColors,
   updateWorkspaceServer,
 } from "../lib/workspace-registry"
+import { MAX_WORKSPACE_ORDER_IDS } from "../lib/workspace-order"
 
 // Server-side workspace logging. Prints to the Next.js terminal.
 function wsLog(fn: string, ...args: unknown[]) {
@@ -1119,6 +1121,28 @@ export async function setWorkspaceLabel(
   const entry = await updateWorkspaceLabel(workspaceId, patch)
   if (!entry) return { success: false, error: "Workspace not found." }
   return resolveLabelledWorkspace(entry)
+}
+
+// beadbox-984: the Workspaces sidebar order. `ids` crosses the rpc boundary
+// from the WebView, so its declared type is a claim: anything but an array of
+// strings no longer than MAX_WORKSPACE_ORDER_IDS is refused with nothing
+// written. Only the registry (Beadbox's own file) is touched; bd never is.
+export async function setWorkspaceOrder(
+  ids: string[],
+): Promise<{ success: true; order: string[] } | { success: false; error: string }> {
+  const raw: unknown = ids
+  if (!Array.isArray(raw) || !raw.every((id) => typeof id === "string")) {
+    return { success: false, error: "Invalid workspace order." }
+  }
+  if (raw.length > MAX_WORKSPACE_ORDER_IDS) {
+    return { success: false, error: "Too many workspaces in one reorder." }
+  }
+  try {
+    return { success: true, order: await reorderWorkspaces(raw) }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    return { success: false, error: `Could not save the workspace order: ${reason}` }
+  }
 }
 
 // ---------------------------------------------------------------------------
