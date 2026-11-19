@@ -19,7 +19,6 @@ import {
   Server,
   ShieldCheck,
   Sparkles,
-  Timer,
   Trash2,
   Truck,
   UserCog,
@@ -39,6 +38,7 @@ import { getUnreadReason, isBeadUnread } from "@/lib/local-storage"
 import type { GateInfo } from "@/lib/molecule-phases"
 import type { Bead, BeadPriority, ReadState } from "@/lib/types"
 import { makeKeyer } from "@/lib/stable-key"
+import { beadSize } from "@/lib/bead-size"
 import { cn } from "@/lib/utils"
 import { describeDeadline } from "@/lib/waiting"
 
@@ -329,6 +329,7 @@ const BeadRowContent = memo(function BeadRowContent({
   onToggleSelect,
 }: RowContentProps) {
   const { isMobile } = useViewport()
+  const size = beadSize(bead)
   const [isArchiving, setIsArchiving] = useState(false)
   const rowKey = source ? projectBeadKey(source.id, bead.id) : bead.id
   const isSelected = selectedIds?.has(rowKey) ?? false
@@ -445,18 +446,25 @@ const BeadRowContent = memo(function BeadRowContent({
             <TooltipContent>Due: {due.text}</TooltipContent>
           </Tooltip>
         )}
-        {bead.estimatedMinutes && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Timer className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
-            </TooltipTrigger>
-            <TooltipContent>
-              {bead.estimatedMinutes >= 60
-                ? `~${Math.round(bead.estimatedMinutes / 60)}h`
-                : `~${bead.estimatedMinutes}m`}
-            </TooltipContent>
-          </Tooltip>
-        )}
+        {/* beadbox-9d4: T-shirt size from the estimate (revised wins); unsized shown plainly */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              role="img"
+              aria-label={size.label}
+              data-bead-size={size.size ?? "unsized"}
+              className={cn(
+                "bead-row-size shrink-0 inline-flex h-4 min-w-[1.375rem] items-center justify-center rounded px-1 text-[10px] font-semibold leading-none tabular-nums",
+                size.size
+                  ? "border border-border/60 bg-muted/40 text-muted-foreground"
+                  : "border border-dashed border-amber-500/50 text-amber-500/80",
+              )}
+            >
+              {size.size ?? "?"}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{size.tooltip}</TooltipContent>
+        </Tooltip>
 
         {/* Spacer for wide layout */}
         <div className="bead-row-spacer flex-1" />
