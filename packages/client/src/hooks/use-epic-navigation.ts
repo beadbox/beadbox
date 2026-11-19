@@ -165,7 +165,6 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
   const [focusedPanel, setFocusedPanel] = useState<"left" | "right">("left")
   const detailPanelRef = useRef<{
     navigateComments: (direction: "up" | "down") => void
-    scrollToLatestComment: () => void
   } | null>(null)
 
   // Track last key press for multi-key sequences (gg)
@@ -218,9 +217,7 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
         if (!fullBead) return
         setSelectedBead((prev) => {
           if (!prev || prev.id !== beadIdParam) return prev
-          if (fullBead.comments.length > prev.comments.length) {
-            setTimeout(() => detailPanelRef.current?.scrollToLatestComment(), 50)
-          }
+          // beadbox-9sa: a new comment never moves the thread; only the user scrolls it.
           return { ...prev, ...fullBead }
         })
       })

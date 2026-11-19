@@ -3,6 +3,7 @@ import { toast } from "sonner"
 import { trackedAction } from "@/lib/capture-action-failed"
 import { findBeadById, getOpenChildren, isDescendantOf } from "@/lib/epic-tree-utils"
 import { getAnalyticsEnabled } from "@/lib/local-storage"
+import type { PendingArchives } from "@/lib/pending-archive"
 import { toastError } from "@/lib/notifications"
 import { safeCapture } from "@/lib/posthog-safe"
 import { rpc } from "@/lib/rpc"
@@ -50,6 +51,8 @@ interface UseBeadActionsOpts {
   backlogEpics: Epic[]
   archivedEpics: Epic[]
   archivedBeads: Bead[]
+  /** beadbox-d6l: in-flight archives, hidden from every view until bd settles them. */
+  pendingArchives?: PendingArchives
 }
 
 export function useBeadActions(opts: UseBeadActionsOpts) {
@@ -64,7 +67,8 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
     backlogEpics,
     archivedEpics,
     archivedBeads,
-  } = opts
+    pendingArchives,
+} = opts
 
   const [isPending, startTransition] = useTransition()
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -397,20 +401,41 @@ export function useBeadActions(opts: UseBeadActionsOpts) {
         }
       }
 
-      // No optimistic update: keep the row visible with a spinner until bd confirms.
-      // Optimistic removal caused flicker when WS refreshes fired mid-operation.
+      // beadbox-d6l: archiving is optimistic. The id goes into the pending set,
+      // which hides the row in every view at once and keeps it hidden through
+      // any refresh until bd settles the write (no flicker back). A second
+      // click while it is pending makes no second call. A failure takes the id
+      // out again, so the row is back where it was, and says which bead failed.
+      if (archived && pendingArchives) {
+        if (!pendingArchives.add(id)) return
+        const result = await trackedAction("archiveBead", () =>
+          archiveBead(id, true, currentWorkspace?.databasePath),
+        )
+        if (!result.success) {
+          pendingArchives.remove(id)
+          console.error("Failed to archive bead:", result.error)
+          toastError(`Failed to archive ${id}`, { description: result.error })
+          await loadEpics()
+          return
+        }
+        await loadEpics()
+        pendingArchives.remove(id)
+        return
+      }
+
+      // Unarchive (and callers without a pending set): keep the row until bd confirms.
       const result = await trackedAction("archiveBead", () =>
         archiveBead(id, archived, currentWorkspace?.databasePath),
       )
       if (!result.success) {
         console.error("Failed to archive bead:", result.error)
-        toastError(archived ? "Failed to archive" : "Failed to unarchive", {
+        toastError(archived ? `Failed to archive ${id}` : `Failed to unarchive ${id}`, {
           description: result.error,
         })
       }
       await loadEpics()
     },
-    [currentWorkspace?.databasePath, loadEpics, epics],
+    [currentWorkspace?.databasePath, loadEpics, epics, pendingArchives],
   )
 
   // Archive handler for BeadTable rows (always archives, returns Promise for spinner)

@@ -80,10 +80,34 @@ export function _resetRuntimeCheck(): void {
 // which is React-tear-safe via useSyncExternalStore.
 let subscriptionChangeCount = 0
 const subscriptionListeners = new Set<() => void>()
+// Direct listeners admit bounded background work without publishing a React
+// snapshot for every hidden event. Ordinary views catch up once on show.
+const admissionListeners = new Set<() => void>()
+let hiddenChangePending = false
+
+/** Listen to real changes directly; consumers must bound their background work. */
+export function onSubscriptionChange(listener: () => void): () => void {
+  admissionListeners.add(listener)
+  return () => {
+    admissionListeners.delete(listener)
+  }
+}
+
+function invalidateVisibleViews(): void {
+  hiddenChangePending = false
+  void queryClient.invalidateQueries()
+  bumpSubscriptionChange()
+  const stamp = getOrInitSubscriptionStamp()
+  if (stamp) stamp.lastInvalidateAt = new Date().toISOString()
+}
+
+function catchUpVisibleViews(): void {
+  if (document.visibilityState !== "hidden" && hiddenChangePending) invalidateVisibleViews()
+}
 
 // beadbox-bez: counts only, for the memory diagnostic line.
 export function getSubscriptionListenerCount(): number {
-  return subscriptionListeners.size + pausedListeners.size
+  return subscriptionListeners.size + admissionListeners.size + pausedListeners.size
 }
 
 function bumpSubscriptionChange(): void {
@@ -137,12 +161,21 @@ export function useSubscriptionChangeSignal(): number {
 // healthy: a loop stuck in an error streak still emits them.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_LIVENESS = { pauseAfterMs: 30_000, tickMs: 5_000 }
+// wakeAfterMs: a tick this much later than its time means the page was frozen.
+// resubscribeEveryMs: while paused, how often to try a fresh subscription.
+const DEFAULT_LIVENESS = {
+  pauseAfterMs: 30_000,
+  tickMs: 5_000,
+  wakeAfterMs: 15_000,
+  resubscribeEveryMs: 60_000,
+}
 let livenessTiming = { ...DEFAULT_LIVENESS }
 
 /** Test-only: shrink the pause window and tick. */
-export function _setLivenessTiming(t: { pauseAfterMs: number; tickMs: number }): void {
-  livenessTiming = { ...t }
+export function _setLivenessTiming(
+  t: { pauseAfterMs: number; tickMs: number } & Partial<typeof DEFAULT_LIVENESS>,
+): void {
+  livenessTiming = { ...DEFAULT_LIVENESS, ...t }
 }
 
 export function _resetLivenessTiming(): void {
@@ -152,12 +185,14 @@ export function _resetLivenessTiming(): void {
 let liveUpdatesPaused = false
 // The workspace the pause belongs to; a switch to another one clears it.
 let pausedWorkspace: string | null = null
-// One resubscribe per pause, so a detector that stays broken can't storm.
-let resubscribedForPause = false
+// A pause resubscribes at once, then every resubscribeEveryMs: a detector that
+// stays broken can't storm, and one left on a dead sidecar still comes back
+// without a relaunch (beadbox-0b6).
+let lastResubscribeAt: number | null = null
 const pausedListeners = new Set<() => void>()
 
 function setLiveUpdatesPaused(paused: boolean, workspacePath: string | null): void {
-  if (!paused) resubscribedForPause = false
+  if (!paused) lastResubscribeAt = null
   if (liveUpdatesPaused === paused && pausedWorkspace === workspacePath) return
   liveUpdatesPaused = paused
   pausedWorkspace = paused ? workspacePath : null
@@ -190,7 +225,7 @@ export function _setLiveUpdatesPausedForTests(paused: boolean): void {
 }
 
 export function _resetLiveUpdatesPaused(): void {
-  resubscribedForPause = false
+  lastResubscribeAt = null
   setLiveUpdatesPaused(false, null)
 }
 
@@ -200,8 +235,8 @@ export function _resetLiveUpdatesPaused(): void {
  * every degraded state: it doesn't depend on the subscription.
  */
 export function requestManualRefresh(): void {
-  void queryClient.invalidateQueries()
-  bumpSubscriptionChange()
+  invalidateVisibleViews()
+  for (const listener of admissionListeners) listener()
 }
 
 function getOrInitSubscriptionStamp(): BeadboxSubscriptionStamp | null {
@@ -303,13 +338,8 @@ function captureSubscriptionTelemetry(event: SubscriptionEvent): void {
 }
 
 /**
- * Default invalidation policy: any change event invalidates ALL queries
- * AND bumps the subscription change counter (for non-useQuery consumers).
- *
- * P3 routes can refine this per route via TanStack Query's per-query
- * staleTime, but for the first cut the broad invalidate + bump matches
- * the legacy WebSocket "we changed, reload everything" semantics from
- * the legacy ws hook module.
+ * Visible changes invalidate queries and React signals as before. Hidden
+ * changes retain one catch-up bit; only bounded admission listeners run.
  */
 function applyEvent(event: SubscriptionEvent): void {
   emitSubscriptionTap(event)
@@ -324,9 +354,9 @@ function applyEvent(event: SubscriptionEvent): void {
     stamp.lastEventType = event.type
   }
   if (event.type === "change") {
-    queryClient.invalidateQueries()
-    bumpSubscriptionChange()
-    if (stamp) stamp.lastInvalidateAt = new Date().toISOString()
+    if (document.visibilityState === "hidden") hiddenChangePending = true
+    else invalidateVisibleViews()
+    for (const listener of admissionListeners) listener()
   }
   // polling_error / reconnecting / recovered / bd_command pass through
   // without invalidation for now; P3 can plug per-route handlers.
@@ -348,6 +378,7 @@ export function _emitChangeForTests(): void {
 /** Test-only: reset to zero between cases. */
 export function _resetSubscriptionChangeCount(): void {
   subscriptionChangeCount = 0
+  hiddenChangePending = false
   for (const listener of subscriptionListeners) listener()
 }
 
@@ -386,24 +417,50 @@ export function useChangeSubscription(
     }
     if (!runtimeCheck()) return
 
+    document.addEventListener("visibilitychange", catchUpVisibleViews)
+
     // beadbox-01f.2: a pause belongs to one workspace.
     if (liveUpdatesPaused && pausedWorkspace !== workspacePath) setLiveUpdatesPaused(false, null)
     // Liveness for THIS subscription: armed by its first heartbeat.
     let armed = false
     let lastHealthyAt = Date.now()
+    let lastTickAt = Date.now()
+    // A fresh subscription is a new detector, and the RPC also wakes a sidecar
+    // loop whose timers are gated.
+    const resubscribe = (at: number) => {
+      lastResubscribeAt = at
+      setTransportEpoch((epoch) => epoch + 1)
+    }
     const livenessTimer = setInterval(() => {
-      if (!armed || cancelled) return
-      if (Date.now() - lastHealthyAt <= livenessTiming.pauseAfterMs) return
+      if (cancelled) return
+      const at = Date.now()
+      const frozenMs = at - lastTickAt - livenessTiming.tickMs
+      lastTickAt = at
+      // beadbox-0b6: the silence measured across a freeze is the page's own, and
+      // whatever changed meanwhile was missed: refresh, and give the detector a
+      // whole window to speak before calling it stalled.
+      if (frozenMs > livenessTiming.wakeAfterMs) {
+        lastHealthyAt = at
+        requestManualRefresh()
+      }
+      if (startFailed && !starting) void startSubscription()
+      if (
+        liveUpdatesPaused &&
+        !starting &&
+        lastResubscribeAt !== null &&
+        at - lastResubscribeAt >= livenessTiming.resubscribeEveryMs
+      ) {
+        resubscribe(at)
+        return
+      }
+      if (!armed || at - lastHealthyAt <= livenessTiming.pauseAfterMs) return
       armed = false
       setLiveUpdatesPaused(true, workspacePath)
-      if (!resubscribedForPause) {
-        resubscribedForPause = true
-        // A fresh subscription is a new detector, and the RPC also wakes a
-        // sidecar loop whose timers are gated.
-        setTransportEpoch((epoch) => epoch + 1)
-      }
+      if (lastResubscribeAt === null) resubscribe(at)
     }, livenessTiming.tickMs)
 
+    let starting = false
+    let startFailed = false
     let cancelled = false
     let activeId: string | null = null
     let unlisten: UnlistenFn | null = null
@@ -413,7 +470,10 @@ export function useChangeSubscription(
     // dashboards clean — start-failure has its own ws_disconnected event.
     let connectedAt: number | null = null
 
-    void (async () => {
+    const startSubscription = async () => {
+      const retry = startFailed
+      starting = true
+      startFailed = false
       try {
         const { id } = await rpc.subscribe.start(workspacePath)
         if (cancelled) {
@@ -477,7 +537,7 @@ export function useChangeSubscription(
           // each mount is a fresh subscription (workspace switch or app start),
           // not a retry of a dropped connection.
           connectedAt = Date.now()
-          if (transportEpoch > 0) {
+          if (transportEpoch > 0 || retry) {
             onEvent({ type: "change", timestamp: connectedAt, trigger: "sidecar-reconnected" })
           }
           if (getAnalyticsEnabled()) {
@@ -499,11 +559,23 @@ export function useChangeSubscription(
             was_clean: false,
           })
         }
+        // beadbox-0b6: no subscription means no events, so nothing else would
+        // ever notice. The next tick tries again and, until one works, the
+        // watchdog says live updates are paused.
+        if (!cancelled) {
+          startFailed = true
+          armed = true
+        }
+      } finally {
+        starting = false
       }
-    })()
+    }
+    void startSubscription()
 
     return () => {
       cancelled = true
+      document.removeEventListener("visibilitychange", catchUpVisibleViews)
+      hiddenChangePending = false
       clearInterval(livenessTimer)
       const idAtCleanup = activeId
       const unlistenAtCleanup = unlisten

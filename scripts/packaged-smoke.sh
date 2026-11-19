@@ -7,8 +7,7 @@
 # attach to it and tauri-driver does not support macOS), so the app is checked
 # from the outside: its sidecar's log, process state, bd on the runner, and the
 # updater endpoint. Checks print PASS or FAIL with evidence; any FAIL exits 1.
-# The live-update check temporarily warns for a runner GUI-session defect
-# (beadbox-l6u); beadbox-zd0 restores its gate in 0.34.1.
+# The live-update gate allows the capped background refresh interval.
 #
 # Shared Macs (beadbox-449.5): the runner may be the QA Mac, with other copies
 # of Beadbox running. The script verifies the bundle's signature and team
@@ -37,6 +36,13 @@ SCRATCH="${RUNNER_TEMP:-$(mktemp -d)}/packaged-smoke"
 LOG="$SCRATCH/beadbox-sidecar.log"
 REGISTRY="$SCRATCH/registry.json"
 WS="$SCRATCH/smoke-workspace"
+# beadbox-79a: a second synthetic workspace for the All projects view. Its
+# folder name must not match "smoke-workspace", which the tree check keys on.
+WS2="$SCRATCH/smoke-second"
+# The views this release changes (one list in the repo); the smoke publishes a
+# filled-in copy for the app's view probe after its live-update check.
+SMOKE_TARGETS_TEMPLATE=${SMOKE_TARGETS_TEMPLATE:-"$(cd "$(dirname "$0")" && pwd)/smoke-targets.json"}
+SMOKE_TARGETS="$SCRATCH/smoke-targets.json"
 # The app resolves bd as BD_PATH, then a Homebrew or /usr/local copy, then
 # PATH. On a shared Mac that Homebrew bd can be another version than the one
 # this smoke seeds the workspace with, and a schema skew fails every read
@@ -76,8 +82,8 @@ count_log() {
 # Seed: a synthetic embedded workspace (an epic, two tasks, a blocks edge),
 # registered and active, so the app has a tree to load.
 # ---------------------------------------------------------------------------
-rm -rf "$SCRATCH"
-mkdir -p "$WS"
+rm -rf "${SCRATCH:?}"
+mkdir -p "$WS" "$WS2"
 (
   cd "$WS" || exit 1
   git init -q && git -c user.email=smoke@example.invalid -c user.name=smoke commit -q --allow-empty -m init
@@ -88,13 +94,24 @@ EPIC=$(cd "$WS" && bd create "Smoke epic" -t epic --json | id_of)
 TASK_A=$(cd "$WS" && bd create "Smoke task A" -t task --parent "$EPIC" --json | id_of)
 TASK_B=$(cd "$WS" && bd create "Smoke task B" -t task --json | id_of)
 (cd "$WS" && bd dep add "$TASK_A" "$TASK_B" >/dev/null)
+(
+  cd "$WS2" || exit 1
+  git init -q && git -c user.email=smoke@example.invalid -c user.name=smoke commit -q --allow-empty -m init
+  bd init --prefix=s2 --non-interactive --skip-agents --skip-hooks >/dev/null
+  bd create "Second workspace task" -t task --json >/dev/null
+) || { fail "seed: second workspace bd init failed"; exit 1; }
 WS_ID=$(python3 -c 'import uuid;print(uuid.uuid4())')
-python3 - "$REGISTRY" "$WS_ID" "$WS/.beads" <<'EOF'
+WS2_ID=$(python3 -c 'import uuid;print(uuid.uuid4())')
+# Each workspace carries its own color for "open" (beadbox-79a status-color target).
+python3 - "$REGISTRY" "$WS_ID" "$WS/.beads" "$WS2_ID" "$WS2/.beads" <<'EOF'
 import json, sys, datetime
-path, wid, beads = sys.argv[1:4]
-json.dump({"version": 2, "activeWorkspace": wid, "workspaces": [{
-    "id": wid, "name": "smoke-workspace", "addedAt": datetime.datetime.utcnow().isoformat() + "Z",
-    "local": {"path": beads}, "server": None, "mode": "embedded"}]}, open(path, "w"))
+path, wid, beads, wid2, beads2 = sys.argv[1:6]
+now = datetime.datetime.utcnow().isoformat() + "Z"
+json.dump({"version": 2, "activeWorkspace": wid, "workspaces": [
+    {"id": wid, "name": "smoke-workspace", "addedAt": now, "local": {"path": beads},
+     "server": None, "mode": "embedded", "statusColors": {"open": "#ff0000"}},
+    {"id": wid2, "name": "smoke-second", "addedAt": now, "local": {"path": beads2},
+     "server": None, "mode": "embedded", "statusColors": {"open": "#0000ff"}}]}, open(path, "w"))
 EOF
 echo "seed: workspace $WS (epic $EPIC, $TASK_A blocked by $TASK_B), bd $(bd --version | awk '{print $3}')"
 
@@ -113,7 +130,8 @@ else
   exit 1
 fi
 
-open -n --env "BEADBOX_LOG_PATH=$LOG" --env "BEADBOX_REGISTRY_PATH=$REGISTRY" --env "BD_PATH=$BD" "$APP" \
+open -n --env "BEADBOX_LOG_PATH=$LOG" --env "BEADBOX_REGISTRY_PATH=$REGISTRY" --env "BD_PATH=$BD" \
+  --env "BEADBOX_SMOKE_VIEWS=$SMOKE_TARGETS" "$APP" \
   || { fail "launch: open failed"; exit 1; }
 APP_PID=""
 for ((i = 0; i < 30; i++)); do
@@ -138,11 +156,13 @@ else
   fail "handshake: no startup health call from the UI within 60s"
 fi
 
-# (c) Tree: the UI asked for the tree (bd list) and subscribed to live updates.
-if wait_log '\[bd\] list completed' 1 60; then
-  pass "tree: bd list served to the UI ($(elapsed))"
+# (c) Tree: a completed hierarchy build, not the blocked-by health read's
+# separate bd list. The success marker excludes getEpicsCore THREW lines.
+TREE_PATTERN='\[debug:cascade9\] getEpicsCore N=[0-9]+ db=.*smoke-workspace'
+if wait_log "$TREE_PATTERN" 1 60; then
+  pass "tree: epic hierarchy served to the UI ($(elapsed))"
 else
-  fail "tree: no bd list within 60s of launch"
+  fail "tree: no completed epic hierarchy within 60s of launch"
 fi
 if wait_log "\[change-detector\] starting for .*smoke-workspace" 1 30; then
   pass "subscription: live-update subscription started for the workspace"
@@ -169,17 +189,62 @@ wait_changes() { # count, timeout seconds
   done
   return 1
 }
-lists_before=$(count_log '\[bd\] list completed')
+# Hidden windows admit a coalesced refresh every 30s. Allow that interval
+# plus scheduling/RPC margin; every other smoke deadline stays unchanged.
+trees_before=$(count_log "$TREE_PATTERN")
 changes_before=$(count_changes)
+live_started=$(date +%s)
 (cd "$WS" && bd update "$TASK_B" --status in_progress >/dev/null)
 if wait_changes $((changes_before + 1)) 30 &&
-  wait_log '\[bd\] list completed' $((lists_before + 1)) 30; then
-  pass "live update: bd update → change detected → the UI refetched ($(elapsed))"
+  change_elapsed="$(($(date +%s) - live_started))s" &&
+  wait_log "$TREE_PATTERN" $((trees_before + 1)) 75; then
+  refetch_elapsed="$(($(date +%s) - live_started))s"
+  pass "live update: bd update → change detected (${change_elapsed}) → tree refetched in ${refetch_elapsed} ($(elapsed))"
 else
-  # Temporary harness exception: the runner GUI session is not on the console.
-  # Hidden windows correctly pause refreshes. Restore the gate in beadbox-zd0.
-  echo "::warning::live update: no change event and refetch within 30s of 'bd update'; harness defect: the runner GUI session is not on the console, so its window is hidden and hidden windows do not refresh (beadbox-l6u; restore gating in beadbox-zd0 / 0.34.1)"
-  reported=$((reported + 1))
+  fail "live update: no change event within 30s or tree refetch within 75s of detection after 'bd update'"
+fi
+
+# (f) Views (beadbox-79a): the views this release changes, opened inside the
+# signed app's own WebView by its view probe, which reports one
+# [smoke-view] {"target":...,"ok":...,"detail":...} line per target to the
+# sidecar log. Published only now, so the probe's navigation cannot disturb
+# the checks above. Each target is one check: a view that does not render, a
+# wrong computed value or a missing report fails the smoke.
+view_ids=$(python3 - "$SMOKE_TARGETS_TEMPLATE" "$WS_ID" "${WS2_ID:-}" "$SMOKE_TARGETS.tmp" <<'EOF'
+import json, sys
+template, ws_a, ws_b, out = sys.argv[1:5]
+doc = json.loads(open(template).read().replace("${WS_A}", ws_a).replace("${WS_B}", ws_b))
+ids = [t["id"] for t in doc["targets"]]
+assert ids and all(isinstance(i, str) and i for i in ids)
+json.dump(doc, open(out, "w"))
+print("\n".join(ids))
+EOF
+)
+if [ -n "$view_ids" ] && mv "$SMOKE_TARGETS.tmp" "$SMOKE_TARGETS"; then
+  first_view=1
+  while IFS= read -r view_id; do
+    EXPECTED_CHECKS=$((EXPECTED_CHECKS + 1))
+    # The first report waits for the probe to notice the file and open a view.
+    view_timeout=45
+    [ "$first_view" = 1 ] && view_timeout=90
+    first_view=0
+    view_pattern="^\[smoke-view\] \{\"target\":\"${view_id}\","
+    if wait_log "$view_pattern" 1 "$view_timeout"; then
+      view_json=$(grep -m1 -E -- "$view_pattern" "$LOG" | sed 's/^\[smoke-view\] //')
+      view_ok=$(printf '%s' "$view_json" | python3 -c 'import json,sys;print("yes" if json.load(sys.stdin).get("ok") is True else "no")' 2>/dev/null)
+      view_detail=$(printf '%s' "$view_json" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("detail",""))' 2>/dev/null)
+      if [ "$view_ok" = yes ]; then
+        pass "view: ${view_id}: ${view_detail}"
+      else
+        fail "view: ${view_id}: ${view_detail:-unreadable report}"
+      fi
+    else
+      fail "view: ${view_id}: no report from the app's view probe within ${view_timeout}s (the view did not render or the probe did not run)"
+    fi
+  done <<<"$view_ids"
+else
+  EXPECTED_CHECKS=$((EXPECTED_CHECKS + 1))
+  fail "views: could not publish the smoke targets from $SMOKE_TARGETS_TEMPLATE"
 fi
 
 screencapture -x "$OUT/app.png" 2>/dev/null || echo "note: screencapture unavailable on this runner"

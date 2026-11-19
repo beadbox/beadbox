@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, stat, unlink, writeFile } from "fs/promises"
 import { homedir } from "os"
 import { basename, dirname, join, resolve } from "path"
 import { readPortFile } from "./dolt-port-file"
+import { applyWorkspaceOrder } from "./workspace-order"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -795,6 +796,24 @@ export async function removeWorkspaceFromRegistry(workspaceId: string): Promise<
 
     console.log(`[beadbox-registry] removed workspace: ${workspaceId}`)
     return true
+  })
+}
+
+/**
+ * Put the registry's workspaces in the user's order (beadbox-984): the order
+ * of the Workspaces sidebar is the array order. See applyWorkspaceOrder for
+ * how a stale request is merged. Writes nothing when the order is unchanged.
+ * Returns the resulting order of ids.
+ */
+export async function reorderWorkspaces(requestedIds: readonly string[]): Promise<string[]> {
+  return mutateRegistry((registry) => {
+    const before = registry.workspaces.map((w) => w.id).join("\n")
+    registry.workspaces = applyWorkspaceOrder(registry.workspaces, requestedIds)
+    const order = registry.workspaces.map((w) => w.id)
+    if (order.join("\n") !== before) {
+      console.log(`[beadbox-registry] reordered ${order.length} workspaces`)
+    }
+    return order
   })
 }
 

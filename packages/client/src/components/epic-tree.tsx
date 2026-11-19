@@ -26,6 +26,7 @@ import { computeStepGroups, isStepFinished, stepCount } from "@/lib/molecule-pha
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
 import type { Bead, Epic, ReadState } from "@/lib/types"
 import { makeKeyer } from "@/lib/stable-key"
+import { acceptArchiveClick } from "@/lib/archive-click-guard"
 import { cn } from "@/lib/utils"
 
 interface EpicTreeProps {
@@ -1534,6 +1535,9 @@ export function EpicRow({
                 aria-label={`${rowArchived ? "Unarchive" : "Archive"} ${epic.type}: ${epic.title}`}
                 onClick={(e) => {
                   e.stopPropagation()
+                  // Archiving removes the row at once (beadbox-d6l): ignore a
+                  // double-click's second click on the epic that slid up.
+                  if (!rowArchived && !acceptArchiveClick(e)) return
                   onArchiveEpic(epic.id, !rowArchived)
                 }}
                 onKeyDown={(e) => {

@@ -8,10 +8,10 @@
 // `subscribe.ts` reads `state.writer` at call time and always sees the
 // current value, including mutations from _setWriter.
 
-import { createChangeDetector, type ChangeDetector } from "../lib/change-detector"
-import { formatLine, type SubscriptionEvent } from "../subscribe-protocol"
 import { beadsDirFromDatabasePath } from "../lib/beadtrain-fs"
+import { type ChangeDetector, createChangeDetector } from "../lib/change-detector"
 import { type RegistryEntry, resolveBdDbPath } from "../lib/workspace-registry"
+import { formatLine, type SubscriptionEvent } from "../subscribe-protocol"
 
 const defaultWriter = (line: string): void => {
   process.stderr.write(line)
@@ -21,6 +21,16 @@ export const state = {
   writer: defaultWriter as (line: string) => void,
   detectors: new Map<string, ChangeDetector>(),
   paths: new Map<string, string>(),
+  // beadbox-0b6: one detector per workspace, newest start wins. Each start
+  // takes a generation on arrival; only the latest for its workspace keeps
+  // its detector.
+  startSeq: 0,
+  latestStart: new Map<string, number>(),
+}
+
+/** The workspace a subscription path belongs to, in every spelling it can take. */
+export function workspaceKey(path: string): string {
+  return beadsDirFromDatabasePath(path) ?? path
 }
 
 export function emitForSubscription(id: string, payload: SubscriptionEvent): void {

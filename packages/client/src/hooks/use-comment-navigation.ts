@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { CommentSortOrder } from "@/lib/local-storage"
 import type { Comment } from "@/lib/types"
 
@@ -21,9 +21,6 @@ export function useCommentNavigation({
   const lastCommentRef = useRef<HTMLDivElement | null>(null)
   const commentRefs = useRef<(HTMLDivElement | null)[]>([])
   const [focusedCommentIndex, setFocusedCommentIndex] = useState<number | null>(null)
-  const [isFirstCommentVisible, setIsFirstCommentVisible] = useState(false)
-  const [isLastCommentVisible, setIsLastCommentVisible] = useState(false)
-  const [isAtTop, setIsAtTop] = useState(true)
 
   // Sorted comments
   const sortedComments = useMemo(() => {
@@ -71,66 +68,65 @@ export function useCommentNavigation({
   // Reset on bead change
   useEffect(() => {
     setFocusedCommentIndex(null)
-    setIsAtTop(true)
   }, [bead?.id])
+
+  // beadbox-9sa: keep the reader's place when comments arrive. The comment at
+  // the top of the view keeps its offset from the thread's top across a change
+  // to the list (WKWebView has no CSS scroll anchoring to do it for us), so a
+  // comment inserted above the reader never moves what they are reading. Only
+  // the user's own scrolling (wheel, keyboard, minimap) moves the thread.
+  const anchorRef = useRef<{ id: string; offset: number } | null>(null)
+  const anchorBeadRef = useRef<string | undefined>(undefined)
+  const sortedRef = useRef(sortedComments)
+
+  const captureAnchor = useCallback(() => {
+    const container = scrollContainerRef.current
+    anchorRef.current = null
+    if (!container) return
+    const top = container.getBoundingClientRect().top
+    const bottom = top + container.clientHeight
+    const list = sortedRef.current
+    for (let i = 0; i < list.length; i++) {
+      const el = commentRefs.current[i]
+      if (!el) continue
+      const r = el.getBoundingClientRect()
+      if (r.bottom > top && r.top < bottom) {
+        anchorRef.current = { id: list[i].id, offset: r.top - top }
+        return
+      }
+    }
+  }, [scrollContainerRef])
+
+  // Follow the user's scrolling, so the anchor is always the comment they see.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the scroll container is re-created when the bead changes, so the listener must re-attach then
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    container.addEventListener("scroll", captureAnchor, { passive: true })
+    return () => container.removeEventListener("scroll", captureAnchor)
+  }, [bead?.id, scrollContainerRef, captureAnchor])
+
+  // After the list changes, put the anchor comment back where it was, before paint.
+  useLayoutEffect(() => {
+    sortedRef.current = sortedComments
+    const container = scrollContainerRef.current
+    const anchor = anchorRef.current
+    if (container && anchor && anchorBeadRef.current === bead?.id) {
+      const i = sortedComments.findIndex((c) => c.id === anchor.id)
+      const el = i >= 0 ? commentRefs.current[i] : null
+      if (el) {
+        const delta = el.getBoundingClientRect().top - container.getBoundingClientRect().top - anchor.offset
+        if (Math.abs(delta) >= 1) container.scrollTop += delta
+      }
+    }
+    anchorBeadRef.current = bead?.id
+    captureAnchor()
+  }, [sortedComments, bead?.id, scrollContainerRef, captureAnchor])
 
   // Reset focus when panel loses focus
   useEffect(() => {
     if (!isFocused) setFocusedCommentIndex(null)
   }, [isFocused])
-
-  // Track visibility of first and last comments
-  useEffect(() => {
-    const firstElement = firstCommentRef.current
-    const lastElement = lastCommentRef.current
-    const container = scrollContainerRef.current
-    if (!container) {
-      setIsFirstCommentVisible(false)
-      setIsLastCommentVisible(false)
-      return
-    }
-
-    const observers: IntersectionObserver[] = []
-
-    if (firstElement) {
-      const firstObserver = new IntersectionObserver(
-        ([entry]) => setIsFirstCommentVisible(entry.isIntersecting),
-        { root: container, threshold: 0.5 },
-      )
-      firstObserver.observe(firstElement)
-      observers.push(firstObserver)
-    }
-
-    if (lastElement) {
-      const lastObserver = new IntersectionObserver(
-        ([entry]) => setIsLastCommentVisible(entry.isIntersecting),
-        { root: container, threshold: 0.5 },
-      )
-      lastObserver.observe(lastElement)
-      observers.push(lastObserver)
-    }
-
-    return () => observers.forEach((obs) => obs.disconnect())
-  }, [bead?.comments.length, scrollContainerRef])
-
-  // Track scroll position
-  useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container) return
-
-    const handleScroll = () => setIsAtTop(container.scrollTop < 50)
-    handleScroll()
-    container.addEventListener("scroll", handleScroll)
-    return () => container.removeEventListener("scroll", handleScroll)
-  }, [bead?.id, scrollContainerRef])
-
-  const scrollToFirstComment = useCallback(() => {
-    firstCommentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }, [])
-
-  const scrollToLastComment = useCallback(() => {
-    lastCommentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }, [])
 
   const navigateComments = useCallback(
     (direction: "up" | "down") => {
@@ -169,27 +165,12 @@ export function useCommentNavigation({
     [bead, sortedComments, scrollContainerRef],
   )
 
-  const scrollToLatestComment = useCallback(() => {
-    if (!bead || sortedComments.length === 0) return
-    const lastIndex = sortedComments.length - 1
-    setFocusedCommentIndex(lastIndex)
-    setTimeout(() => {
-      commentRefs.current[lastIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-    }, 0)
-  }, [bead, sortedComments])
-
   return {
     sortedComments,
     groupedComments,
     focusedCommentIndex,
     setFocusedCommentIndex,
-    isFirstCommentVisible,
-    isLastCommentVisible,
-    isAtTop,
-    scrollToFirstComment,
-    scrollToLastComment,
     navigateComments,
-    scrollToLatestComment,
     commentRefs,
     firstCommentRef,
     lastCommentRef,

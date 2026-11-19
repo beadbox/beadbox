@@ -1,8 +1,6 @@
 "use client"
 
 import {
-  ArrowDown,
-  ArrowUp,
   CheckCircle2,
   ExternalLink,
   FileText,
@@ -79,7 +77,6 @@ interface BeadDetailPanelProps {
 
 interface BeadDetailPanelHandle {
   navigateComments: (direction: "up" | "down") => void
-  scrollToLatestComment: () => void
 }
 
 export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanelProps>(
@@ -131,9 +128,8 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
       ref,
       () => ({
         navigateComments: comments.navigateComments,
-        scrollToLatestComment: comments.scrollToLatestComment,
       }),
-      [comments.navigateComments, comments.scrollToLatestComment],
+      [comments.navigateComments],
     )
 
     // Molecule DAG view state
@@ -812,49 +808,6 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
             </Button>
           </div>
         )}
-
-        {/* Floating nav */}
-        {bead.comments.length > 0 &&
-          (comments.isAtTop ? !comments.isFirstCommentVisible : true) && (
-            <div
-              className={cn(
-                "absolute left-1/2 -translate-x-1/2 z-10",
-                hasFooter ? "bottom-20" : "bottom-4",
-              )}
-            >
-              {comments.isAtTop && !comments.isFirstCommentVisible ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={comments.scrollToFirstComment}
-                  className="shadow-lg shadow-black/30 hover:shadow-black/40 transition-shadow"
-                >
-                  <ArrowDown className="h-4 w-4 mr-1.5" />
-                  {commentSort === "newest" ? "Latest comment" : "First comment"}
-                </Button>
-              ) : comments.isLastCommentVisible ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={comments.scrollToFirstComment}
-                  className="shadow-lg shadow-black/30 hover:shadow-black/40 transition-shadow"
-                >
-                  <ArrowUp className="h-4 w-4 mr-1.5" />
-                  {commentSort === "newest" ? "Latest comment" : "First comment"}
-                </Button>
-              ) : (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={comments.scrollToLastComment}
-                  className="shadow-lg shadow-black/30 hover:shadow-black/40 transition-shadow"
-                >
-                  <ArrowDown className="h-4 w-4 mr-1.5" />
-                  {commentSort === "newest" ? "Oldest comment" : "Latest comment"}
-                </Button>
-              )}
-            </div>
-          )}
 
         {/* Modals */}
         <ExpandedCommentModal comment={expandedComment} onClose={() => setExpandedComment(null)} />

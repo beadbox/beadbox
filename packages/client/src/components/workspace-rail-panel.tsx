@@ -51,6 +51,7 @@ function WorkspaceRailShell() {
     selectWorkspace,
     removeWorkspace,
     relabelWorkspace,
+    moveWorkspace,
     openDashboard,
     toggleCollapse,
     startResize,
@@ -118,6 +119,7 @@ function WorkspaceRailShell() {
         onSelect={selectWorkspace}
         onRemove={setRemoveTarget}
         onRelabel={relabelWorkspace}
+        onMove={moveWorkspace}
         onAdd={() => setAddOpen(true)}
         onToggleCollapse={toggleCollapse}
         onResizePointerDown={startResize}

@@ -1993,12 +1993,26 @@ jobs:
     # beadbox-z3j M4: on the promote path the build needs are SKIPPED, which
     # the failure check alone lets through, so a skipped or absent copy
     # could publish an empty final. promote-artifacts must have succeeded.
+    # beadbox-pqn: a job that hits its timeout ends CANCELLED, not failed, and
+    # !cancelled() asks about the whole run, not one job. v0.35.1-rc.2 shipped
+    # macOS-only when build-linux timed out. So: no need may be cancelled
+    # (nothing here is cancelled by design; designed non-runs are skipped), and
+    # each path names the jobs that must have succeeded on it:
+    #   promote path (final, not rebuild_final): promote-artifacts;
+    #   build path (rc, or rebuild_final): create-arm64-dmg and build-linux.
+    # build-windows is skipped by design and is in neither list.
     if: >-
       always() && !cancelled()
       && inputs.mode != 'build'
       && !contains(needs.*.result, 'failure')
-      && (needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final
-          || needs.promote-artifacts.result == 'success')
+      && !contains(needs.*.result, 'cancelled')
+      && (
+        (needs.validate-tag.outputs.is_final == 'true' && !inputs.rebuild_final
+          && needs.promote-artifacts.result == 'success')
+        || ((needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final)
+          && needs.create-arm64-dmg.result == 'success'
+          && needs.build-linux.result == 'success')
+      )
     needs: [validate-tag, create-arm64-dmg, build-linux, build-windows, promote-artifacts]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -2075,6 +2089,12 @@ jobs:
               echo "::warning::darwin bundle bundle not found on $TAG; skipping darwin-aarch64"
             fi
           fi
+          # beadbox-pqn: every release ships macOS; a manifest without it would
+          # leave macOS users on the old version with no error anywhere.
+          case "$platforms_json" in
+            *'"darwin-aarch64":'*) ;;
+            *) echo "::error::no signed darwin-aarch64 bundle (Beadbox_aarch64.app.tar.gz + .sig) on $TAG; latest.json would leave macOS out"; exit 1 ;;
+          esac
 
           # linux-x86_64 (either AppImage.tar.gz OR deb; prefer the first one found)
           for linux_name in "Beadbox_x86_64.AppImage.tar.gz.sig" "Beadbox_x86_64.deb.sig"; do
@@ -2089,6 +2109,12 @@ jobs:
               echo "::warning::linux bundle ${artifact} bundle not found; trying next"
             fi
           done
+          # beadbox-pqn: v0.35.1-rc.2's latest.json left Linux out when
+          # build-linux was cancelled. Every release ships Linux.
+          case "$platforms_json" in
+            *'"linux-x86_64":'*) ;;
+            *) echo "::error::no signed linux-x86_64 bundle (Beadbox_x86_64.deb or AppImage.tar.gz + .sig) on $TAG; latest.json would leave Linux out"; exit 1 ;;
+          esac
 
           # windows-x86_64
           if sig=$(fetch_sig "Beadbox_x86_64.nsis.zip.sig"); then
@@ -2240,13 +2266,29 @@ jobs:
     # never ran. When the draft has a macOS app, the smoke must have passed.
     # beadbox-z3j M4: see publish-update-manifest. Never publish a final whose
     # assets were not promoted.
+    # beadbox-pqn: as publish-update-manifest. No need may be cancelled, and
+    # each path names what must have succeeded on it:
+    #   promote path (final, not rebuild_final): promote-artifacts;
+    #   build path (rc, or rebuild_final): create-arm64-dmg, build-linux,
+    #   test and test-integration.
+    # publish-update-manifest must have succeeded on both. build-windows is
+    # skipped by design and is in neither list.
     if: >-
       always() && !cancelled()
       && inputs.mode != 'build'
       && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+      && needs.publish-update-manifest.result == 'success'
       && (needs.stage-packaged-smoke.outputs.has_mac != 'true' || needs.packaged-smoke.result == 'success')
-      && (needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final
-          || needs.promote-artifacts.result == 'success')
+      && (
+        (needs.validate-tag.outputs.is_final == 'true' && !inputs.rebuild_final
+          && needs.promote-artifacts.result == 'success')
+        || ((needs.validate-tag.outputs.is_final != 'true' || inputs.rebuild_final)
+          && needs.create-arm64-dmg.result == 'success'
+          && needs.build-linux.result == 'success'
+          && needs.test.result == 'success'
+          && needs.test-integration.result == 'success')
+      )
     # stage-packaged-smoke is listed as well: when a job fails, the jobs that
     # need it are skipped, not failed, so a staging failure would otherwise
     # skip the smoke and let this promote anyway.
@@ -2256,6 +2298,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: The jobs this publish depends on
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          # beadbox-pqn: the record of what this publish stood on.
+          echo "needs results: $RESULTS"
       - name: Promote draft to published release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

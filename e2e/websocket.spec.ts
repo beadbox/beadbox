@@ -33,7 +33,7 @@ test.describe("WebSocket real-time updates", () => {
     await setupWithWs(page, testDb.workspaceId)
 
     // The red disconnect dot should NOT be visible when WS is connected
-    const disconnectDot = page.locator("header span.rounded-full.bg-red-500")
+    const disconnectDot = page.locator("header span.rounded-full.bg-destructive")
     await expect(disconnectDot).not.toBeVisible({ timeout: 5_000 })
   })
 
@@ -122,7 +122,7 @@ test.describe("WebSocket real-time updates", () => {
     await setupWithWs(page, testDb.workspaceId)
 
     // Confirm connection is active (no red disconnect dot)
-    const disconnectDot = page.locator("header span.rounded-full.bg-red-500")
+    const disconnectDot = page.locator("header span.rounded-full.bg-destructive")
     await expect(disconnectDot).not.toBeVisible({ timeout: 5_000 })
 
     // Close all WebSocket connections from the browser side

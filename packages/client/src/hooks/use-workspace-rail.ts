@@ -44,7 +44,10 @@ import {
   subscribeWorkspaceCookie,
 } from "@/lib/workspace-cookie"
 import { publishWorkspaceLabel } from "@/lib/workspace-labels"
-import { subscribeWorkspaceRegistryChange } from "@/lib/workspace-registry-events"
+import {
+  publishWorkspaceRegistryChange,
+  subscribeWorkspaceRegistryChange,
+} from "@/lib/workspace-registry-events"
 
 const DASHBOARD_ROUTE = "/workspaces"
 
@@ -67,6 +70,12 @@ export interface WorkspaceRailController {
     workspace: WorkspaceCard,
     label: { name?: string; icon?: string | null },
   ) => Promise<boolean>
+  /**
+   * Move a workspace to `toIndex` in the sidebar order (beadbox-984). The list
+   * updates at once; the order is saved in the registry, and a failure puts
+   * the saved order back. Resolves false when nothing moved or the save failed.
+   */
+  moveWorkspace: (workspace: WorkspaceCard, toIndex: number) => Promise<boolean>
   openDashboard: () => void
   toggleCollapse: () => void
   startResize: (event: ReactPointerEvent<HTMLDivElement>) => void
@@ -206,6 +215,33 @@ export function useWorkspaceRail(): WorkspaceRailController {
     [],
   )
 
+  const moveWorkspace = useCallback(async (workspace: WorkspaceCard, toIndex: number) => {
+    const current = workspacesRef.current
+    const from = current.findIndex((w) => w.id === workspace.id)
+    const to = Math.max(0, Math.min(toIndex, current.length - 1))
+    if (from < 0 || from === to) return false
+    const next = [...current]
+    next.splice(to, 0, ...next.splice(from, 1))
+    workspacesRef.current = next
+    setWorkspaces(next)
+
+    let error: string | null = null
+    try {
+      const result = await rpc.workspaces.setWorkspaceOrder(next.map((w) => w.id))
+      if (!result.success) error = result.error
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+    if (error !== null) {
+      toastError("Could not save the workspace order", { description: error })
+      await refresh()
+      return false
+    }
+    // The dashboard and All projects hold their own copy of the list.
+    publishWorkspaceRegistryChange()
+    return true
+  }, [refresh])
+
   const toggleCollapse = useCallback(() => {
     const next = !collapsed
     setCollapsed(next)
@@ -248,6 +284,7 @@ export function useWorkspaceRail(): WorkspaceRailController {
     selectWorkspace,
     removeWorkspace,
     relabelWorkspace,
+    moveWorkspace,
     openDashboard,
     toggleCollapse,
     startResize,

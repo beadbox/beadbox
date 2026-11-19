@@ -6,7 +6,7 @@
 // screen must keep showing the tree's own blocked-by, before and after a
 // subscription change.
 
-import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, mock, spyOn, test } from "bun:test"
 import { QueryClientProvider } from "@tanstack/react-query"
 import {
   createMemoryHistory,
@@ -17,6 +17,8 @@ import {
   RouterProvider,
 } from "@tanstack/react-router"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+
+import { Profiler } from "react"
 
 import { StartupGate } from "../components/startup-gate"
 import { queryClient } from "../lib/query-client"
@@ -133,6 +135,8 @@ function installRpc() {
   return { getEpics, getBlocksDependencies }
 }
 
+let homeCommits = 0
+
 function mountHome() {
   const rootRoute = createRootRoute({
     component: () => (
@@ -142,7 +146,20 @@ function mountHome() {
     ),
   })
   const routeTree = rootRoute.addChildren([
-    createRoute({ getParentRoute: () => rootRoute, path: "/", component: HomePage }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/",
+      component: () => (
+        <Profiler
+          id="home"
+          onRender={() => {
+            homeCommits++
+          }}
+        >
+          <HomePage />
+        </Profiler>
+      ),
+    }),
     createRoute({ getParentRoute: () => rootRoute, path: "/workspaces", component: () => null }),
   ])
   const router = createRouter({
@@ -196,6 +213,48 @@ describe("home page: blocked-by comes with the tree (beadbox-kqiv)", () => {
     await settle()
     expect(rowText()).toMatch(/after\s*tb-1/)
     expect(rowText()).not.toContain("tb-patched")
+  }, 20_000)
+  test("hidden changes do not run blocked-by reads until the capped tree completes", async () => {
+    setWorkspaceCookie(ws.id)
+    mountHome()
+    await waitFor(() => expect(screen.getByText("Loose step")).toBeTruthy())
+    await settle()
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+    try {
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"))
+        _emitChangeForTests()
+      })
+      await settle()
+      const trees = getEpics.mock.calls.length
+      const blocks = getBlocksDependencies.mock.calls.length
+      const commits = homeCommits
+      const invalidations = spyOn(queryClient, "invalidateQueries")
+      try {
+        for (let n = 0; n < 10; n++) {
+          await act(async () => {
+            _emitChangeForTests()
+          })
+        }
+        // act flushes each event's React work. Assert commits before waiting
+        // on unrelated page timers (tooltips/health/console startup).
+        expect(homeCommits).toBe(commits)
+        await settle()
+        expect(getEpics.mock.calls.length).toBe(trees)
+        expect(getBlocksDependencies.mock.calls.length).toBe(blocks)
+        expect(invalidations.mock.calls.length).toBe(0)
+      } finally {
+        invalidations.mockRestore()
+      }
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" })
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")))
+      await settle()
+      expect(getEpics.mock.calls.length).toBe(trees + 1)
+      expect(getBlocksDependencies.mock.calls.length).toBe(blocks + 1)
+      expect(rowText()).toMatch(/after\s*tb-1/)
+    } finally {
+      Reflect.deleteProperty(document, "visibilityState")
+    }
   }, 20_000)
 })
 

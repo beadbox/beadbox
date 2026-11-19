@@ -31,10 +31,11 @@ import {
   setArchiveExpanded,
 } from "@/lib/local-storage"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
+import { usePendingArchives, withoutPending } from "@/lib/pending-archive"
 import { safeCapture } from "@/lib/posthog-safe"
 import { rpc } from "@/lib/rpc"
 import { sortEpics } from "@/lib/sort"
-import { useSubscriptionChangeSignal } from "@/lib/subscribe"
+import { onSubscriptionChange } from "@/lib/subscribe"
 import type { Bead, Epic } from "@/lib/types"
 
 // Resolved at call time, not import time: an import-time binding captures
@@ -295,8 +296,9 @@ function BeadsEpicsViewer() {
     typeCatalogError,
     typeCatalogRetrying,
     retryAvailableTypes,
-    epics,
+    epics: loadedEpics,
     setEpics,
+    treeRevision,
     isLoading,
     isRefreshing,
     loadingWorkspaceId,
@@ -325,6 +327,13 @@ function BeadsEpicsViewer() {
     handleRemoveWorkspace,
     doRemoveWorkspace,
   } = lifecycle
+
+  // beadbox-d6l: a bead whose archive is in flight is hidden from every view
+  // (tree, backlog, archived, grouped, flat) until bd settles the write, even
+  // when a refresh brings it back unarchived. Navigation keeps the full tree,
+  // so archiving the bead open in the detail panel does not close it mid-flight.
+  const pendingArchives = usePendingArchives()
+  const epics = useMemo(() => withoutPending(loadedEpics, pendingArchives.ids), [loadedEpics, pendingArchives.ids])
 
   useLabelChoiceForWorkspace(currentWorkspace?.id, filters, setFilters)
 
@@ -535,7 +544,7 @@ function BeadsEpicsViewer() {
 
   const nav = useEpicNavigation({
     groupedLayout,
-    epics,
+    epics: loadedEpics,
     currentWorkspace,
     filters,
     filteredEpics,
@@ -612,15 +621,16 @@ function BeadsEpicsViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.search])
 
-  // beadbox-s5z: bead-list auto-refresh on subscription change.
-  // bb-pgb0.1 (delete useWebSocket shim, commit 5580928) claimed real-time
-  // invalidation flows through queryClient.invalidateQueries + bumpSubscription
-  // Change per pm/systemdesign.md §3.2. home-page.tsx is neither a useQuery
-  // consumer nor a useSubscriptionChangeSignal consumer, so external bd writes
-  // never triggered loadEpics. Mirror the workspaces-page.tsx / activity-page.tsx
-  // pattern: read the signal, refetch on bump. The bump also drives epicEpoch
-  // forward so the blocked-by health check below re-runs for the new tree.
-  const subscriptionSignal = useSubscriptionChangeSignal()
+  // Deliver changes straight to the lifecycle's bounded admission. Hidden
+  // bursts need neither a React signal nor an extra blocked-by health read.
+  const workspaceDbPathRef = useRef(currentWorkspace?.databasePath)
+  workspaceDbPathRef.current = currentWorkspace?.databasePath
+  const [windowVisible, setWindowVisible] = useState(document.visibilityState !== "hidden")
+  useEffect(() => {
+    const updateVisibility = () => setWindowVisible(document.visibilityState !== "hidden")
+    document.addEventListener("visibilitychange", updateVisibility)
+    return () => document.removeEventListener("visibilitychange", updateVisibility)
+  }, [])
 
   // Blocked-by health: the tree arrives with its blockedBy (the sidecar builds
   // both from one bd list). This effect no longer patches the tree: doing that
@@ -629,8 +639,8 @@ function BeadsEpicsViewer() {
   // into Phase 1 and re-formed on each change (beadbox-kqiv). It still asks
   // the sidecar after each load, only to learn whether blocked-by could be
   // computed, for the banner below. While the data is unchanged the sidecar
-  // answers from the tree's own list. epicEpoch increments on each
-  // subscription refresh so the check runs for every new tree.
+  // answers from the tree's own list. treeRevision increments on each
+  // accepted tree load, including updates with unchanged tree shape.
   const blocksLoadIdRef = useRef(0)
   // Set when the server could not compute blocked-by for this workspace, so the
   // tree says so instead of reading as "nothing is blocked" (beadbox-01f.5).
@@ -638,16 +648,16 @@ function BeadsEpicsViewer() {
     null,
   )
   const [blocksRetry, setBlocksRetry] = useState(0)
-  const [epicEpoch, setEpicEpoch] = useState(0)
 
+  useEffect(
+    () =>
+      onSubscriptionChange(() => {
+        if (workspaceDbPathRef.current) void loadEpics()
+      }),
+    [loadEpics],
+  )
   useEffect(() => {
-    if (subscriptionSignal === 0) return
-    if (!currentWorkspace?.databasePath) return
-    void loadEpics()
-    setEpicEpoch((prev) => prev + 1)
-  }, [subscriptionSignal, currentWorkspace?.databasePath, loadEpics])
-  useEffect(() => {
-    if (isLoading || !currentWorkspace?.databasePath || epics.length === 0) return
+    if (!windowVisible || isLoading || !currentWorkspace?.databasePath || epics.length === 0) return
 
     const loadId = ++blocksLoadIdRef.current
     const dbPath = currentWorkspace.databasePath
@@ -671,7 +681,14 @@ function BeadsEpicsViewer() {
         setBlocksDegraded({ dbPath, message })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- epics.length tracks structural changes; the tree's contents are not read here
-  }, [isLoading, currentWorkspace?.databasePath, epics.length, epicEpoch, blocksRetry])
+  }, [
+    windowVisible,
+    isLoading,
+    currentWorkspace?.databasePath,
+    epics.length,
+    treeRevision,
+    blocksRetry,
+  ])
 
   // bb-pgb0.1: deleted ~130 lines of dead WebSocket-shim plumbing
   // (handleSSEChange + bdCmdHandlerRef + lifecycleHandlerRef +
@@ -742,6 +759,7 @@ function BeadsEpicsViewer() {
     backlogEpics,
     archivedEpics,
     archivedBeads,
+    pendingArchives,
   })
   const {
     isPending,

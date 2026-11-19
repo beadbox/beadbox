@@ -105,7 +105,8 @@ function credentialMethods(): string[] {
 describe("Commands-tab redaction census", () => {
   test("the scan reads every handler namespace", () => {
     const files = namespaceFiles()
-    expect(files.size).toBe(19)
+    expect(files.size).toBe(20)
+    expect(files.get("smoke")).toBe("smoke.ts")
     expect(files.get("bdSettings")).toBe("bd-settings.ts")
     expect(files.get("aggregate")).toBe("aggregate.ts")
     expect(files.get("workspaces")).toBe("workspaces.ts")
