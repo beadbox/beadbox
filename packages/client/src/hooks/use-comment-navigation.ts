@@ -21,9 +21,6 @@ export function useCommentNavigation({
   const lastCommentRef = useRef<HTMLDivElement | null>(null)
   const commentRefs = useRef<(HTMLDivElement | null)[]>([])
   const [focusedCommentIndex, setFocusedCommentIndex] = useState<number | null>(null)
-  const [isFirstCommentVisible, setIsFirstCommentVisible] = useState(false)
-  const [isLastCommentVisible, setIsLastCommentVisible] = useState(false)
-  const [isAtTop, setIsAtTop] = useState(true)
 
   // Sorted comments
   const sortedComments = useMemo(() => {
@@ -71,66 +68,12 @@ export function useCommentNavigation({
   // Reset on bead change
   useEffect(() => {
     setFocusedCommentIndex(null)
-    setIsAtTop(true)
   }, [bead?.id])
 
   // Reset focus when panel loses focus
   useEffect(() => {
     if (!isFocused) setFocusedCommentIndex(null)
   }, [isFocused])
-
-  // Track visibility of first and last comments
-  useEffect(() => {
-    const firstElement = firstCommentRef.current
-    const lastElement = lastCommentRef.current
-    const container = scrollContainerRef.current
-    if (!container) {
-      setIsFirstCommentVisible(false)
-      setIsLastCommentVisible(false)
-      return
-    }
-
-    const observers: IntersectionObserver[] = []
-
-    if (firstElement) {
-      const firstObserver = new IntersectionObserver(
-        ([entry]) => setIsFirstCommentVisible(entry.isIntersecting),
-        { root: container, threshold: 0.5 },
-      )
-      firstObserver.observe(firstElement)
-      observers.push(firstObserver)
-    }
-
-    if (lastElement) {
-      const lastObserver = new IntersectionObserver(
-        ([entry]) => setIsLastCommentVisible(entry.isIntersecting),
-        { root: container, threshold: 0.5 },
-      )
-      lastObserver.observe(lastElement)
-      observers.push(lastObserver)
-    }
-
-    return () => observers.forEach((obs) => obs.disconnect())
-  }, [bead?.comments.length, scrollContainerRef])
-
-  // Track scroll position
-  useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container) return
-
-    const handleScroll = () => setIsAtTop(container.scrollTop < 50)
-    handleScroll()
-    container.addEventListener("scroll", handleScroll)
-    return () => container.removeEventListener("scroll", handleScroll)
-  }, [bead?.id, scrollContainerRef])
-
-  const scrollToFirstComment = useCallback(() => {
-    firstCommentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }, [])
-
-  const scrollToLastComment = useCallback(() => {
-    lastCommentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }, [])
 
   const navigateComments = useCallback(
     (direction: "up" | "down") => {
@@ -169,27 +112,12 @@ export function useCommentNavigation({
     [bead, sortedComments, scrollContainerRef],
   )
 
-  const scrollToLatestComment = useCallback(() => {
-    if (!bead || sortedComments.length === 0) return
-    const lastIndex = sortedComments.length - 1
-    setFocusedCommentIndex(lastIndex)
-    setTimeout(() => {
-      commentRefs.current[lastIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-    }, 0)
-  }, [bead, sortedComments])
-
   return {
     sortedComments,
     groupedComments,
     focusedCommentIndex,
     setFocusedCommentIndex,
-    isFirstCommentVisible,
-    isLastCommentVisible,
-    isAtTop,
-    scrollToFirstComment,
-    scrollToLastComment,
     navigateComments,
-    scrollToLatestComment,
     commentRefs,
     firstCommentRef,
     lastCommentRef,
