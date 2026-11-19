@@ -39,6 +39,7 @@ import type { GateInfo } from "@/lib/molecule-phases"
 import type { Bead, BeadPriority, ReadState } from "@/lib/types"
 import { makeKeyer } from "@/lib/stable-key"
 import { beadSize } from "@/lib/bead-size"
+import { acceptArchiveClick } from "@/lib/archive-click-guard"
 import { cn } from "@/lib/utils"
 import { describeDeadline } from "@/lib/waiting"
 
@@ -480,6 +481,9 @@ const BeadRowContent = memo(function BeadRowContent({
                   disabled={isArchiving}
                   onClick={(e) => {
                     e.stopPropagation()
+                    // The row leaves at once (beadbox-d6l): ignore a double-click's
+                    // second click, which would land on the row that slid up.
+                    if (!acceptArchiveClick(e)) return
                     setIsArchiving(true)
                     onArchive(rowKey).finally(() => setIsArchiving(false))
                   }}

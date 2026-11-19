@@ -83,3 +83,25 @@ test("archive leaves at once, holds through the write, and a failure comes back 
     if (labelsOf(ws, a.id).includes("archived")) ws.bd(["update", a.id, "--remove-label=archived"])
   }
 })
+
+test("a real double-click on Archive archives exactly one bead", async ({ page, workspace: ws }) => {
+  test.setTimeout(60_000)
+  await openTree(page, ws)
+  const archivedNow = () =>
+    ws
+      .bdJson<Listed[]>(["list", "--status", "all", "--limit", "0", "--flat"])
+      .filter((x) => (x.labels ?? []).includes("archived"))
+      .map((x) => x.id)
+  const before = archivedNow()
+  // The first visible bead row's archive button; the next row slides up under the pointer.
+  const target = (await domIds(page)).find((id) => !id.startsWith("_") && id.includes("."))!
+  try {
+    await page.getByRole("button", { name: `Archive bead ${target}`, exact: true }).dblclick()
+    await expect.poll(() => archivedNow().filter((id) => !before.includes(id))).toEqual([target])
+    await page.waitForTimeout(1500) // any second archive would have landed by now
+    expect(archivedNow().filter((id) => !before.includes(id))).toEqual([target])
+  } finally {
+    for (const id of archivedNow().filter((x) => !before.includes(x))) ws.bd(["update", id, "--remove-label=archived"])
+  }
+})
+

@@ -34,3 +34,12 @@ g.requestAnimationFrame ??= ((cb: FrameRequestCallback) => {
   return 0
 }) as typeof requestAnimationFrame
 g.IS_REACT_ACT_ENVIRONMENT ??= true
+
+// beadbox-d6l: the archive double-click guard is module state shared by every
+// row's archive button (it has to be: the second click lands on a different
+// row). Reset it before each test, so archive clicks in one test never fall
+// inside another test's guard window.
+import { beforeEach } from "bun:test"
+import { _resetArchiveClickGuard } from "../lib/archive-click-guard"
+
+beforeEach(() => _resetArchiveClickGuard())
