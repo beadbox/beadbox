@@ -433,7 +433,8 @@ describe("tree actions: a thrown write toasts and reloads", () => {
     })
     expect(loadEpics).toHaveBeenCalledTimes(1)
     expect(errorToast).toHaveBeenCalledTimes(1)
-    expect(errorToast.mock.calls[0][0]).toBe("Failed to archive")
+    // beadbox-d6l: the error names the bead.
+    expect(errorToast.mock.calls[0][0]).toBe("Failed to archive c-1")
   })
 })
 

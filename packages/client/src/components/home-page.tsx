@@ -18,6 +18,7 @@ import {
 import { summarizeBulkStatus } from "@/lib/bulk-status-summary"
 import { safeCapture } from "@/lib/posthog-safe"
 import { isMoleculePresentation } from "@/lib/molecule-presentation"
+import { usePendingArchives, withoutPending } from "@/lib/pending-archive"
 import { rpc } from "@/lib/rpc"
 import { sortEpics } from "@/lib/sort"
 import { onSubscriptionChange } from "@/lib/subscribe"
@@ -298,7 +299,7 @@ function BeadsEpicsViewer() {
     typeCatalogError,
     typeCatalogRetrying,
     retryAvailableTypes,
-    epics,
+    epics: loadedEpics,
     setEpics,
     treeRevision,
     isLoading,
@@ -329,6 +330,13 @@ function BeadsEpicsViewer() {
     handleRemoveWorkspace,
     doRemoveWorkspace,
   } = lifecycle
+
+  // beadbox-d6l: a bead whose archive is in flight is hidden from every view
+  // (tree, backlog, archived, grouped, flat) until bd settles the write, even
+  // when a refresh brings it back unarchived. Navigation keeps the full tree,
+  // so archiving the bead open in the detail panel does not close it mid-flight.
+  const pendingArchives = usePendingArchives()
+  const epics = useMemo(() => withoutPending(loadedEpics, pendingArchives.ids), [loadedEpics, pendingArchives.ids])
 
   useLabelChoiceForWorkspace(currentWorkspace?.id, filters, setFilters)
 
@@ -527,7 +535,7 @@ function BeadsEpicsViewer() {
 
   const nav = useEpicNavigation({
     groupedLayout,
-    epics,
+    epics: loadedEpics,
     currentWorkspace,
     filters,
     filteredEpics,
@@ -742,6 +750,7 @@ function BeadsEpicsViewer() {
     backlogEpics,
     archivedEpics,
     archivedBeads,
+    pendingArchives,
   })
   const {
     isPending,
