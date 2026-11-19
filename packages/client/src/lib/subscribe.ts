@@ -80,10 +80,34 @@ export function _resetRuntimeCheck(): void {
 // which is React-tear-safe via useSyncExternalStore.
 let subscriptionChangeCount = 0
 const subscriptionListeners = new Set<() => void>()
+// Direct listeners admit bounded background work without publishing a React
+// snapshot for every hidden event. Ordinary views catch up once on show.
+const admissionListeners = new Set<() => void>()
+let hiddenChangePending = false
+
+/** Listen to real changes directly; consumers must bound their background work. */
+export function onSubscriptionChange(listener: () => void): () => void {
+  admissionListeners.add(listener)
+  return () => {
+    admissionListeners.delete(listener)
+  }
+}
+
+function invalidateVisibleViews(): void {
+  hiddenChangePending = false
+  void queryClient.invalidateQueries()
+  bumpSubscriptionChange()
+  const stamp = getOrInitSubscriptionStamp()
+  if (stamp) stamp.lastInvalidateAt = new Date().toISOString()
+}
+
+function catchUpVisibleViews(): void {
+  if (document.visibilityState !== "hidden" && hiddenChangePending) invalidateVisibleViews()
+}
 
 // beadbox-bez: counts only, for the memory diagnostic line.
 export function getSubscriptionListenerCount(): number {
-  return subscriptionListeners.size + pausedListeners.size
+  return subscriptionListeners.size + admissionListeners.size + pausedListeners.size
 }
 
 function bumpSubscriptionChange(): void {
@@ -200,8 +224,8 @@ export function _resetLiveUpdatesPaused(): void {
  * every degraded state: it doesn't depend on the subscription.
  */
 export function requestManualRefresh(): void {
-  void queryClient.invalidateQueries()
-  bumpSubscriptionChange()
+  invalidateVisibleViews()
+  for (const listener of admissionListeners) listener()
 }
 
 function getOrInitSubscriptionStamp(): BeadboxSubscriptionStamp | null {
@@ -303,13 +327,8 @@ function captureSubscriptionTelemetry(event: SubscriptionEvent): void {
 }
 
 /**
- * Default invalidation policy: any change event invalidates ALL queries
- * AND bumps the subscription change counter (for non-useQuery consumers).
- *
- * P3 routes can refine this per route via TanStack Query's per-query
- * staleTime, but for the first cut the broad invalidate + bump matches
- * the legacy WebSocket "we changed, reload everything" semantics from
- * the legacy ws hook module.
+ * Visible changes invalidate queries and React signals as before. Hidden
+ * changes retain one catch-up bit; only bounded admission listeners run.
  */
 function applyEvent(event: SubscriptionEvent): void {
   emitSubscriptionTap(event)
@@ -324,9 +343,9 @@ function applyEvent(event: SubscriptionEvent): void {
     stamp.lastEventType = event.type
   }
   if (event.type === "change") {
-    queryClient.invalidateQueries()
-    bumpSubscriptionChange()
-    if (stamp) stamp.lastInvalidateAt = new Date().toISOString()
+    if (document.visibilityState === "hidden") hiddenChangePending = true
+    else invalidateVisibleViews()
+    for (const listener of admissionListeners) listener()
   }
   // polling_error / reconnecting / recovered / bd_command pass through
   // without invalidation for now; P3 can plug per-route handlers.
@@ -348,6 +367,7 @@ export function _emitChangeForTests(): void {
 /** Test-only: reset to zero between cases. */
 export function _resetSubscriptionChangeCount(): void {
   subscriptionChangeCount = 0
+  hiddenChangePending = false
   for (const listener of subscriptionListeners) listener()
 }
 
@@ -385,6 +405,8 @@ export function useChangeSubscription(
       return
     }
     if (!runtimeCheck()) return
+
+    document.addEventListener("visibilitychange", catchUpVisibleViews)
 
     // beadbox-01f.2: a pause belongs to one workspace.
     if (liveUpdatesPaused && pausedWorkspace !== workspacePath) setLiveUpdatesPaused(false, null)
@@ -504,6 +526,8 @@ export function useChangeSubscription(
 
     return () => {
       cancelled = true
+      document.removeEventListener("visibilitychange", catchUpVisibleViews)
+      hiddenChangePending = false
       clearInterval(livenessTimer)
       const idAtCleanup = activeId
       const unlistenAtCleanup = unlisten
