@@ -34,7 +34,7 @@ async function restoring(ws: HarnessWorkspace, beads: Listed[], body: () => Prom
 }
 
 async function select(page: Page, beads: Listed[]): Promise<void> {
-  for (const b of beads) await page.getByRole("checkbox", { name: `Select bead ${b.id}` }).click()
+  for (const b of beads) await page.getByRole("checkbox", { name: `Select bead ${b.id}`, exact: true }).click()
   await expect(page.getByRole("toolbar", { name: "Bulk actions" })).toContainText(`${beads.length} selected`)
 }
 
