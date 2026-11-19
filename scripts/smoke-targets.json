@@ -1,0 +1,30 @@
+{
+  "_comment": "Views the packaged smoke opens inside the signed app (beadbox-79a). Each release lists the views it changes here. ${WS_A} is the smoke's active workspace (status color open = #ff0000), ${WS_B} its second workspace (open = #0000ff). Checks: minCount (at least N matches) and style (the first match's computed value).",
+  "targets": [
+    {
+      "id": "all-projects",
+      "route": "/all-projects",
+      "waitFor": "[data-project-id][data-bead-id]",
+      "assertions": [
+        { "selector": "[data-project-id=\"${WS_A}\"][data-bead-id]", "minCount": 1 },
+        { "selector": "[data-project-id=\"${WS_B}\"][data-bead-id]", "minCount": 1 }
+      ]
+    },
+    {
+      "id": "status-colors-gray",
+      "route": "/all-projects",
+      "waitFor": "[data-project-id][data-bead-id] [data-status=\"open\"][data-status-role=\"badge\"]",
+      "assertions": [
+        { "selector": "html.theme-gray", "minCount": 1 },
+        {
+          "selector": "[data-project-id=\"${WS_A}\"][data-bead-id] [data-status=\"open\"][data-status-role=\"badge\"]",
+          "style": { "property": "background-color", "equals": "rgba(255, 0, 0, 0.2)" }
+        },
+        {
+          "selector": "[data-project-id=\"${WS_B}\"][data-bead-id] [data-status=\"open\"][data-status-role=\"badge\"]",
+          "style": { "property": "background-color", "equals": "rgba(0, 0, 255, 0.2)" }
+        }
+      ]
+    }
+  ]
+}

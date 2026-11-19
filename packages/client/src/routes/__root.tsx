@@ -1,4 +1,4 @@
-import { createRootRoute, Outlet, useRouterState } from "@tanstack/react-router"
+import { createRootRoute, Outlet, useRouter, useRouterState } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { DevBadge } from "../components/dev-badge"
 import { LiveUpdatesPausedBanner } from "../components/live-updates-paused"
@@ -7,6 +7,7 @@ import { StatusColorsMount } from "../components/status-colors-mount"
 import { Toaster } from "../components/ui/sonner"
 import { WorkspaceRailPanel } from "../components/workspace-rail-panel"
 import { PostHogProvider } from "../lib/posthog-provider"
+import { runSmokeProbe } from "../lib/smoke-probe"
 import { useChangeSubscription } from "../lib/subscribe"
 import { getWorkspaceCookie, subscribeWorkspaceCookie } from "../lib/workspace-cookie"
 
@@ -73,8 +74,19 @@ function RootLayout() {
       </div>
       <Toaster position="bottom-right" theme="dark" />
       <DevBadge />
+      <SmokeProbeMount />
     </PostHogProvider>
   )
+}
+
+// beadbox-79a: the packaged smoke's view probe. Outside StartupGate so it can
+// open any route; inert (one RPC) unless the smoke launched the app.
+function SmokeProbeMount() {
+  const router = useRouter()
+  useEffect(() => {
+    void runSmokeProbe({ navigate: (route) => router.navigate({ to: route as "/" }) })
+  }, [router])
+  return null
 }
 
 // Centralized change-subscription mount. Lives inside StartupGate so it

@@ -56,8 +56,11 @@ fi
 [ "$FAILED_GATE" = subscription ] || echo '[change-detector] starting for smoke-workspace' >> "$LOG"
 # beadbox-79a: the release's named smoke targets and what the app reported
 # for each from inside its WebView (one [smoke-view] JSON line per target).
+WS_ID=ws-a
+WS2_ID=ws-b
+SMOKE_TARGETS_TEMPLATE=$PWD/smoke-targets-template.json
 SMOKE_TARGETS=$PWD/smoke-targets.json
-printf '%s\n' "$TARGETS_JSON" > "$SMOKE_TARGETS"
+printf '%s\n' "$TARGETS_JSON" > "$SMOKE_TARGETS_TEMPLATE"
 [ -z "$VIEW_LINES" ] || printf '%s\n' "$VIEW_LINES" >> "$LOG"
 '''
         # The five checks outside this extracted section retain their accounting.
@@ -70,7 +73,7 @@ printf '%s\n' "$TARGETS_JSON" > "$SMOKE_TARGETS"
                                      reporting + setup + checks + other_checks + '\n' + finish],
                                     cwd=tmp, env=dict(os.environ, FAILED_GATE=failed_gate, REFETCH_AT=str(refetch_at), LIST_ONLY="yes" if list_only else "no",
                                              TARGETS_JSON=json.dumps({"targets": [{"id": t} for t in TARGETS]}),
-                                             VIEW_LINES="\n".join("[smoke-view] " + json.dumps(v) for v in (VIEWS_OK if views is None else views))),
+                                             VIEW_LINES="\n".join("[smoke-view] " + json.dumps(v, separators=(",", ":")) for v in (VIEWS_OK if views is None else views))),
                                     text=True, capture_output=True, timeout=10)
         print(f"gate={failed_gate or 'live-update-only'} missing={missing_check}: exit={result.returncode}\n{result.stdout}")
         return result

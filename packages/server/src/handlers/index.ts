@@ -21,6 +21,7 @@ import * as activity from "./activity"
 import * as beads from "./beads"
 import * as bdSettings from "./bd-settings"
 import * as console from "./console"
+import * as smoke from "./smoke"
 import * as diagnostics from "./diagnostics"
 import * as epics from "./epics"
 import * as formulas from "./formulas"
@@ -49,6 +50,7 @@ export const handlers = {
   beads: wrapNamespace(beads, "beads"),
   bdSettings: wrapNamespace(bdSettings, "bdSettings"),
   console: wrapNamespace(console, "console"),
+  smoke: wrapNamespace(smoke, "smoke"),
   diagnostics: wrapNamespace(diagnostics, "diagnostics"),
   epics: wrapNamespace(epics, "epics"),
   formulas: wrapNamespace(formulas, "formulas"),
