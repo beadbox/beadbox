@@ -2304,6 +2304,30 @@ jobs:
         run: |
           # beadbox-pqn: the record of what this publish stood on.
           echo "needs results: $RESULTS"
+      - name: Check out the release asset definition
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: scripts/check-release-assets.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: The draft carries every platform (before it is published)
+        # beadbox-pqn: checked on the DRAFT, by release id, before the PATCH
+        # below makes it public, on rc and final alike. Covers what the job
+        # conditions cannot see: a build that succeeded but uploaded nothing.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/releases?per_page=100" -q ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id" > ids.txt
+          [ "$(wc -l < ids.txt)" -eq 1 ] || { echo "::error::expected 1 release object for $RELEASE_TAG, found $(wc -l < ids.txt)"; exit 1; }
+          gh api --paginate "repos/$REPO/releases/$(cat ids.txt)/assets?per_page=100" | jq -s 'add' > assets.json
+          jq -r '.[].name' assets.json > assets.txt
+          rm -f latest.json
+          id=$(jq -r '.[] | select(.name == "latest.json") | .id' assets.json)
+          [ -z "$id" ] || gh api -H "Accept: application/octet-stream" "repos/$REPO/releases/assets/$id" > latest.json
+          bash scripts/check-release-assets.sh release "$RELEASE_TAG" "$VERSION" assets.txt latest.json
       - name: Promote draft to published release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -2607,6 +2631,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Check out the release asset definition
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref }}
+          sparse-checkout: scripts/check-release-assets.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Collect the platform assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -2621,13 +2653,10 @@ jobs:
           SHA: ${{ inputs.ref }}
         run: |
           set -euo pipefail
+          # The full release set, from the one definition (beadbox-pqn); a
+          # missing or extra file means this build can't be promoted.
+          bash scripts/check-release-assets.sh build "$VERSION" build || { ls -la build; exit 1; }
           cd build
-          # The full release set; a missing one means this build can't be promoted.
-          for f in "Beadbox-${VERSION}-macOS-arm64.dmg" "beadbox_${VERSION}_Linux_amd64.deb" \
-                   Beadbox_aarch64.app.tar.gz Beadbox_aarch64.app.tar.gz.sig; do
-            [ -f "$f" ] || { echo "::error::missing build asset: $f"; ls -la; exit 1; }
-          done
-          ls Beadbox_x86_64.* >/dev/null 2>&1 || { echo "::error::missing Linux updater bundle"; ls -la; exit 1; }
           python3 - <<'EOF'
           import hashlib, json, os
           assets = {}

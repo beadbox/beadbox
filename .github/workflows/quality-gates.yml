@@ -409,6 +409,12 @@ jobs:
         # objdump: over the ceiling, three-part versions, no ELF, no symbols.
         run: bash scripts/ci-runner/test-glibc-ceiling.sh
 
+      - name: Release asset table
+        # beadbox-pqn: the one definition of a release's assets and platforms,
+        # used by promote (on the draft), assemble-build and the final guard;
+        # rows include v0.35.1-rc.2's real macOS-only shape.
+        run: bash scripts/test-release-assets.sh
+
       - name: No fork-triggered workflows with secret access
         run: |
           set -euo pipefail
