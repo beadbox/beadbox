@@ -2,18 +2,19 @@
 // rendering, which was the 0.25.2 limitation this feature removes.
 import { afterEach, describe, expect, test } from "bun:test"
 import {
-  _resetThemePreferenceForTests,
-  clearCache,
-  clearLegacyThemeId,
   DEFAULT_LIGHT_THEME_ID,
   DEFAULT_THEME_ID,
   DEFAULT_THEME_PREFS,
+  _resetThemePreferenceForTests,
+  clearCache,
+  clearLegacyThemeId,
   getLegacyThemeId,
   getThemePrefs,
   hasThemePrefs,
   resolveThemeId,
   setThemeForAppearance,
   setThemeMode,
+  setThemeModeAndSlot,
   subscribeThemePreference,
 } from "../lib/local-storage"
 import { applyThemeClass } from "../lib/theme"
@@ -226,5 +227,40 @@ describe("theme prefs (appearance mode)", () => {
     _resetThemePreferenceForTests()
     localStorage.clear()
     expect(hasThemePrefs()).toBe(false)
+  })
+})
+
+describe("setThemeModeAndSlot", () => {
+  // The legacy migration set a slot then the mode. Two writes meant two store
+  // notifications and an observable half-migrated state (new slot, old mode)
+  // that the apply effect could render as a dark->light double transition.
+  test("writes mode and slot with ONE notification", () => {
+    localStorage.clear()
+    clearCache()
+    let notifications = 0
+    const unsub = subscribeThemePreference(() => {
+      notifications++
+    })
+    try {
+      setThemeModeAndSlot("light", "light", "beadbox-light")
+      expect(notifications).toBe(1)
+      const prefs = getThemePrefs()
+      expect(prefs.mode).toBe("light")
+      expect(prefs.lightThemeId).toBe("beadbox-light")
+      // And no intermediate state was ever visible: both landed together.
+      expect(prefs.darkThemeId).toBe(DEFAULT_THEME_PREFS.darkThemeId)
+    } finally {
+      unsub()
+    }
+  })
+
+  test("rejects a bad mode or id without writing", () => {
+    localStorage.clear()
+    clearCache()
+    // @ts-expect-error deliberate bad input
+    setThemeModeAndSlot("sideways", "dark", "beadbox-dark")
+    expect(localStorage.getItem("beads-theme-prefs")).toBeNull()
+    setThemeModeAndSlot("dark", "dark", "NOT A SLUG")
+    expect(localStorage.getItem("beads-theme-prefs")).toBeNull()
   })
 })

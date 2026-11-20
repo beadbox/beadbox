@@ -61,7 +61,10 @@ export function getStatusConfig(status: string): BadgeConfig {
   }
   return {
     label: status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-    className: "bg-info/20 text-info-text border-info/40",
+    // A lighter info than ready_for_qa's above: an arbitrary bd status
+    // (pinned, hooked) must not be indistinguishable from a known one while
+    // the stylesheet is still loading.
+    className: "bg-info/10 text-info-text border-info/25",
     icon: <Circle className="h-3 w-3" />,
   }
 }
@@ -101,7 +104,9 @@ export const priorityConfig: Record<BeadPriority, BadgeConfig> = {
 
 const fallbackConfig: BadgeConfig = {
   label: "Unknown",
-  className: "bg-muted/40 text-muted-foreground border-border",
+  // Dashed: distinct from `closed` (same muted triple) and from every
+  // priority, so a missing config is visibly a missing config.
+  className: "bg-muted/20 text-muted-foreground border-border/60 border-dashed",
   icon: <Circle className="h-3 w-3" />,
 }
 

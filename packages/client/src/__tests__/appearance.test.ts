@@ -55,12 +55,16 @@ describe("system appearance listener", () => {
     }
   })
 
-  test("degrades to a no-op where matchMedia is unavailable", () => {
+  test("degrades to a no-op where matchMedia is unavailable, reading as dark", () => {
     const original = window.matchMedia
     // @ts-expect-error test seam
     window.matchMedia = undefined
     try {
-      expect(prefersDarkNow()).toBe(false)
+      // REVERSED: this asserted false (light). With no OS signal the answer
+      // has to be dark, because that is what is actually on screen —
+      // index.html ships class="dark" and the :root palette is the dark one.
+      // Reading "light" put `system` mode on a light theme over a dark paint.
+      expect(prefersDarkNow()).toBe(true)
       expect(() => subscribeSystemAppearance(() => {})()).not.toThrow()
     } finally {
       window.matchMedia = original

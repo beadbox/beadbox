@@ -80,7 +80,11 @@ export const statusColorStore = {
       statuses: [],
       overrides: {},
       customs: null,
+      // Every field, because set() is a patch merge: omitting one leaves the
+      // previous test's value behind, and a stale `foreground` silently
+      // changes `open`'s default colour for every later test in the file.
       surface: THEME_SURFACES.gray.card,
+      foreground: DEFAULT_STATUS_HEX.open,
     })
   },
 }

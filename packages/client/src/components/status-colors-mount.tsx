@@ -10,7 +10,7 @@
 // color chosen for a built-in, no rule exists for it and its classes stand.
 
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { rpc } from "../lib/rpc"
 import {
   buildPriorityColorCss,
@@ -101,12 +101,34 @@ export function StatusColorsMount() {
 
 export function StatusColorStyles() {
   const { css, surface } = useStatusColors()
-  // Priorities ride in the same sheet: they are not user-configurable and
-  // not per project, so they only need the surface, but they need the SAME
-  // per-surface text derivation statuses get.
-  return (
-    <style data-beadbox-status-colors="">
-      {`${buildPriorityColorCss(surface)}\n${buildTypeColorCss(surface)}\n${buildStatusColorCss(css, surface)}`}
-    </style>
+  return <style data-beadbox-status-colors="">{buildStatusColorCss(css, surface)}</style>
+}
+
+/**
+ * Priority and bead-type rules, which are neither user-configurable nor per
+ * project — so one unscoped sheet serves the whole app.
+ *
+ * Mounted from __root.tsx OUTSIDE the aggregate branch, because
+ * StatusColorsMount is inside it: emitting these from there left every type
+ * badge on /all-projects falling back to the neutral TYPE_BADGE_CLASS and
+ * collapsed the priority ramp. Deriving them in both places instead would be
+ * two copies of one fact, which is what colorRules() exists to avoid.
+ */
+export function PriorityTypeStyles() {
+  const [surface, setSurface] = useState(() => currentThemeSurface())
+  useEffect(() => {
+    const el = document.documentElement
+    const update = () => setSurface((prev) => (prev === currentThemeSurface(el) ? prev : currentThemeSurface(el)))
+    update()
+    const observer = new MutationObserver(update)
+    observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] })
+    return () => observer.disconnect()
+  }, [])
+  // Only `surface` feeds these, so recompute only when it moves: each
+  // colorRules() call runs readableTextColor's contrast search.
+  const css = useMemo(
+    () => `${buildPriorityColorCss(surface)}\n${buildTypeColorCss(surface)}`,
+    [surface],
   )
+  return <style data-beadbox-status-colors-shared="">{css}</style>
 }

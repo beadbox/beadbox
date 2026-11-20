@@ -26,8 +26,7 @@ import {
   clearLegacyThemeId,
   getLegacyThemeId,
   hasThemePrefs,
-  setThemeForAppearance,
-  setThemeMode,
+  setThemeModeAndSlot,
 } from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
 import { hasSidecarTransport, onStderr } from "../lib/sidecar-transport"
@@ -115,8 +114,9 @@ export function useTheme(): {
         // appearance could not be determined (Fix 2), and that cannot be
         // slotted either.
         if (entry?.appearance) {
-          setThemeForAppearance(entry.appearance, legacyId)
-          setThemeMode(entry.appearance)
+          // One write, not two: a split produced an observable half-migrated
+          // state (new slot, old mode) that the apply effect could render.
+          setThemeModeAndSlot(entry.appearance, entry.appearance, legacyId)
         }
         if (!entry && degraded) {
           // Not found, but the read itself degraded (sidecar unavailable
@@ -197,7 +197,6 @@ export function useTheme(): {
     const isHotReloadReapply =
       lastAppliedThemeIdRef.current === activeThemeId &&
       reapplyEpoch !== lastReapplyEpochRef.current
-    lastAppliedThemeIdRef.current = activeThemeId
     lastReapplyEpochRef.current = reapplyEpoch
 
     let cancelled = false
@@ -237,6 +236,12 @@ export function useTheme(): {
       // The resolved MODE's appearance drives the .dark class,
       // not the theme's own `appearance` field — see theme-engine.ts.
       applyTheme(safeTheme, appearance)
+      // Recorded only once something is actually ON SCREEN. Setting this
+      // synchronously above marked a CANCELLED run as applied, and the
+      // hot-reload guard then read "there IS a last-good theme" when there
+      // was none — so it refused loadTheme's fallback and left the app on
+      // the baked palette with no theme applied at all.
+      lastAppliedThemeIdRef.current = activeThemeId
     })
     return () => {
       cancelled = true

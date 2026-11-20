@@ -12,12 +12,7 @@
 import { useQueries } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { rpc } from "../lib/rpc"
-import {
-  buildPriorityColorCss,
-  buildStatusColorCss,
-  buildTypeColorCss,
-  resolveStatusColors,
-} from "../lib/status-colors"
+import { buildStatusColorCss, resolveStatusColors } from "../lib/status-colors"
 import { currentThemeForeground, currentThemeSurface } from "../lib/status-colors-store"
 import { statusColorsQueryKey, statusListQueryKey } from "./status-colors-mount"
 
@@ -50,16 +45,6 @@ export function ProjectStatusColors({ sources }: { sources: readonly StatusColor
   }, [])
   return (
     <>
-      {/*
-        Priority and bead-type rules are NOT per project, but they still have
-        to be emitted here: StatusColorsMount lives inside __root.tsx's
-        non-aggregate branch, so it never mounts on this route. Without this
-        sheet every type badge in All projects falls back to the neutral
-        TYPE_BADGE_CLASS and the priority ramp collapses onto the tones.
-      */}
-      <style data-beadbox-status-colors-shared="">
-        {`${buildPriorityColorCss(theme.surface)}\n${buildTypeColorCss(theme.surface)}`}
-      </style>
       {sources.map((source) => (
         <ProjectStatusColorStyles
           key={source.id}

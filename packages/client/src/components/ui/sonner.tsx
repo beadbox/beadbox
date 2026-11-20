@@ -18,13 +18,19 @@
 
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
+import { isThemingAvailable } from "@/lib/theme-engine"
+
 import { useThemePreference } from "@/hooks/use-theme-preference"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { appearance } = useThemePreference()
+  // When the startup probe disables theming, applyTheme never runs and <html>
+  // keeps the baked dark palette — so following the stored appearance here
+  // would paint light toast chrome over a dark app. settings-dialog.tsx gates
+  // on the same probe.
   return (
     <Sonner
-      theme={appearance}
+      theme={isThemingAvailable() ? appearance : "dark"}
       className="toaster group"
       style={
         {

@@ -11,6 +11,7 @@ import { act, cleanup, render } from "@testing-library/react"
 import { toast } from "sonner"
 import { Toaster } from "../components/ui/sonner"
 import { clearCache } from "../lib/local-storage"
+import { __resetProbeCache } from "../lib/theme-engine"
 
 afterEach(() => {
   cleanup()
@@ -59,5 +60,28 @@ describe("Toaster follows the resolved appearance", () => {
     expect(style).toContain("var(--bb-popover)")
     expect(style).toContain("var(--bb-popover-foreground)")
     expect(style).toContain("var(--bb-border)")
+  })
+})
+
+describe("Toaster respects the theming probe", () => {
+  // When probeTokenSupport() fails, applyTheme never runs and <html> keeps
+  // index.css's baked dark palette. Following the stored appearance then
+  // paints light toast chrome over a dark app — the same mismatch the
+  // hardcoded "dark" was removed to fix, just in the other direction.
+  test("falls back to dark when theming is unavailable", async () => {
+    const probe = document.createElement("div")
+    const originalGCS = window.getComputedStyle
+    // Make the probe report non-resolution: transparent background.
+    // @ts-expect-error test seam
+    window.getComputedStyle = () => ({ backgroundColor: "rgba(0, 0, 0, 0)", getPropertyValue: () => "" })
+    __resetProbeCache()
+    try {
+      const el = await mountWith("light")
+      expect(el.getAttribute("data-theme")).toBe("dark")
+    } finally {
+      window.getComputedStyle = originalGCS
+      __resetProbeCache()
+      probe.remove()
+    }
   })
 })

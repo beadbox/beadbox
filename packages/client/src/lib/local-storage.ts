@@ -219,11 +219,17 @@ export interface ThemePrefs {
   lightThemeId: ThemeId
 }
 
-export const DEFAULT_THEME_PREFS: ThemePrefs = {
+/**
+ * Frozen and returned BY IDENTITY from getThemePrefs()'s fallback paths, so
+ * it doubles as a useSyncExternalStore snapshot. A mutation would rewrite the
+ * session default for every later reader AND leave the snapshot identity
+ * unchanged, so no subscriber would re-render.
+ */
+export const DEFAULT_THEME_PREFS: ThemePrefs = Object.freeze({
   mode: "dark",
   darkThemeId: defaultThemeIdFor("dark"),
   lightThemeId: defaultThemeIdFor("light"),
-}
+})
 
 const THEME_MODES: readonly ThemeMode[] = ["dark", "light", "system"]
 const isThemeMode = (v: unknown): v is ThemeMode => THEME_MODES.includes(v as ThemeMode)
@@ -266,6 +272,10 @@ export function getThemePrefs(): ThemePrefs {
     // storage). Defaults render today's appearance, so this degrades rather
     // than failing.
   }
+  // Cache the fallback too. This function is the getSnapshot for every theme
+  // consumer, so leaving it uncached made a corrupt or absent value cost a
+  // localStorage read plus a throwing JSON.parse on every render pass.
+  currentThemePrefs = DEFAULT_THEME_PREFS
   return DEFAULT_THEME_PREFS
 }
 
@@ -288,6 +298,25 @@ export function setThemeMode(mode: ThemeMode): void {
   if (typeof window === "undefined") return
   if (!isThemeMode(mode)) return
   writeThemePrefs({ ...getThemePrefs(), mode })
+}
+
+/**
+ * Sets a mode and a slot in ONE write. The legacy migration needs both at
+ * once: doing it as setThemeForAppearance() then setThemeMode() produced two
+ * notifications and an observable half-migrated state (new slot, old mode),
+ * which the apply effect could render as a visible dark->light double
+ * transition on the upgrade launch — exactly what packing all three values
+ * into one key was meant to prevent.
+ */
+export function setThemeModeAndSlot(mode: ThemeMode, appearance: Appearance, id: ThemeId): void {
+  if (typeof window === "undefined") return
+  if (!isThemeMode(mode) || !THEME_ID_RE.test(id)) return
+  const prefs = getThemePrefs()
+  writeThemePrefs({
+    ...prefs,
+    mode,
+    ...(appearance === "dark" ? { darkThemeId: id } : { lightThemeId: id }),
+  })
 }
 
 export function setThemeForAppearance(appearance: Appearance, id: ThemeId): void {

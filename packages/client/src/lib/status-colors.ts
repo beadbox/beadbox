@@ -79,7 +79,14 @@ const PALETTE = [
   "#f43f5e", // rose
 ]
 
-/** The three dark theme variants Beadbox ships, plus white for a future light theme. */
+/**
+ * NOT a theme registry — themes live in src/themes/*.json and ~/.beadbox/themes.
+ * The old `theme-*` class variants this described are gone.
+ *
+ * What survives: `gray.card` is the fallback when `--bb-card` cannot be read
+ * (the only production use), and the set as a whole is the surface matrix the
+ * contrast tests run readableTextColor across, white included.
+ */
 export const THEME_SURFACES: Readonly<Record<string, { background: string; card: string }>> = {
   blue: { background: "#0f172a", card: "#1e293b" },
   gray: { background: "#18181b", card: "#27272a" },
@@ -100,7 +107,7 @@ const RGB_FN = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})/
  */
 export function toHexColor(value: string): string | null {
   const v = value.trim()
-  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v.toLowerCase()
+  if (isHexColor(v)) return v.toLowerCase()
   const m = RGB_FN.exec(v)
   if (!m) return null
   return `#${[1, 2, 3]

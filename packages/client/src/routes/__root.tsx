@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import { DevBadge } from "../components/dev-badge"
 import { LiveUpdatesPausedBanner } from "../components/live-updates-paused"
 import { StartupGate, useWorkspaceGate } from "../components/startup-gate"
-import { StatusColorsMount } from "../components/status-colors-mount"
+import { PriorityTypeStyles, StatusColorsMount } from "../components/status-colors-mount"
 import { Toaster } from "../components/ui/sonner"
 import { WorkspaceRailPanel } from "../components/workspace-rail-panel"
 import { useTheme } from "../hooks/use-theme"
@@ -66,6 +66,9 @@ function RootLayout() {
           and re-appear on every switch. Height chain is html/body/#root at
           100% (index.css bb-s3gb), so h-full here keeps the page shells'
           own h-full working. */}
+      {/* Outside the branch below: priority and bead-type colours are not
+          per workspace, and /all-projects does not mount StatusColorsMount. */}
+      <PriorityTypeStyles />
       <div className="flex h-full min-h-0">
         <WorkspaceRailPanel />
         <div className="min-w-0 flex-1">

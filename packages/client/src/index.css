@@ -192,8 +192,11 @@
 }
 
 /* Formula DAG dot-grid background (opacity via color, not container opacity) */
+/* --bb-* directly, like the scrollbar rules: the startup probe only
+   tests ONE level of var() indirection, so a --color-* chain here would be
+   undetectable if it failed. */
 .dag-dotgrid {
-  background-image: radial-gradient(circle, color-mix(in srgb, var(--color-muted-foreground) 25%, transparent) 0.4px, transparent 0.4px);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--bb-muted-foreground) 25%, transparent) 0.4px, transparent 0.4px);
   background-size: 24px 24px;
   background-position: 12px 12px;
 }

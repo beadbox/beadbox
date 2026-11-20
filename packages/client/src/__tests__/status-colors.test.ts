@@ -233,9 +233,10 @@ describe("unchanged defaults (main @ 89cf7f18)", () => {
     expect(getStatusConfig("closed").className).toBe(
       "bg-muted/40 text-muted-foreground border-border",
     )
-    // blocked / deferred have no config of their own and take the fallback.
-    expect(getStatusConfig("blocked").className).toBe("bg-info/20 text-info-text border-info/40")
-    expect(getStatusConfig("deferred").className).toBe("bg-info/20 text-info-text border-info/40")
+    // blocked / deferred have no config of their own and take the unknown
+    // fallback, which must NOT look like ready_for_qa's own entry.
+    expect(getStatusConfig("blocked").className).toBe("bg-info/10 text-info-text border-info/25")
+    expect(getStatusConfig("deferred").className).toBe("bg-info/10 text-info-text border-info/25")
     expect(getStatusConfig("ready_for_qa").className).toBe(
       "bg-info/20 text-info-text border-info/40",
     )
@@ -419,5 +420,30 @@ describe("chosen vs css", () => {
     const { chosen } = resolveStatusColors([...BUILTIN_STATUSES, "waiting"], {}, ["waiting"])
     expect(chosen.waiting).toMatch(/^#[0-9a-f]{6}$/)
     expect(chosen.open).toBeUndefined()
+  })
+})
+
+describe("pre-stylesheet badge fallbacks stay distinguishable", () => {
+  // The sweep collapsed several of these onto the same token triple:
+  // ready_for_qa became identical to the unknown-status fallback (they were
+  // purple vs blue), and `closed` to the "Unknown" config. Before the
+  // stylesheet mounts — status rules wait on the custom-status list — those
+  // badges were pixel-identical, so the fallback disagreed with
+  // DEFAULT_STATUS_HEX about what the status looks like.
+  test("no two status-space fallbacks share a className", () => {
+    const seen = new Map<string, string>()
+    for (const s of ["open", "in_progress", "closed", "ready_for_qa", "ready_to_ship", "nonesuch"]) {
+      const cls = getStatusConfig(s).className
+      expect(seen.has(cls)).toBe(false)
+      seen.set(cls, s)
+    }
+  })
+
+  test("every one is tokenised, with no palette literal", () => {
+    const PALETTE =
+      /-(slate|zinc|gray|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/
+    for (const s of ["open", "in_progress", "closed", "ready_for_qa", "ready_to_ship", "nonesuch"]) {
+      expect(getStatusConfig(s).className).not.toMatch(PALETTE)
+    }
   })
 })

@@ -19,14 +19,17 @@ export function resolveAppearance(mode: ThemeMode, prefersDark: boolean): Appear
 }
 
 export function prefersDarkNow(): boolean {
-  // Guarded rather than assumed: happy-dom and older webviews may not
-  // implement matchMedia, and a missing OS signal should read as "not dark"
-  // instead of throwing during startup.
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false
+  // Guarded rather than assumed: older webviews may not implement matchMedia.
+  // With NO signal the answer is dark, which is what every other no-signal
+  // default in the app says (index.html ships class="dark",
+  // DEFAULT_THEME_PREFS.mode is "dark", and clearTheme leaves the dark
+  // :root palette). Answering "light" here would put `system` mode on a
+  // light theme while the baked palette on screen is still dark.
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true
   try {
     return window.matchMedia(DARK_QUERY).matches
   } catch {
-    return false
+    return true
   }
 }
 
