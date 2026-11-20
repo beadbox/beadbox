@@ -74,3 +74,10 @@ codegen-units = 8
 strip = "symbols"
 opt-level = "z"
 panic = "abort"
+
+# Proc macros and build scripts are loaded BY rustc, so they must keep their
+# symbols: `strip = "symbols"` above removes the crate metadata rustc reads,
+# which makes every proc-macro-backed crate fail to resolve its derive
+# ("can't find crate for zerofrom_derive") even though the .dylib is present.
+[profile.release.build-override]
+strip = "none"
