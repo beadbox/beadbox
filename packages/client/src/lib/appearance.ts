@@ -2,7 +2,7 @@
 // and exposes the OS preference as a subscribable value.
 //
 // The resolved appearance — not a theme's own `appearance` field — is what
-// drives the `.dark` class (spec §6). A theme's field governs only which slot
+// drives the `.dark` class. A theme's field governs only which slot
 // it is eligible for, so the two cannot disagree.
 //
 // matchMedia usage mirrors hooks/use-viewport.ts, which already listens to

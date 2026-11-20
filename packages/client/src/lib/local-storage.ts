@@ -319,7 +319,7 @@ export function hasThemePrefs(): boolean {
 }
 
 /**
- * The pre-§6 single-id key, for one-time migration.
+ * The pre-appearance-mode single-id key, for one-time migration.
  *
  * Reading it here rather than migrating here is deliberate: choosing which
  * slot the id belongs in needs the theme's `appearance`, which only the

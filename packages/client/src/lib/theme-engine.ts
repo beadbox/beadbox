@@ -118,7 +118,7 @@ export function applyTheme(
   // Delegates to theme.ts's applyThemeClass so exactly one function in the
   // codebase maps an Appearance to the dark class.
   //
-  // The appearance comes from the caller (the resolved MODE, spec §6), not
+  // The appearance comes from the caller (the resolved MODE), not
   // from theme.appearance: a theme's own field governs only which slot it is
   // eligible for. Reading it here instead would let a mis-slotted theme paint
   // dark tokens under a light class.

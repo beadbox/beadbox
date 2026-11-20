@@ -270,7 +270,7 @@ test.describe("user theme files from ~/.beadbox/themes", () => {
     const darkSlot = page.getByRole("radiogroup", { name: "Dark theme", exact: true })
     const lightSlot = page.getByRole("radiogroup", { name: "Light theme", exact: true })
 
-    // §6's slot-eligibility rule: a theme only ever appears in the grid for
+    // Slot eligibility: a theme only ever appears in the grid for
     // its own `appearance`, never the other one. Assert the light grid itself
     // is present first — otherwise the toHaveCount(0) right below would pass
     // vacuously against a radiogroup that never rendered at all.

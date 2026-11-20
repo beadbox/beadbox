@@ -13,7 +13,7 @@
 // other consumer all read the same single store. A change made through
 // any one of them (e.g. the settings dialog) re-renders every subscriber,
 // including this one — see
-// .superpowers/sdd/2026-11-13-runtime-themes/task-11-addendum.md for why a
+// See below for why a
 // local useState here would silently stop the applied theme from tracking
 // changes made elsewhere.
 
@@ -81,7 +81,8 @@ export function useTheme(): {
   const [available] = useState(() => isThemingAvailable())
   const queryClient = useQueryClient()
 
-  // One-time migration of the pre-§6 single-id preference. It lives here,
+  // One-time migration of the pre-appearance-mode single-id preference. It
+  // lives here,
   // not in local-storage.ts, because picking a legacy id's slot needs the
   // theme's `appearance`, which only the loaded list knows.
   //
@@ -233,7 +234,7 @@ export function useTheme(): {
       // last-good theme exists yet to fall back to), so doing nothing is
       // not an option here.
       const safeTheme = theme.appearance === appearance ? theme : builtinThemeFor(appearance)
-      // The resolved MODE's appearance drives the .dark class (spec §6),
+      // The resolved MODE's appearance drives the .dark class,
       // not the theme's own `appearance` field — see theme-engine.ts.
       applyTheme(safeTheme, appearance)
     })

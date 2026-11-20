@@ -5,12 +5,10 @@
 // rendered (activeThemeId) and the resolved appearance, not a raw
 // preference id — see use-theme-preference.ts and use-theme.ts.
 //
-// Covers the design in
-// .superpowers/sdd/2026-11-13-runtime-themes/task-11-addendum.md: the
-// theme preference is ONE observable store (local-storage.ts), not local
+// The theme preference is ONE observable store (local-storage.ts), not local
 // state owned by this hook — so a write from any consumer must reach every
-// other subscriber without a reload. (usePreferences itself no longer
-// subscribes to theme state as of task 5 — the settings dialog reads/writes
+// other subscriber without a reload. (usePreferences no longer
+// subscribes to theme state — the settings dialog reads/writes
 // the store directly via useThemePreference() — so the "independent
 // subscribers" below are this hook's own Probe and a raw useThemePreference
 // subscriber.)
@@ -365,7 +363,7 @@ describe("useTheme", () => {
 
 // ─── Legacy single-id migration ────────────────────────────────────
 //
-// Pre-§6 installs stored one theme id under "beads-theme". On first launch
+// Installs predating appearance mode stored one theme id under "beads-theme". On first launch
 // after the upgrade, that id must be adopted into whichever slot matches
 // its own appearance, and the mode set to match — but ONLY when the new
 // three-value key has never been written, so a deliberate choice already
