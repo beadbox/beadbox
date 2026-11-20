@@ -19,7 +19,6 @@ import {
 } from "../lib/status-colors"
 import {
   currentThemeForeground,
-  currentThemeMutedForeground,
   currentThemeSurface,
   statusColorStore,
   useStatusColors,
@@ -80,12 +79,17 @@ export function StatusColorsMount() {
 
   useEffect(() => {
     const el = document.documentElement
-    const update = () =>
-      statusColorStore.set({
-        surface: currentThemeSurface(el),
-        foreground: currentThemeForeground(el),
-        mutedForeground: currentThemeMutedForeground(el),
-      })
+    // Only set when a colour actually moved. This observer also fires on
+    // `style`, and usePreferences writes documentElement.style.zoom on every
+    // zoom step — without this check each of those rebuilt all three
+    // stylesheets and re-rendered every useStatusColors subscriber.
+    const update = () => {
+      const surface = currentThemeSurface(el)
+      const foreground = currentThemeForeground(el)
+      const cur = statusColorStore.get()
+      if (cur.surface === surface && cur.foreground === foreground) return
+      statusColorStore.set({ surface, foreground })
+    }
     update()
     const observer = new MutationObserver(update)
     observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] })

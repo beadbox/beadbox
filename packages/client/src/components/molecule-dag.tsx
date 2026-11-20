@@ -64,7 +64,9 @@ export function MoleculeDag({ beadId, dbPath, onBeadNavigate }: MoleculeDagProps
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 400, height: 400 })
-  const { css: statusCss } = useStatusColors()
+  // `chosen`, not `css`: every status now emits a stylesheet rule, so `css`
+  // is always populated and the palette below would be unreachable.
+  const { chosen: statusCss } = useStatusColors()
 
   useEffect(() => {
     let cancelled = false

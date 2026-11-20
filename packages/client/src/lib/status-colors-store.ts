@@ -9,6 +9,7 @@ import {
   resolveStatusColors,
   type StatusColorMap,
   THEME_SURFACES,
+  toHexColor,
 } from "./status-colors"
 
 /** The dark palette's --bb-muted-foreground, the fallback for the getter below. */
@@ -30,16 +31,12 @@ export interface StatusColorState {
    * rather than baked (see FOREGROUND_DEFAULT_STATUSES).
    */
   foreground: string
-  /**
-   * For the formula graphs: React Flow writes markerEnd.color into an SVG
-   * presentation attribute, where var() does not resolve, so arrowheads need
-   * a colour VALUE read in JS rather than a class.
-   */
-  mutedForeground: string
 }
 
 export interface ResolvedStatusColors extends StatusColorState {
   css: StatusColorMap
+  /** Only user-chosen or generated colours; see resolveStatusColors. */
+  chosen: StatusColorMap
   display: StatusColorMap
   defaults: StatusColorMap
 }
@@ -47,7 +44,7 @@ export interface ResolvedStatusColors extends StatusColorState {
 function resolve(s: StatusColorState): ResolvedStatusColors {
   // Until the custom list is in, render nothing for any status: a bd
   // built-in must never flash a generated color.
-  if (s.customs === null) return { ...s, css: {}, display: {}, defaults: {} }
+  if (s.customs === null) return { ...s, css: {}, chosen: {}, display: {}, defaults: {} }
   return {
     ...s,
     ...resolveStatusColors(s.statuses, s.overrides, s.customs, { foreground: s.foreground }),
@@ -61,7 +58,6 @@ let state: ResolvedStatusColors = resolve({
   customs: null,
   surface: THEME_SURFACES.gray.card,
   foreground: DEFAULT_STATUS_HEX.open,
-  mutedForeground: DEFAULT_MUTED_FOREGROUND,
 })
 const listeners = new Set<() => void>()
 
@@ -127,18 +123,22 @@ export function currentThemeMutedForeground(el: Element = document.documentEleme
  * switch live; only arrowheads carry this snapshot, refreshed on next layout.
  */
 export function currentThemeEdgeColor(alpha = 0.5, el: Element = document.documentElement): string {
-  const v = currentThemeMutedForeground(el).trim()
-  const hex = /^#[0-9a-fA-F]{6}$/.test(v)
-    ? ([1, 3, 5].map((i) => Number.parseInt(v.slice(i, i + 2), 16)) as [number, number, number])
-    : null
-  const rgb = v.match(/^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})/)
-  const [r, g, b] = hex ?? (rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : [161, 161, 170])
+  const hex = currentThemeMutedForeground(el)
+  const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16))
   return `rgb(${r} ${g} ${b} / ${alpha})`
 }
 
+/**
+ * Reads a --bb-* token AS HEX. A theme may legally write a token as rgb()
+ * (theme-validate.ts), and every consumer of these values parses hex, so an
+ * unnormalised rgb() surface would silently produce black text everywhere
+ * instead of failing. Returns "" when the value is absent or unparseable,
+ * which makes each getter fall back to its documented default.
+ */
 function readThemeVar(el: Element, name: string): string {
   const inline = (el as HTMLElement).style?.getPropertyValue(name)?.trim()
-  if (inline) return inline
-  const view = el.ownerDocument?.defaultView
-  return view?.getComputedStyle(el).getPropertyValue(name).trim() ?? ""
+  const raw =
+    inline || el.ownerDocument?.defaultView?.getComputedStyle(el).getPropertyValue(name).trim() || ""
+  if (!raw) return ""
+  return toHexColor(raw) ?? ""
 }

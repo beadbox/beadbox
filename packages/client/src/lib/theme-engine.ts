@@ -22,7 +22,7 @@ import {
   TONE_KEYS,
   toneTextVarName,
 } from "@beadbox/server/theme-tokens"
-import { readableTextColor } from "./status-colors"
+import { readableTextColor, toHexColor } from "./status-colors"
 import { applyThemeClass } from "./theme"
 
 function allVarNames(): string[] {
@@ -33,26 +33,6 @@ function allVarNames(): string[] {
     ...RADIUS_KEYS.map(radiusVarName),
     ...FONT_KEYS.map(fontVarName),
   ]
-}
-
-const RGB_FN = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/
-
-/**
- * readableTextColor does hex arithmetic, but a theme may legally write a
- * token as rgb() (see theme-validate.ts). Normalise so the derivation is
- * never fed a string it would mis-parse into black.
- *
- * Returns null for anything unrecognised; the caller then skips derivation
- * rather than writing a wrong colour.
- */
-function toHexColor(value: string): string | null {
-  const v = value.trim()
-  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v.toLowerCase()
-  const m = RGB_FN.exec(v)
-  if (!m) return null
-  return `#${[1, 2, 3]
-    .map((i) => Math.min(255, Number(m[i])).toString(16).padStart(2, "0"))
-    .join("")}`
 }
 
 export function clearTheme(el: HTMLElement = document.documentElement): void {

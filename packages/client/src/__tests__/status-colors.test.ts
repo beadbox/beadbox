@@ -18,6 +18,7 @@ import {
   isGreyish,
   readableTextColor,
   resolveStatusColors,
+  toHexColor,
 } from "../lib/status-colors"
 
 const CUSTOMS = [
@@ -371,5 +372,52 @@ describe("buildTypeColorCss", () => {
     for (const css of [buildTypeColorCss(DARK), buildPriorityColorCss(DARK)]) {
       expect(css).not.toMatch(/\/ 0\.\d{5,}\)/)
     }
+  })
+})
+
+describe("rgb() theme tokens reach the hex-only maths as hex", () => {
+  // theme-validate.ts accepts a token written as rgb() on purpose. Every
+  // function here parses hex, and an unnormalised rgb() surface does NOT
+  // error — readableTextColor silently returns #000000, which is valid CSS
+  // and therefore invisible black text on a dark card with nothing logged.
+  test("toHexColor normalises rgb() and passes hex through", () => {
+    expect(toHexColor("rgb(39, 39, 42)")).toBe("#27272a")
+    expect(toHexColor("rgb(39 39 42)")).toBe("#27272a")
+    expect(toHexColor("rgba(39, 39, 42, 0.5)")).toBe("#27272a")
+    expect(toHexColor("#27272A")).toBe("#27272a")
+    expect(toHexColor("goldenrod")).toBeNull()
+  })
+
+  test("an rgb() surface derives the same text as its hex equivalent", () => {
+    const hex = readableTextColor("#f59e0b", "#27272a")
+    const viaRgb = readableTextColor("#f59e0b", toHexColor("rgb(39, 39, 42)") as string)
+    expect(viaRgb).toBe(hex)
+    // And the unnormalised form is the trap: not an error, just black.
+    expect(readableTextColor("#f59e0b", "rgb(39, 39, 42)")).toBe("#000000")
+  })
+})
+
+describe("chosen vs css", () => {
+  // Every status emits a stylesheet rule now, so `css` is always populated.
+  // `chosen` keeps the older "only what the user picked, or a generated
+  // custom default" meaning, which the molecule graph needs to know when to
+  // fall back to its own palette.
+  test("a default built-in is in css but NOT in chosen", () => {
+    const { css, chosen } = resolveStatusColors([...BUILTIN_STATUSES], {})
+    expect(css.in_progress).toBe(DEFAULT_STATUS_HEX.in_progress)
+    expect(chosen.in_progress).toBeUndefined()
+    expect(chosen).toEqual({})
+  })
+
+  test("a user-chosen colour appears in both", () => {
+    const { css, chosen } = resolveStatusColors([...BUILTIN_STATUSES], { open: "#ff0000" })
+    expect(css.open).toBe("#ff0000")
+    expect(chosen.open).toBe("#ff0000")
+  })
+
+  test("a custom status's generated default appears in chosen", () => {
+    const { chosen } = resolveStatusColors([...BUILTIN_STATUSES, "waiting"], {}, ["waiting"])
+    expect(chosen.waiting).toMatch(/^#[0-9a-f]{6}$/)
+    expect(chosen.open).toBeUndefined()
   })
 })

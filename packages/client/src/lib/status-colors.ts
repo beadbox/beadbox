@@ -89,6 +89,25 @@ export const THEME_SURFACES: Readonly<Record<string, { background: string; card:
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
 
+const RGB_FN = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})/
+
+/**
+ * Normalises a theme colour to 6-digit hex. Theme files may legally write a
+ * token as rgb() (theme-validate.ts), but every function here parses hex, so
+ * an unnormalised rgb() surface silently yields black text rather than an
+ * error. Returns null for anything unrecognised so callers can skip instead
+ * of painting a wrong colour.
+ */
+export function toHexColor(value: string): string | null {
+  const v = value.trim()
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v.toLowerCase()
+  const m = RGB_FN.exec(v)
+  if (!m) return null
+  return `#${[1, 2, 3]
+    .map((i) => Math.min(255, Number(m[i])).toString(16).padStart(2, "0"))
+    .join("")}`
+}
+
 export function isHexColor(value: unknown): value is string {
   return typeof value === "string" && HEX_RE.test(value)
 }
@@ -253,7 +272,12 @@ export function resolveStatusColors(
   overrides: StatusColorMap,
   customs?: readonly string[],
   opts: { foreground?: string } = {},
-): { css: StatusColorMap; display: StatusColorMap; defaults: StatusColorMap } {
+): {
+  css: StatusColorMap
+  chosen: StatusColorMap
+  display: StatusColorMap
+  defaults: StatusColorMap
+} {
   // Defaults to the dark literal so a caller that cannot read the DOM (and
   // every existing test) behaves exactly as before.
   const foreground = isHexColor(opts.foreground ?? "")
@@ -271,6 +295,7 @@ export function resolveStatusColors(
     live,
   )
   const css: StatusColorMap = {}
+  const chosen: StatusColorMap = {}
   const display: StatusColorMap = {}
   const defaults: StatusColorMap = {}
   for (const s of statuses) {
@@ -286,8 +311,15 @@ export function resolveStatusColors(
     // instead gives it readableTextColor's per-surface text for free, and
     // makes a built-in and a custom status behave identically.
     css[s] = live[s] ?? def
+    // `chosen` carries ONLY a colour the user picked or one generated for a
+    // custom status — what `css` meant before built-ins started emitting
+    // rules. The molecule graph keys its own palette off this: with `css` it
+    // would never reach that palette again, so its node colours would have
+    // changed silently for every workspace using the defaults.
+    if (live[s]) chosen[s] = live[s]
+    else if (!builtins.has(s) && def !== DEFAULT_STATUS_HEX[s]) chosen[s] = def
   }
-  return { css, display, defaults }
+  return { css, chosen, display, defaults }
 }
 
 /** Escape text for a double-quoted CSS string: anything but [A-Za-z0-9_-] becomes a hex escape. */

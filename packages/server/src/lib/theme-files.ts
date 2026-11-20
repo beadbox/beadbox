@@ -5,7 +5,7 @@
 // Reading happens here, in the sidecar, so no Tauri fs: capability is needed
 // — the webview never touches the filesystem.
 
-import { type FSWatcher, watch } from "node:fs"
+import { type FSWatcher, mkdirSync, watch } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, join } from "node:path"
@@ -173,12 +173,23 @@ export async function readThemeFile(
  * renames anything itself. Reporting bad themes in place is
  * listThemeFiles()'s job.
  *
- * Returns a stop function; a missing directory yields a no-op stop.
+ * Creates the themes directory if absent, then watches it. Returns a stop
+ * function; an unwatchable directory yields a no-op stop.
  */
 export function watchThemes(onChange: () => void): () => void {
   let watcher: FSWatcher
+  const dir = getThemesDir()
   try {
-    watcher = watch(getThemesDir(), { persistent: false })
+    // Create the directory before watching. A missing themes folder is the
+    // normal first-run state (see listThemeFiles), but watch() throws ENOENT
+    // on it and nothing re-arms — so without this, a user who starts the app
+    // and THEN creates the folder gets no hot reload for the whole session.
+    mkdirSync(dir, { recursive: true })
+  } catch {
+    // Unwritable parent: fall through and let watch() decide.
+  }
+  try {
+    watcher = watch(dir, { persistent: false })
   } catch {
     return () => {}
   }

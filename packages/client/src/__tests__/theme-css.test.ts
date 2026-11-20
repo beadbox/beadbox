@@ -146,3 +146,46 @@ describe("regression: tone tokens are never used bare as text", () => {
     expect(offenders).toEqual([])
   })
 })
+
+describe("the packaged smoke's html-class assertions stay satisfiable", () => {
+  // The sweep removed `theme-gray` from <html> and from applyThemeClass, but
+  // scripts/smoke-targets.json still asserted `html.theme-gray` with
+  // minCount 1 — so every packaged release smoke would have failed, and no
+  // unit or e2e test touched that file. This guards the coupling: any
+  // `html.<class>` the smoke requires must be a class the app actually sets.
+  const repoRoot = join(import.meta.dir, "..", "..", "..", "..")
+  const targets = JSON.parse(readFileSync(join(repoRoot, "scripts/smoke-targets.json"), "utf-8"))
+  const indexHtml = readFileSync(join(import.meta.dir, "..", "..", "index.html"), "utf-8")
+
+  function requiredHtmlClasses(node: unknown, out: Set<string> = new Set()): Set<string> {
+    if (Array.isArray(node)) {
+      for (const n of node) requiredHtmlClasses(n, out)
+    } else if (node && typeof node === "object") {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        if (k === "selector" && typeof v === "string") {
+          const m = /^html\.([A-Za-z0-9_-]+)$/.exec(v.trim())
+          if (m) out.add(m[1])
+        } else {
+          requiredHtmlClasses(v, out)
+        }
+      }
+    }
+    return out
+  }
+
+  test("every html.<class> the smoke asserts is a class the app sets", () => {
+    const required = [...requiredHtmlClasses(targets)]
+    expect(required.length).toBeGreaterThan(0)
+
+    // What the app can actually put on <html>: the pre-hydration classes in
+    // index.html, plus whatever applyThemeClass toggles (only `dark`).
+    const preHydration = new Set(
+      (/<html[^>]*class="([^"]*)"/.exec(indexHtml)?.[1] ?? "").split(/\s+/).filter(Boolean),
+    )
+    const settable = new Set([...preHydration, "dark"])
+
+    for (const cls of required) {
+      expect(settable.has(cls)).toBe(true)
+    }
+  })
+})

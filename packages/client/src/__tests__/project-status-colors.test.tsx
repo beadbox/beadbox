@@ -115,3 +115,26 @@ test("a style-only change to --bb-card (no class change) updates the text colour
   })
   document.documentElement.removeAttribute("style")
 })
+
+// StatusColorsMount lives inside __root.tsx's NON-aggregate branch, so it
+// never mounts on /all-projects — and the sweep moved priority and bead-type
+// colours out of per-component Tailwind classes into the stylesheet it
+// renders. Without a shared sheet here, every type badge in All projects fell
+// back to the neutral TYPE_BADGE_CLASS and the priority ramp collapsed.
+test("the aggregate route emits priority and bead-type rules too", async () => {
+  mount(["a"])
+  const shared = await waitFor(() => {
+    const el = document.querySelector<HTMLStyleElement>("[data-beadbox-status-colors-shared]")
+    expect(el).not.toBeNull()
+    return el?.textContent ?? ""
+  })
+  // Priorities keep distinct hues (P0 red at /20, P2 yellow at half that).
+  expect(shared).toContain('[data-priority="critical"][data-priority-role="badge"]')
+  expect(shared).toContain("rgb(239 68 68 / 0.2)")
+  expect(shared).toContain("rgb(234 179 8 / 0.1)")
+  // Bead types keep theirs.
+  expect(shared).toContain('[data-type="bug"][data-type-role="badge"]')
+  expect(shared).toContain('[data-type="molecule"][data-type-role="text"]')
+  // And it is unscoped: these are not per project.
+  expect(shared).not.toContain("data-project-id")
+})
