@@ -92,8 +92,8 @@ export function SchedulingControls({
               className={cn(
                 "inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium transition-colors",
                 due.overdue
-                  ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
-                  : "bg-blue-500/20 text-blue-400 hover:bg-blue-500/30",
+                  ? "bg-destructive/20 text-destructive-text hover:bg-destructive/30"
+                  : "bg-info/20 text-info-text hover:bg-info/30",
               )}
             >
               <CalendarClock className="h-3 w-3" />
@@ -150,8 +150,8 @@ export function SchedulingControls({
               className={cn(
                 "inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium transition-colors",
                 new Date(deferUntil) > new Date()
-                  ? "bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
-                  : "bg-zinc-500/20 text-zinc-400 hover:bg-zinc-500/30",
+                  ? "bg-warning/20 text-warning-text hover:bg-warning/30"
+                  : "bg-muted-foreground/20 text-muted-foreground hover:bg-muted-foreground/30",
               )}
             >
               <PauseCircle className="h-3 w-3" />
@@ -215,7 +215,7 @@ export function SchedulingControls({
                 setEditEstimateValue(String(estimatedMinutes))
                 setIsEditingEstimate(true)
               }}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-500/20 text-zinc-400 font-medium hover:bg-zinc-500/30 transition-colors"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted-foreground/20 text-muted-foreground font-medium hover:bg-muted-foreground/30 transition-colors"
             >
               <Timer className="h-3 w-3" />
               <span className="text-xs">

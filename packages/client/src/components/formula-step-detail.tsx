@@ -13,7 +13,7 @@ function formatDescription(text: string): React.ReactNode[] {
       return (
         <span
           key={i}
-          className="px-1 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25"
+          className="px-1 py-0.5 rounded bg-info/15 text-info-text border border-info/25"
         >
           {part.slice(2, -2)}
         </span>
@@ -21,7 +21,7 @@ function formatDescription(text: string): React.ReactNode[] {
     }
     if (/^(\/|~\/|\w+\/)/.test(part) && part.includes("/")) {
       return (
-        <span key={i} className="px-1 py-0.5 rounded bg-blue-900/20 text-blue-200">
+        <span key={i} className="px-1 py-0.5 rounded bg-info/10 text-info-text">
           {part}
         </span>
       )
@@ -142,12 +142,12 @@ export function FormulaStepDetail({
             </span>
           )}
           {gateType === "human" && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20">
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-warning/15 text-warning-text border border-warning/20">
               human gate
             </span>
           )}
           {gateType === "conditional" && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20">
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-info/15 text-info-text border border-info/20">
               conditional gate
             </span>
           )}
@@ -164,8 +164,8 @@ export function FormulaStepDetail({
             <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">
               Description
             </div>
-            <div className="bg-[#1a1a1e] rounded-md p-4 overflow-x-auto">
-              <div className="text-[14px] text-zinc-200 whitespace-pre-line break-words leading-[1.7]">
+            <div className="bg-background rounded-md p-4 overflow-x-auto">
+              <div className="text-[14px] text-muted-foreground whitespace-pre-line break-words leading-[1.7]">
                 {formatDescription(step.description)}
               </div>
             </div>

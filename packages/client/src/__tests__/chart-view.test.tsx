@@ -247,7 +247,7 @@ describe("Chart view", () => {
     expect(barFor("a")?.getAttribute("data-style")).toBe("working")
     expect(barFor("b")?.getAttribute("data-style")).toBe("waiting hollow")
     expect(barFor("x")?.getAttribute("data-style")).toBe("blocked hollow")
-    expect(barFor("x")?.getAttribute("class")).toContain("stroke-red-500")
+    expect(barFor("x")?.getAttribute("class")).toContain("stroke-destructive")
     // c is closed with no start time from bd: placed, and drawn as inferred.
     expect(barFor("c")?.getAttribute("data-style")).toBe("done inferred")
     expect(barFor("c")?.getAttribute("stroke-dasharray")).toBe("1 2")

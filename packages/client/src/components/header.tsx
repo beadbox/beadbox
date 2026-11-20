@@ -232,7 +232,7 @@ export function Header({
                   <span
                     className="absolute inset-0 rounded-md pointer-events-none"
                     style={{
-                      boxShadow: "0 0 0 2px var(--primary)",
+                      boxShadow: "0 0 0 2px var(--bb-primary)",
                       animation: "pulse-ring 2s ease-in-out infinite",
                     }}
                     aria-hidden="true"
@@ -394,7 +394,7 @@ export function Header({
         </div>
 
         <div className={cn("flex items-center", isMobile ? "gap-1" : "gap-2")}>
-          <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
+          <span className="rounded-full bg-success/10 border border-success/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-success-text">
             {versionLabel ?? "Beta"}
           </span>
           {onRefresh && (
@@ -430,7 +430,7 @@ export function Header({
                   onClick={onUpdateClick}
                   className={cn(
                     "relative inline-flex items-center justify-center rounded-md",
-                    "text-emerald-400 hover:text-emerald-300 hover:bg-accent",
+                    "text-success-text/80 hover:text-success-text hover:bg-accent",
                     "transition-colors",
                     isMobile ? "min-h-[44px] min-w-[44px]" : "h-9 w-9",
                   )}
@@ -438,8 +438,8 @@ export function Header({
                 >
                   <ArrowUpCircle className="h-4 w-4" />
                   <span className="absolute top-1 right-1 flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
                   </span>
                 </button>
               </TooltipTrigger>
@@ -453,7 +453,7 @@ export function Header({
                   <span
                     className={cn(
                       "inline-block h-2.5 w-2.5 rounded-full",
-                      appHealth.status === "degraded" ? "bg-amber-500" : "bg-red-500",
+                      appHealth.status === "degraded" ? "bg-warning" : "bg-destructive",
                     )}
                   />
                 </span>
@@ -520,7 +520,7 @@ export function Header({
               : appHealth.reason
           return (
             <Fragment>
-              <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-red-500/10 border-t border-red-500/20 text-red-400 text-xs">
+              <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-destructive/10 border-t border-destructive/20 text-destructive-text text-xs">
                 <ServerCrash className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">
                   {autoRetryCountdown != null && autoRetryCountdown > 0
@@ -530,7 +530,7 @@ export function Header({
                 {loadError && (
                   <button
                     onClick={() => setHealthDetailsOpen(true)}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-red-500/20 hover:bg-red-500/30 text-red-300 transition-colors shrink-0"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-destructive/20 hover:bg-destructive/30 text-destructive-text transition-colors shrink-0"
                   >
                     Details
                   </button>
@@ -539,7 +539,7 @@ export function Header({
                   <button
                     onClick={() => onRefresh?.()}
                     disabled={isRefreshing}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-red-500/20 hover:bg-red-500/30 text-red-300 transition-colors shrink-0"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-destructive/20 hover:bg-destructive/30 text-destructive-text transition-colors shrink-0"
                   >
                     <RefreshCw className={cn("h-3 w-3", isRefreshing && "animate-spin")} />
                     Retry

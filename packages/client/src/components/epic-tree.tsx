@@ -69,6 +69,9 @@ interface EpicTreeProps {
 import { countBeadAndSubtasks, getAggregatedCounts } from "@/lib/epic-progress"
 
 const depthBorderColors = [
+  // Identity colours for "which epic is this", not semantic roles. Left as
+  // literals on purpose: a 4px saturated border reads on a light card as well
+  // as a dark one, and there is no token vocabulary for "epic #3".
   "border-l-emerald-500",
   "border-l-teal-500",
   "border-l-cyan-500",
@@ -664,7 +667,7 @@ export function EpicTree({
         <div
           className={cn(
             "border-2 border-dashed rounded-lg p-4 transition-colors",
-            isDraggingToArchive ? "border-amber-500 bg-amber-500/10" : "border-muted-foreground/30",
+            isDraggingToArchive ? "border-warning bg-warning/10" : "border-muted-foreground/30",
           )}
           onDragOver={(e) => {
             e.preventDefault()
@@ -697,7 +700,7 @@ export function EpicTree({
         <div
           className={cn(
             "mt-2 border-2 border-dashed rounded-lg p-4 transition-colors",
-            isDraggingToBacklog ? "border-blue-500 bg-blue-500/10" : "border-muted-foreground/30",
+            isDraggingToBacklog ? "border-info bg-info/10" : "border-muted-foreground/30",
           )}
           onDragOver={(e) => {
             e.preventDefault()
@@ -732,7 +735,7 @@ export function EpicTree({
             className={cn(
               "flex-1 border-2 border-dashed rounded-lg p-3 text-center text-sm text-muted-foreground transition-colors",
               dragOverEpicId === "_toplevel"
-                ? "border-emerald-500 bg-emerald-500/10"
+                ? "border-success bg-success/10"
                 : "border-border",
             )}
             onDragOver={(e) => {
@@ -758,7 +761,7 @@ export function EpicTree({
             className={cn(
               "flex-1 border-2 border-dashed rounded-lg p-3 text-center text-sm text-muted-foreground transition-colors",
               draggedMilestone && "opacity-50",
-              dragOverEpicId === "_loose" ? "border-blue-500 bg-blue-500/10" : "border-border",
+              dragOverEpicId === "_loose" ? "border-info bg-info/10" : "border-border",
             )}
             aria-disabled={draggedMilestone}
             onDragOver={(e) => {
@@ -797,7 +800,7 @@ export function EpicTree({
               !isBacklogItem &&
               !isArchivedItem &&
               isDraggingToBacklogSection &&
-              "ring-2 ring-blue-500/50 bg-blue-500/5",
+              "ring-2 ring-info/50 bg-info/5",
           )}
           onDragOver={
             draggedBeadId && onBacklog && !isBacklogItem && !isArchivedItem
@@ -840,7 +843,7 @@ export function EpicTree({
               className={cn(
                 "mb-4 border-2 border-dashed rounded-lg p-4 transition-colors",
                 isDraggingFromBacklog
-                  ? "border-emerald-500 bg-emerald-500/10"
+                  ? "border-success bg-success/10"
                   : "border-muted-foreground/30",
               )}
               onDragOver={(e) => {
@@ -862,7 +865,7 @@ export function EpicTree({
                 setIsDraggingFromBacklog(false)
               }}
             >
-              <div className="flex items-center justify-center gap-2 text-emerald-500">
+              <div className="flex items-center justify-center gap-2 text-success-text">
                 <Inbox className="h-4 w-4" />
                 <span className="text-sm font-medium">Drop here to restore from backlog</span>
               </div>
@@ -963,7 +966,7 @@ export function EpicTree({
             draggedBeadId &&
               !isArchivedItem &&
               isDraggingToArchiveSection &&
-              "ring-2 ring-amber-500/50 bg-amber-500/5",
+              "ring-2 ring-warning/50 bg-warning/5",
           )}
           onDragOver={
             draggedBeadId && onArchive && !isArchivedItem
@@ -1006,7 +1009,7 @@ export function EpicTree({
               className={cn(
                 "mb-4 border-2 border-dashed rounded-lg p-4 transition-colors",
                 isDraggingToUnarchive
-                  ? "border-emerald-500 bg-emerald-500/10"
+                  ? "border-success bg-success/10"
                   : "border-muted-foreground/30",
               )}
               onDragOver={(e) => {
@@ -1028,7 +1031,7 @@ export function EpicTree({
                 setIsDraggingToUnarchive(false)
               }}
             >
-              <div className="flex items-center justify-center gap-2 text-emerald-500">
+              <div className="flex items-center justify-center gap-2 text-success-text">
                 <Archive className="h-4 w-4" />
                 <span className="text-sm font-medium">Drop here to restore from archive</span>
               </div>
@@ -1364,7 +1367,7 @@ export function EpicRow({
           "w-full flex items-center bg-white/[0.04] hover:bg-white/[0.07] transition-colors select-none",
           isMobile ? "px-2 py-1.5 gap-2 min-h-[44px]" : "px-3 py-2.5 gap-3",
           isDraggable && "cursor-grab active:cursor-grabbing",
-          dragOverEpicId === epic.id && "ring-1 ring-emerald-500 ring-inset bg-emerald-500/10",
+          dragOverEpicId === epic.id && "ring-1 ring-success ring-inset bg-success/10",
           draggedBeadId === epic.id && "opacity-50",
           selectedBeadId === epic.id && "bg-primary/10",
         )}
@@ -1455,7 +1458,7 @@ export function EpicRow({
           {!isStandalone && epic.type === "convoy" && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Truck className="h-3.5 w-3.5 text-lime-400 shrink-0" />
+                <Truck data-type="convoy" data-type-role="text" className="h-3.5 w-3.5 shrink-0" />
               </TooltipTrigger>
               <TooltipContent>Convoy</TooltipContent>
             </Tooltip>
@@ -1463,7 +1466,7 @@ export function EpicRow({
           {!isStandalone && isMoleculePresentation(epic) && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Hexagon className="h-3.5 w-3.5 text-pink-400 shrink-0" />
+                <Hexagon data-type="molecule" data-type-role="text" className="h-3.5 w-3.5 shrink-0" />
               </TooltipTrigger>
               <TooltipContent>Molecule</TooltipContent>
             </Tooltip>
@@ -1471,7 +1474,7 @@ export function EpicRow({
           {!isStandalone && epic.type === "milestone" && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Flag className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                <Flag data-type="milestone" data-type-role="text" className="h-3.5 w-3.5 shrink-0" />
               </TooltipTrigger>
               <TooltipContent>Milestone</TooltipContent>
             </Tooltip>
@@ -1482,7 +1485,7 @@ export function EpicRow({
             !isMoleculePresentation(epic) && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Layers className="h-3.5 w-3.5 text-amber-400/60 shrink-0" />
+                  <Layers data-type="epic" data-type-role="text" className="h-3.5 w-3.5 shrink-0" />
                 </TooltipTrigger>
                 <TooltipContent>Epic</TooltipContent>
               </Tooltip>
@@ -1500,7 +1503,7 @@ export function EpicRow({
         {!isStandalone && (
           <>
             <PillBadge config={getStatusConfig(epic.status)} status={epic.status} />
-            <PillBadge config={priorityConfig[epic.priority]} />
+            <PillBadge config={priorityConfig[epic.priority]} priority={epic.priority} />
           </>
         )}
 
@@ -1514,7 +1517,7 @@ export function EpicRow({
                   e.stopPropagation()
                   onBacklogEpic(epic.id, false)
                 }}
-                className="p-1.5 rounded hover:bg-blue-500/20 text-muted-foreground hover:text-blue-400 transition-colors"
+                className="p-1.5 rounded hover:bg-info/20 text-muted-foreground hover:text-info-text transition-colors"
               >
                 <RotateCcw className="h-4 w-4" />
               </button>
@@ -1545,7 +1548,7 @@ export function EpicRow({
                   }
                 }}
                 className={cn(
-                  "p-1.5 rounded hover:bg-amber-500/20 text-muted-foreground hover:text-amber-400 transition-colors cursor-pointer",
+                  "p-1.5 rounded hover:bg-warning/20 text-muted-foreground hover:text-warning-text transition-colors cursor-pointer",
                   isMobile && "min-h-[44px] min-w-[44px] flex items-center justify-center",
                 )}
               >
@@ -1577,7 +1580,7 @@ export function EpicRow({
                   }
                 }}
                 className={cn(
-                  "p-1.5 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors cursor-pointer",
+                  "p-1.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive-text transition-colors cursor-pointer",
                   isMobile && "min-h-[44px] min-w-[44px] flex items-center justify-center",
                 )}
               >
@@ -1596,7 +1599,7 @@ export function EpicRow({
                 className={cn(
                   "text-xs font-mono shrink-0 tabular-nums",
                   closedCount === totalCount && totalCount > 0
-                    ? "text-emerald-400"
+                    ? "text-success-text"
                     : "text-muted-foreground",
                 )}
               >
@@ -1612,9 +1615,9 @@ export function EpicRow({
             <TooltipTrigger asChild>
               <div className="flex items-center gap-3 shrink-0">
                 <div className="w-24 group">
-                  <div className="relative h-3 bg-slate-700/60 rounded-full overflow-hidden">
+                  <div className="relative h-3 bg-muted/60 rounded-full overflow-hidden">
                     <div
-                      className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-600/80 via-emerald-500/70 to-teal-500/70 rounded-full transition-all duration-500 ease-out group-hover:brightness-110 group-hover:shadow-[0_0_8px_rgba(34,197,94,0.3)]"
+                      className="absolute inset-y-0 left-0 bg-gradient-to-r from-success/80 via-success/70 to-success/70 rounded-full transition-all duration-500 ease-out group-hover:brightness-110 group-hover:shadow-[0_0_8px_rgba(34,197,94,0.3)]"
                       style={{ width: `${progress}%` }}
                     />
                   </div>
@@ -1623,7 +1626,7 @@ export function EpicRow({
                   className={cn(
                     "text-sm font-mono min-w-[90px] text-right",
                     closedCount === totalCount && totalCount > 0
-                      ? "text-emerald-400"
+                      ? "text-success-text"
                       : "text-muted-foreground",
                   )}
                 >
@@ -1642,7 +1645,7 @@ export function EpicRow({
         <div
           className={cn(
             "border-t border-border/30",
-            dragOverEpicId === epic.id && "bg-emerald-500/5",
+            dragOverEpicId === epic.id && "bg-success/5",
           )}
           onDragOver={(e) => {
             e.preventDefault()
@@ -1758,7 +1761,7 @@ export function EpicRow({
                       data-step-count=""
                       className={cn(
                         "ml-auto font-mono tabular-nums shrink-0",
-                        finished ? "text-emerald-400/60" : "text-muted-foreground/60",
+                        finished ? "text-success-text/60" : "text-muted-foreground/60",
                       )}
                     >
                       {count.closed}/{count.total}

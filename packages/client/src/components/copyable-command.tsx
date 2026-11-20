@@ -43,7 +43,7 @@ export function CopyableCommand({ command, label, className }: CopyableCommandPr
           className="shrink-0 p-1 rounded hover:bg-muted-foreground/10 transition-colors text-muted-foreground hover:text-foreground"
           aria-label={copied ? "Copied" : "Copy command"}
         >
-          {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+          {copied ? <Check className="h-4 w-4 text-success-text" /> : <Copy className="h-4 w-4" />}
         </button>
       </div>
     </div>

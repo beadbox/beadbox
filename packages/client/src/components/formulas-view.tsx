@@ -13,8 +13,6 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
-import { useHasTrains } from "@/hooks/use-has-trains"
-import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import {
   Activity,
   AlertTriangle,
@@ -29,15 +27,15 @@ import {
 } from "lucide-react"
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState, useTransition } from "react"
+import { useHasTrains } from "@/hooks/use-has-trains"
+import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { useActiveWorkspace } from "../hooks/use-active-workspace"
 import { useAppHealth } from "../hooks/use-app-health"
-import { safeCapture } from "../lib/posthog-safe"
 import { useUpdateChecker } from "../hooks/use-update-checker"
 import {
   getAnalyticsEnabled,
   getFormulaViewMode,
   getSelectedFormula,
-  getThemePreference,
   getUpdateCheckEnabled,
   getUpdateCheckFrequency,
   getVimNavigationEnabled,
@@ -45,14 +43,12 @@ import {
   setZoomLevel as persistZoomLevel,
   setFormulaViewMode,
   setSelectedFormula,
-  setThemePreference,
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeVariant,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
-import { applyThemeClass } from "../lib/theme"
+import { safeCapture } from "../lib/posthog-safe"
 import { rpc } from "../lib/rpc"
 import type {
   FormulaDetail,
@@ -64,7 +60,6 @@ import type {
   Workspace,
 } from "../lib/types"
 import { cn } from "../lib/utils"
-import { StepCountsContext } from "./step-count-badge"
 import { setWorkspaceCookie } from "../lib/workspace-cookie"
 import { FormulaDag } from "./formula-dag"
 import { FormulaPourModal } from "./formula-pour-modal"
@@ -74,6 +69,7 @@ import { FormulaTree } from "./formula-tree"
 import { Header } from "./header"
 import { SettingsDialog } from "./settings-dialog"
 import { useWorkspaceGate } from "./startup-gate"
+import { StepCountsContext } from "./step-count-badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
 import { UpdateDialog } from "./update-dialog"
 
@@ -83,7 +79,7 @@ function formatVars(text: string): React.ReactNode[] {
     part.startsWith("{{") ? (
       <span
         key={i}
-        className="text-[11px] font-mono px-1 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-500/25 mx-0.5"
+        className="text-[11px] font-mono px-1 py-0.5 rounded bg-info/15 text-info-text border border-info/25 mx-0.5"
       >
         {part.slice(2, -2)}
       </span>
@@ -164,7 +160,7 @@ function MoleculeCardItem({
               <div
                 className={cn(
                   "h-full rounded-full transition-all",
-                  pct === 100 ? "bg-green-500" : pct > 0 ? "bg-blue-500" : "bg-muted-foreground/30",
+                  pct === 100 ? "bg-success" : pct > 0 ? "bg-info" : "bg-muted-foreground/30",
                 )}
                 style={{ width: `${pct}%` }}
               />
@@ -175,8 +171,8 @@ function MoleculeCardItem({
           </div>
           {mol.progress.inProgress > 0 && (
             <div className="flex items-center gap-1 mt-1">
-              <Activity className="h-3 w-3 text-blue-400" />
-              <span className="text-[10px] text-blue-400">
+              <Activity className="h-3 w-3 text-info-text" />
+              <span className="text-[10px] text-info-text">
                 {mol.progress.inProgress} in progress
               </span>
             </div>
@@ -211,7 +207,6 @@ export function FormulasView() {
   // Settings
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
-  const [theme, setTheme] = useState<ThemeVariant>("gray")
   const [zoomLevel, setZoomLevelState] = useState(100)
   const isTauriRef = useRef(false)
   const [vimEnabled, setVimEnabledState] = useState(true)
@@ -295,7 +290,6 @@ export function FormulasView() {
 
   // Load preferences on mount
   useEffect(() => {
-    setTheme(getThemePreference())
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
     setUpdateCheckFrequencyState(getUpdateCheckFrequency())
@@ -317,12 +311,6 @@ export function FormulasView() {
       }
     })
   }, [])
-
-  // Apply theme
-  useEffect(() => {
-    const el = document.documentElement
-    applyThemeClass(el, theme)
-  }, [theme])
 
   // Apply zoom (Tauri only)
   useEffect(() => {
@@ -492,7 +480,10 @@ export function FormulasView() {
         setSettingsOpen(true)
         return
       }
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "4" || e.key === "5" || e.key === "6")) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        (e.key === "1" || e.key === "2" || e.key === "4" || e.key === "5" || e.key === "6")
+      ) {
         e.preventDefault()
         if (e.key === "1") router.navigate({ to: "/" as never })
         if (e.key === "2") router.navigate({ to: "/activity" as never })
@@ -515,10 +506,6 @@ export function FormulasView() {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleThemeChange = (next: ThemeVariant) => {
-    setTheme(next)
-    setThemePreference(next)
-  }
   const handleZoomChange = useCallback((level: number) => {
     const c = Math.max(50, Math.min(200, level))
     setZoomLevelState(c)
@@ -575,7 +562,7 @@ export function FormulasView() {
               </div>
             ) : formulasError ? (
               <div className="flex flex-col items-center gap-3 py-12 text-muted-foreground">
-                <AlertTriangle className="h-5 w-5 text-amber-400" />
+                <AlertTriangle className="h-5 w-5 text-warning-text" />
                 <p className="text-sm text-center px-4">{formulasError}</p>
                 <button
                   onClick={fetchFormulas}
@@ -655,7 +642,7 @@ export function FormulasView() {
                             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
                             <span className="font-mono text-foreground">{name}</span>
                             {v.required && (
-                              <span className="text-[10px] text-amber-400/80">required</span>
+                              <span className="text-[10px] text-warning-text/80">required</span>
                             )}
                             {v.default && (
                               <span className="text-muted-foreground/60">= {v.default}</span>
@@ -682,13 +669,13 @@ export function FormulasView() {
                   <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Step Graph
                   </span>
-                  <div className="flex items-center bg-zinc-800/50 rounded-md p-0.5">
+                  <div className="flex items-center bg-muted/50 rounded-md p-0.5">
                     <button
                       onClick={() => setViewMode("tree")}
                       className={cn(
                         "p-1 rounded transition-colors",
                         viewMode === "tree"
-                          ? "bg-zinc-700 text-foreground"
+                          ? "bg-muted text-foreground"
                           : "text-muted-foreground hover:text-foreground",
                       )}
                       title="Tree view"
@@ -700,7 +687,7 @@ export function FormulasView() {
                       className={cn(
                         "p-1 rounded transition-colors",
                         viewMode === "dag"
-                          ? "bg-zinc-700 text-foreground"
+                          ? "bg-muted text-foreground"
                           : "text-muted-foreground hover:text-foreground",
                       )}
                       title="Graph view"
@@ -838,8 +825,6 @@ export function FormulasView() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        theme={theme}
-        onThemeChange={handleThemeChange}
         zoomLevel={zoomLevel}
         onZoomChange={handleZoomChange}
         databasePath={databasePath}

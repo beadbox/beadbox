@@ -16,12 +16,17 @@ import { UpdateDialog } from "@/components/update-dialog"
 import { useActiveWorkspace } from "@/hooks/use-active-workspace"
 import { useAppHealth } from "@/hooks/use-app-health"
 import { useHasTrains } from "@/hooks/use-has-trains"
-import { useHasWaiting } from "@/hooks/use-waiting-gates"
-import { usePreferences } from "@/hooks/use-preferences"
 import { useLabelChoiceForWorkspace } from "@/hooks/use-label-choice-for-workspace"
+import { usePreferences } from "@/hooks/use-preferences"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
+import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { readSystemIssues, systemIssuesKey } from "@/hooks/use-workspace-lifecycle"
-import { extractAssignees, extractLabels, extractRigNames, flattenEpicsToBeads } from "@/lib/epic-tree-utils"
+import {
+  extractAssignees,
+  extractLabels,
+  extractRigNames,
+  flattenEpicsToBeads,
+} from "@/lib/epic-tree-utils"
 import { buildGanttModel } from "@/lib/gantt-model"
 import { setSelectedBead as persistSelectedBead } from "@/lib/local-storage"
 import { rpc } from "@/lib/rpc"
@@ -133,7 +138,13 @@ export function ChartView() {
   const labels = useMemo(() => extractLabels(epics), [epics])
   const rigNames = useMemo(() => extractRigNames(epics), [epics])
   const typeOptions = useMemo(
-    () => [...new Set([...(typesQuery.data ?? []), ...epics.map((e) => e.type), ...flattenEpicsToBeads(epics).map((b) => b.type)])],
+    () => [
+      ...new Set([
+        ...(typesQuery.data ?? []),
+        ...epics.map((e) => e.type),
+        ...flattenEpicsToBeads(epics).map((b) => b.type),
+      ]),
+    ],
     [typesQuery.data, epics],
   )
   const model = useMemo(
@@ -146,7 +157,16 @@ export function ChartView() {
         rigNames,
         statusesQuery.data ?? [],
       ),
-    [epics, blocksQuery.data, prefs.filters, selectedType, includeSystem, now, rigNames, statusesQuery.data],
+    [
+      epics,
+      blocksQuery.data,
+      prefs.filters,
+      selectedType,
+      includeSystem,
+      now,
+      rigNames,
+      statusesQuery.data,
+    ],
   )
 
   useEffect(() => {
@@ -169,7 +189,9 @@ export function ChartView() {
   return (
     <div className="h-full flex flex-col bg-background safe-area-inset">
       <Header
-        currentWorkspace={currentWorkspace || { id: "", name: "Loading...", mode: "embedded" as const }}
+        currentWorkspace={
+          currentWorkspace || { id: "", name: "Loading...", mode: "embedded" as const }
+        }
         isRefreshing={epicsQuery.isFetching}
         isPending={epicsQuery.isLoading}
         appHealth={appHealth}
@@ -209,22 +231,27 @@ export function ChartView() {
           }}
         />
         {blocksQuery.data?.degraded && (
-          <div role="alert" className="flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-300">
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-text dark:text-warning-text"
+          >
             <span>
-              Blocked-by markers are unavailable: {blocksQuery.data.degraded.message}. The chart does not show what is
-              blocked.
+              Blocked-by markers are unavailable: {blocksQuery.data.degraded.message}. The chart
+              does not show what is blocked.
             </span>
             <button
               type="button"
               onClick={() => void blocksQuery.refetch()}
-              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-amber-500/20"
+              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-warning/20"
             >
               Retry
             </button>
           </div>
         )}
         {epicsQuery.isError ? (
-          <p className="text-sm text-destructive">Could not load beads: {String(epicsQuery.error)}</p>
+          <p className="text-sm text-destructive">
+            Could not load beads: {String(epicsQuery.error)}
+          </p>
         ) : epicsQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
@@ -235,8 +262,6 @@ export function ChartView() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        theme={prefs.theme}
-        onThemeChange={prefs.handleThemeChange}
         zoomLevel={prefs.zoomLevel}
         onZoomChange={prefs.handleZoomChange}
         databasePath={dbPath}

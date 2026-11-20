@@ -159,8 +159,8 @@ test.describe("Workspace Lifecycle", () => {
     await loadWorkspace(page, serverTestDb.workspaceId)
 
     // Verify healthy: no error/degraded indicator (ModeIcon removed in bb-hzp5.1)
-    await expect(page.locator("header span.bg-amber-500")).not.toBeVisible({ timeout: 10_000 })
-    await expect(page.locator("header span.bg-red-500")).not.toBeVisible({ timeout: 2_000 })
+    await expect(page.locator("header span.bg-warning")).not.toBeVisible({ timeout: 10_000 })
+    await expect(page.locator("header span.bg-destructive")).not.toBeVisible({ timeout: 2_000 })
     await expect(page.getByText("E2E Test Epic")).toBeVisible({ timeout: 10_000 })
 
     // Kill the Dolt server

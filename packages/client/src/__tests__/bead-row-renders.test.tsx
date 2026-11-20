@@ -135,7 +135,10 @@ test("read-state refreshes update only the row whose unread display changed", ()
     const props = { beads: rows, epicId: "epic", onBeadClick: () => {} }
     const view = render(<BeadTable {...props} readState={{}} />)
     const unreadDot = (id: string) =>
-      view.container.querySelector(`[data-item-id="${id}"] .bg-blue-400`)
+      // The palette sweep moved the unread dot from bg-blue-400 to the info
+      // token. A colour class is a brittle selector, but it is the only hook
+      // this dot has.
+      view.container.querySelector(`[data-item-id="${id}"] .bg-info`)
     expect(unreadDot("first")).not.toBeNull()
     expect(unreadDot("second")).not.toBeNull()
     rowRenders.mockClear()

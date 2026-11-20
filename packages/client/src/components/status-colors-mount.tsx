@@ -10,10 +10,19 @@
 // color chosen for a built-in, no rule exists for it and its classes stand.
 
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { rpc } from "../lib/rpc"
-import { buildStatusColorCss } from "../lib/status-colors"
-import { currentThemeSurface, statusColorStore, useStatusColors } from "../lib/status-colors-store"
+import {
+  buildPriorityColorCss,
+  buildStatusColorCss,
+  buildTypeColorCss,
+} from "../lib/status-colors"
+import {
+  currentThemeForeground,
+  currentThemeSurface,
+  statusColorStore,
+  useStatusColors,
+} from "../lib/status-colors-store"
 import { getWorkspaceCookie, subscribeWorkspaceCookie } from "../lib/workspace-cookie"
 import { useWorkspaceGate } from "./startup-gate"
 
@@ -70,10 +79,20 @@ export function StatusColorsMount() {
 
   useEffect(() => {
     const el = document.documentElement
-    const update = () => statusColorStore.set({ surface: currentThemeSurface(el) })
+    // Only set when a colour actually moved. This observer also fires on
+    // `style`, and usePreferences writes documentElement.style.zoom on every
+    // zoom step — without this check each of those rebuilt all three
+    // stylesheets and re-rendered every useStatusColors subscriber.
+    const update = () => {
+      const surface = currentThemeSurface(el)
+      const foreground = currentThemeForeground(el)
+      const cur = statusColorStore.get()
+      if (cur.surface === surface && cur.foreground === foreground) return
+      statusColorStore.set({ surface, foreground })
+    }
     update()
     const observer = new MutationObserver(update)
-    observer.observe(el, { attributes: true, attributeFilter: ["class"] })
+    observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] })
     return () => observer.disconnect()
   }, [])
 
@@ -83,4 +102,33 @@ export function StatusColorsMount() {
 export function StatusColorStyles() {
   const { css, surface } = useStatusColors()
   return <style data-beadbox-status-colors="">{buildStatusColorCss(css, surface)}</style>
+}
+
+/**
+ * Priority and bead-type rules, which are neither user-configurable nor per
+ * project — so one unscoped sheet serves the whole app.
+ *
+ * Mounted from __root.tsx OUTSIDE the aggregate branch, because
+ * StatusColorsMount is inside it: emitting these from there left every type
+ * badge on /all-projects falling back to the neutral TYPE_BADGE_CLASS and
+ * collapsed the priority ramp. Deriving them in both places instead would be
+ * two copies of one fact, which is what colorRules() exists to avoid.
+ */
+export function PriorityTypeStyles() {
+  const [surface, setSurface] = useState(() => currentThemeSurface())
+  useEffect(() => {
+    const el = document.documentElement
+    const update = () => setSurface((prev) => (prev === currentThemeSurface(el) ? prev : currentThemeSurface(el)))
+    update()
+    const observer = new MutationObserver(update)
+    observer.observe(el, { attributes: true, attributeFilter: ["class", "style"] })
+    return () => observer.disconnect()
+  }, [])
+  // Only `surface` feeds these, so recompute only when it moves: each
+  // colorRules() call runs readableTextColor's contrast search.
+  const css = useMemo(
+    () => `${buildPriorityColorCss(surface)}\n${buildTypeColorCss(surface)}`,
+    [surface],
+  )
+  return <style data-beadbox-status-colors-shared="">{css}</style>
 }

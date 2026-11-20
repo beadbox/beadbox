@@ -570,6 +570,7 @@ function buildTauriRpc(manager: Pick<SidecarManager, "call"> = sidecarManager): 
     session: namespaceProxy("session"),
     subscribe: namespaceProxy("subscribe"),
     system: namespaceProxy("system"),
+    themes: namespaceProxy("themes"),
     trains: namespaceProxy("trains"),
     workspaces: namespaceProxy("workspaces"),
   } satisfies Record<keyof RemoteApi, unknown>
@@ -614,6 +615,7 @@ function buildStubRpc(): RemoteApi {
     session: namespaceStub("session"),
     subscribe: namespaceStub("subscribe"),
     system: namespaceStub("system"),
+    themes: namespaceStub("themes"),
     trains: namespaceStub("trains"),
     workspaces: namespaceStub("workspaces"),
   } as unknown as RemoteApi

@@ -5,15 +5,20 @@ import { describe, expect, test } from "bun:test"
 import { getStatusDisplayConfig } from "../components/bead-detail-helpers"
 import { getStatusConfig } from "../lib/badge-config"
 import {
-  assignCustomDefaults,
   BUILTIN_STATUSES,
-  buildStatusColorCss,
-  contrastRatio,
+  DEFAULT_PRIORITY_HEX,
   DEFAULT_STATUS_HEX,
+  DEFAULT_TYPE_HEX,
+  THEME_SURFACES,
+  assignCustomDefaults,
+  buildPriorityColorCss,
+  buildStatusColorCss,
+  buildTypeColorCss,
+  contrastRatio,
   isGreyish,
   readableTextColor,
   resolveStatusColors,
-  THEME_SURFACES,
+  toHexColor,
 } from "../lib/status-colors"
 
 const CUSTOMS = [
@@ -108,9 +113,29 @@ describe("readableTextColor", () => {
 })
 
 describe("resolveStatusColors", () => {
-  test("built-ins with no chosen color get no CSS (they keep today's classes)", () => {
-    const { css } = resolveStatusColors([...BUILTIN_STATUSES, "ready_for_qa", "ready_to_ship"], {})
-    expect(css).toEqual({})
+  // REVERSED by the light-theme palette sweep. This previously asserted
+  // `css` was empty, because a built-in with no chosen colour kept the
+  // hardcoded Tailwind classes each surface carried. Those classes are
+  // dark-only (`text-amber-400` on a white card fails contrast), so every
+  // status now emits a rule and gets readableTextColor's per-surface text.
+  test("built-ins with no chosen color now emit CSS, at their default hex", () => {
+    const statuses = [...BUILTIN_STATUSES, "ready_for_qa", "ready_to_ship"]
+    const { css } = resolveStatusColors(statuses, {})
+    for (const s of statuses) {
+      expect(css[s]).toBe(DEFAULT_STATUS_HEX[s])
+    }
+  })
+
+  test("open's default follows the theme foreground, not a baked #ffffff", () => {
+    // The bug this fixes: #ffffff tinted 20% over a white card is white —
+    // contrast 1.00, an invisible badge in every light theme.
+    const dark = resolveStatusColors(["open"], {}, [], { foreground: "#f4f4f5" })
+    const light = resolveStatusColors(["open"], {}, [], { foreground: "#0a0a0a" })
+    expect(dark.css.open).toBe("#f4f4f5")
+    expect(light.css.open).toBe("#0a0a0a")
+    // Absent/garbage foreground falls back to the dark literal.
+    expect(resolveStatusColors(["open"], {}, []).css.open).toBe("#ffffff")
+    expect(resolveStatusColors(["open"], {}, [], { foreground: "nope" }).css.open).toBe("#ffffff")
   })
 
   test("a chosen color applies; a generated default applies to other customs", () => {
@@ -122,12 +147,14 @@ describe("resolveStatusColors", () => {
     expect(display.in_progress).toBe(DEFAULT_STATUS_HEX.in_progress)
   })
 
-  test("bd built-ins beyond the five (pinned, hooked on bd 1.3) are built-ins: no CSS, today's blue", () => {
+  test("bd built-ins beyond the five (pinned, hooked on bd 1.3) are built-ins: today's blue", () => {
     // bd 1.3.1 lists pinned and hooked as built-ins; only status.custom is custom.
+    // They now emit CSS too (see the reversal above), still at FALLBACK_HEX,
+    // so they keep looking like the blue every surface fell back to.
     const statuses = [...BUILTIN_STATUSES, "pinned", "hooked", "waiting_on_nelson"]
     const { css, display } = resolveStatusColors(statuses, {}, ["waiting_on_nelson"])
-    expect(css.pinned).toBeUndefined()
-    expect(css.hooked).toBeUndefined()
+    expect(css.pinned).toBe("#3b82f6")
+    expect(css.hooked).toBe("#3b82f6")
     expect(display.pinned).toBe("#3b82f6")
     expect(css.waiting_on_nelson).toMatch(/^#[0-9a-f]{6}$/)
     // and a chosen color still applies to one
@@ -189,38 +216,63 @@ describe("buildStatusColorCss", () => {
 })
 
 describe("unchanged defaults (main @ 89cf7f18)", () => {
-  test("badge classes for built-ins and the two known customs are today's", () => {
-    expect(getStatusConfig("open").className).toBe("bg-white/10 text-white border-white/30")
+  // This block used to pin the literal palette classes, to prove the o3h
+  // status-colour work changed nothing about the look. The light-theme sweep
+  // changes it ON PURPOSE: those literals are dark-only, and the badge's
+  // actual colour now comes from the unlayered stylesheet. What is pinned
+  // here instead is that the PRE-STYLESHEET fallback is tokenised — no
+  // palette literal may come back, or a light theme shows amber-on-white
+  // during the window before the custom-status list loads.
+  test("badge fallback classes are tokenised, with no palette literal left", () => {
+    expect(getStatusConfig("open").className).toBe(
+      "bg-foreground/10 text-foreground border-foreground/30",
+    )
     expect(getStatusConfig("in_progress").className).toBe(
-      "bg-amber-500/20 text-amber-400 border-amber-500/40",
+      "bg-warning/20 text-warning-text border-warning/40",
     )
     expect(getStatusConfig("closed").className).toBe(
-      "bg-zinc-600/20 text-zinc-400 border-zinc-500/40",
+      "bg-muted/40 text-muted-foreground border-border",
     )
-    expect(getStatusConfig("blocked").className).toBe(
-      "bg-blue-500/20 text-blue-400 border-blue-500/40",
-    )
-    expect(getStatusConfig("deferred").className).toBe(
-      "bg-blue-500/20 text-blue-400 border-blue-500/40",
-    )
+    // blocked / deferred have no config of their own and take the unknown
+    // fallback, which must NOT look like ready_for_qa's own entry.
+    expect(getStatusConfig("blocked").className).toBe("bg-info/10 text-info-text border-info/25")
+    expect(getStatusConfig("deferred").className).toBe("bg-info/10 text-info-text border-info/25")
     expect(getStatusConfig("ready_for_qa").className).toBe(
-      "bg-purple-500/20 text-purple-400 border-purple-500/40",
+      "bg-info/20 text-info-text border-info/40",
     )
+
+    const PALETTE =
+      /-(slate|zinc|gray|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/
+    for (const s of ["open", "in_progress", "closed", "blocked", "ready_for_qa", "nonesuch"]) {
+      expect(getStatusConfig(s).className).not.toMatch(PALETTE)
+    }
   })
 
-  test("detail-panel classes for built-ins are today's", () => {
+  // Same reversal as the badge classes above: the real colour comes from the
+  // stylesheet's "text" and "dot" roles, so what is pinned is that the
+  // fallback is tokenised.
+  test("detail-panel fallback classes are tokenised", () => {
     expect(getStatusDisplayConfig("open")).toMatchObject({
-      colorClass: "text-white",
-      dotClass: "bg-white",
+      colorClass: "text-foreground",
+      dotClass: "bg-foreground",
     })
     expect(getStatusDisplayConfig("in_progress")).toMatchObject({
-      colorClass: "text-amber-400",
-      dotClass: "bg-amber-500",
+      colorClass: "text-warning-text",
+      dotClass: "bg-warning",
     })
+    // blocked has no config of its own and takes the fallback.
     expect(getStatusDisplayConfig("blocked")).toMatchObject({
-      colorClass: "text-cyan-400",
-      dotClass: "bg-cyan-500",
+      colorClass: "text-info-text",
+      dotClass: "bg-info",
     })
+
+    const PALETTE =
+      /-(slate|zinc|gray|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/
+    for (const s of ["open", "in_progress", "closed", "ready_to_ship", "nonesuch"]) {
+      const c = getStatusDisplayConfig(s)
+      expect(c.colorClass).not.toMatch(PALETTE)
+      expect(c.dotClass).not.toMatch(PALETTE)
+    }
   })
 })
 
@@ -235,3 +287,163 @@ function mix(a: string, b: string, t: number): string {
     )
     .join("")}`
 }
+
+describe("buildPriorityColorCss", () => {
+  const DARK = "#27272a"
+  const LIGHT = "#ffffff"
+
+  test("emits a rule set for all five priorities", () => {
+    const css = buildPriorityColorCss(DARK)
+    for (const p of ["critical", "high", "medium", "low", "backlog"]) {
+      expect(css).toContain(`[data-priority="${p}"][data-priority-role="badge"]`)
+    }
+  })
+
+  test("keeps the alpha ramp the hardcoded classes carried", () => {
+    const css = buildPriorityColorCss(DARK)
+    // P0 filled at /20 (#ef4444), P2 at half that (#eab308).
+    expect(css).toContain("rgb(239 68 68 / 0.2)")
+    expect(css).toContain("rgb(234 179 8 / 0.1)")
+  })
+
+  // The reason priorities go through the machinery at all.
+  test("derives different badge text per surface", () => {
+    const dark = buildPriorityColorCss(DARK)
+    const light = buildPriorityColorCss(LIGHT)
+    expect(dark).not.toBe(light)
+    for (const hex of Object.values(DEFAULT_PRIORITY_HEX)) {
+      const d = readableTextColor(hex, DARK)
+      const l = readableTextColor(hex, LIGHT)
+      expect(dark).toContain(`color:${d}`)
+      expect(light).toContain(`color:${l}`)
+      expect(d).not.toBe(l)
+    }
+  })
+
+  test("the fill itself is appearance-independent, only the text moves", () => {
+    // Priorities are not user-configurable, so the hue is fixed; what a light
+    // theme needs is the text, not a different fill.
+    expect(buildPriorityColorCss(LIGHT)).toContain("rgb(239 68 68 / 0.2)")
+  })
+})
+
+describe("buildTypeColorCss", () => {
+  const DARK = "#27272a"
+
+  test("emits a rule set for every known bead type", () => {
+    const css = buildTypeColorCss(DARK)
+    for (const t of Object.keys(DEFAULT_TYPE_HEX)) {
+      expect(css).toContain(`[data-type="${t}"][data-type-role="badge"]`)
+    }
+  })
+
+  // typeColors tinted at /20 with a softer /30 edge; the edge comes out of
+  // 0.4 * 0.75, which is 0.30000000000000004 unrounded.
+  test("reproduces typeColors' /20 fill and /30 edge, with no float noise", () => {
+    const css = buildTypeColorCss(DARK)
+    expect(css).toContain("rgb(239 68 68 / 0.2)")
+    expect(css).toContain("rgb(239 68 68 / 0.3)")
+    expect(css).not.toContain("0.30000000000000004")
+    expect(css).not.toMatch(/\/ 0\.\d{5,}\)/)
+  })
+
+  // epic-tree's bead-type ICONS use the "text" role, not "badge": they are
+  // lucide svgs with stroke="currentColor", so a `color:` rule on the svg
+  // paints them. They carry no colour class of their own any more, so if this
+  // role went missing they would silently inherit the parent's colour.
+  test("emits a text-role rule for the types epic-tree draws as icons", () => {
+    const css = buildTypeColorCss(DARK)
+    for (const t of ["convoy", "molecule", "milestone", "epic"]) {
+      expect(DEFAULT_TYPE_HEX[t]).toBeDefined()
+      expect(css).toContain(`[data-type="${t}"][data-type-role="text"]{color:`)
+    }
+  })
+
+  test("derives different text per surface", () => {
+    const dark = buildTypeColorCss(DARK)
+    const light = buildTypeColorCss("#ffffff")
+    expect(dark).not.toBe(light)
+    for (const hex of Object.values(DEFAULT_TYPE_HEX)) {
+      expect(dark).toContain(`color:${readableTextColor(hex, DARK)}`)
+      expect(light).toContain(`color:${readableTextColor(hex, "#ffffff")}`)
+    }
+  })
+
+  test("no emitted alpha anywhere carries float noise", () => {
+    for (const css of [buildTypeColorCss(DARK), buildPriorityColorCss(DARK)]) {
+      expect(css).not.toMatch(/\/ 0\.\d{5,}\)/)
+    }
+  })
+})
+
+describe("rgb() theme tokens reach the hex-only maths as hex", () => {
+  // theme-validate.ts accepts a token written as rgb() on purpose. Every
+  // function here parses hex, and an unnormalised rgb() surface does NOT
+  // error — readableTextColor silently returns #000000, which is valid CSS
+  // and therefore invisible black text on a dark card with nothing logged.
+  test("toHexColor normalises rgb() and passes hex through", () => {
+    expect(toHexColor("rgb(39, 39, 42)")).toBe("#27272a")
+    expect(toHexColor("rgb(39 39 42)")).toBe("#27272a")
+    expect(toHexColor("rgba(39, 39, 42, 0.5)")).toBe("#27272a")
+    expect(toHexColor("#27272A")).toBe("#27272a")
+    expect(toHexColor("goldenrod")).toBeNull()
+  })
+
+  test("an rgb() surface derives the same text as its hex equivalent", () => {
+    const hex = readableTextColor("#f59e0b", "#27272a")
+    const viaRgb = readableTextColor("#f59e0b", toHexColor("rgb(39, 39, 42)") as string)
+    expect(viaRgb).toBe(hex)
+    // And the unnormalised form is the trap: not an error, just black.
+    expect(readableTextColor("#f59e0b", "rgb(39, 39, 42)")).toBe("#000000")
+  })
+})
+
+describe("chosen vs css", () => {
+  // Every status emits a stylesheet rule now, so `css` is always populated.
+  // `chosen` keeps the older "only what the user picked, or a generated
+  // custom default" meaning, which the molecule graph needs to know when to
+  // fall back to its own palette.
+  test("a default built-in is in css but NOT in chosen", () => {
+    const { css, chosen } = resolveStatusColors([...BUILTIN_STATUSES], {})
+    expect(css.in_progress).toBe(DEFAULT_STATUS_HEX.in_progress)
+    expect(chosen.in_progress).toBeUndefined()
+    expect(chosen).toEqual({})
+  })
+
+  test("a user-chosen colour appears in both", () => {
+    const { css, chosen } = resolveStatusColors([...BUILTIN_STATUSES], { open: "#ff0000" })
+    expect(css.open).toBe("#ff0000")
+    expect(chosen.open).toBe("#ff0000")
+  })
+
+  test("a custom status's generated default appears in chosen", () => {
+    const { chosen } = resolveStatusColors([...BUILTIN_STATUSES, "waiting"], {}, ["waiting"])
+    expect(chosen.waiting).toMatch(/^#[0-9a-f]{6}$/)
+    expect(chosen.open).toBeUndefined()
+  })
+})
+
+describe("pre-stylesheet badge fallbacks stay distinguishable", () => {
+  // The sweep collapsed several of these onto the same token triple:
+  // ready_for_qa became identical to the unknown-status fallback (they were
+  // purple vs blue), and `closed` to the "Unknown" config. Before the
+  // stylesheet mounts — status rules wait on the custom-status list — those
+  // badges were pixel-identical, so the fallback disagreed with
+  // DEFAULT_STATUS_HEX about what the status looks like.
+  test("no two status-space fallbacks share a className", () => {
+    const seen = new Map<string, string>()
+    for (const s of ["open", "in_progress", "closed", "ready_for_qa", "ready_to_ship", "nonesuch"]) {
+      const cls = getStatusConfig(s).className
+      expect(seen.has(cls)).toBe(false)
+      seen.set(cls, s)
+    }
+  })
+
+  test("every one is tokenised, with no palette literal", () => {
+    const PALETTE =
+      /-(slate|zinc|gray|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/
+    for (const s of ["open", "in_progress", "closed", "ready_for_qa", "ready_to_ship", "nonesuch"]) {
+      expect(getStatusConfig(s).className).not.toMatch(PALETTE)
+    }
+  })
+})

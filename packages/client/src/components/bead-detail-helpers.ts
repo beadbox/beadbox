@@ -45,15 +45,24 @@ export const initialFieldStates: Record<FieldName, FieldState> = {
 // Style constants
 // ---------------------------------------------------------------------------
 
+// colorClass / dotClass are the PRE-STYLESHEET fallback. The real colour
+// arrives from the status stylesheet via data-status + data-status-role
+// ("text" and "dot"), including any colour chosen in Settings > Workflow.
+// Tokens here rather than palette literals so the window before the
+// custom-status list loads is legible in a light theme too.
 const coreStatusConfig: Record<string, { label: string; colorClass: string; dotClass: string }> = {
-  open: { label: "Open", colorClass: "text-white", dotClass: "bg-white" },
-  in_progress: { label: "In Progress", colorClass: "text-amber-400", dotClass: "bg-amber-500" },
-  closed: { label: "Closed", colorClass: "text-zinc-500", dotClass: "bg-zinc-600" },
-  ready_for_qa: { label: "Ready for QA", colorClass: "text-purple-400", dotClass: "bg-purple-500" },
+  open: { label: "Open", colorClass: "text-foreground", dotClass: "bg-foreground" },
+  in_progress: {
+    label: "In Progress",
+    colorClass: "text-warning-text",
+    dotClass: "bg-warning",
+  },
+  closed: { label: "Closed", colorClass: "text-muted-foreground", dotClass: "bg-muted-foreground" },
+  ready_for_qa: { label: "Ready for QA", colorClass: "text-info-text", dotClass: "bg-info" },
   ready_to_ship: {
     label: "Ready to Ship",
-    colorClass: "text-emerald-400",
-    dotClass: "bg-emerald-500",
+    colorClass: "text-success-text",
+    dotClass: "bg-success",
   },
 }
 
@@ -67,28 +76,23 @@ export function getStatusDisplayConfig(status: string): {
   }
   return {
     label: status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-    colorClass: "text-cyan-400",
-    dotClass: "bg-cyan-500",
+    colorClass: "text-info-text",
+    dotClass: "bg-info",
   }
 }
 
-export const typeColors: Record<string, string> = {
-  bug: "bg-red-500/20 text-red-400 border-red-500/30",
-  task: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  feature: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  epic: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  chore: "bg-slate-500/20 text-slate-400 border-slate-500/30",
-  message: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
-  gate: "bg-green-500/20 text-green-400 border-green-500/30",
-  "merge-request": "bg-teal-500/20 text-teal-400 border-teal-500/30",
-  molecule: "bg-pink-500/20 text-pink-400 border-pink-500/30",
-  agent: "bg-violet-500/20 text-violet-400 border-violet-500/30",
-  role: "bg-sky-500/20 text-sky-400 border-sky-500/30",
-  rig: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  convoy: "bg-lime-500/20 text-lime-400 border-lime-500/30",
-  event: "bg-rose-500/20 text-rose-400 border-rose-500/30",
-}
+/**
+ * Base class for a bead-type badge; the per-type hue comes from the type
+ * stylesheet via data-type (DEFAULT_TYPE_HEX). This neutral is what a
+ * workspace-defined type with no entry of its own draws.
+ */
+export const TYPE_BADGE_CLASS = "bg-muted/40 text-muted-foreground border-border"
 
+/**
+ * One left-border colour per comment author, by hash. Identity colours, not
+ * semantic roles: do NOT collapse onto tone tokens — two authors would share
+ * a stripe. Literal on purpose; a saturated border reads on either surface.
+ */
 const authorColors = [
   "border-l-emerald-500",
   "border-l-blue-500",

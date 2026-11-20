@@ -134,7 +134,7 @@ describe("hint and overdue on each surface (beadbox-816g.2)", () => {
       const dueAt = new Date(Date.now() - 7 * 24 * HOUR)
       const styled = s.mount(dueAt)
       expectDueText(`Due: ${formatDueAt(dueAt)} · overdue`)
-      expect(styled.getAttribute("class")).toContain("text-red-400")
+      expect(styled.getAttribute("class")).toContain("text-destructive-text")
     })
   }
 })

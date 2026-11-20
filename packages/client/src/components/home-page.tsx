@@ -4,26 +4,11 @@ import { getStatusDisplayConfig } from "@/components/bead-detail-helpers"
 import { BeadDetailPanel } from "@/components/bead-detail-panel"
 import { BeadTable } from "@/components/bead-table"
 import { BeadTableBulkToolbar } from "@/components/bead-table-bulk-toolbar"
+import { DevConsole } from "@/components/dev-console"
 import { EpicTree } from "@/components/epic-tree"
 import { FilterBar, type Filters } from "@/components/filter-bar"
 import { GroupedStatusView } from "@/components/grouped-status-view"
 import { Header } from "@/components/header"
-import {
-  getAnalyticsEnabled,
-  getArchiveExpanded,
-  markAllBeadsRead,
-  markBeadRead,
-  setArchiveExpanded,
-} from "@/lib/local-storage"
-import { summarizeBulkStatus } from "@/lib/bulk-status-summary"
-import { safeCapture } from "@/lib/posthog-safe"
-import { isMoleculePresentation } from "@/lib/molecule-presentation"
-import { usePendingArchives, withoutPending } from "@/lib/pending-archive"
-import { rpc } from "@/lib/rpc"
-import { sortEpics } from "@/lib/sort"
-import { onSubscriptionChange } from "@/lib/subscribe"
-
-import { DevConsole } from "@/components/dev-console"
 import { useBdHealth, useWorkspaceGate } from "@/components/startup-gate"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { useAppHealth } from "@/hooks/use-app-health"
@@ -32,11 +17,25 @@ import { useBeadSelection } from "@/hooks/use-bead-selection"
 import { useDevConsole } from "@/hooks/use-dev-console"
 import { useDevConsoleTaps } from "@/hooks/use-dev-console-taps"
 import { useEpicNavigation } from "@/hooks/use-epic-navigation"
-import { usePreferences } from "@/hooks/use-preferences"
 import { useLabelChoiceForWorkspace } from "@/hooks/use-label-choice-for-workspace"
+import { usePreferences } from "@/hooks/use-preferences"
 import { useUpdateChecker } from "@/hooks/use-update-checker"
 import { useViewport } from "@/hooks/use-viewport"
 import { useWorkspaceLifecycle } from "@/hooks/use-workspace-lifecycle"
+import { summarizeBulkStatus } from "@/lib/bulk-status-summary"
+import {
+  getAnalyticsEnabled,
+  getArchiveExpanded,
+  markAllBeadsRead,
+  markBeadRead,
+  setArchiveExpanded,
+} from "@/lib/local-storage"
+import { isMoleculePresentation } from "@/lib/molecule-presentation"
+import { usePendingArchives, withoutPending } from "@/lib/pending-archive"
+import { safeCapture } from "@/lib/posthog-safe"
+import { rpc } from "@/lib/rpc"
+import { sortEpics } from "@/lib/sort"
+import { onSubscriptionChange } from "@/lib/subscribe"
 import type { Bead, Epic } from "@/lib/types"
 
 // Resolved at call time, not import time: an import-time binding captures
@@ -212,8 +211,6 @@ function BeadsEpicsViewer() {
     filters,
     sort,
     setSort,
-    theme,
-    handleThemeChange,
     zoomLevel,
     handleZoomChange,
     filterBarVisible,
@@ -366,11 +363,23 @@ function BeadsEpicsViewer() {
     ? (typesByWorkspace[currentWorkspace.id] ?? readTypeFilter(currentWorkspace.id))
     : "all"
   const typeOptions = useMemo(
-    () => [...new Set([...availableTypes, ...epics.map((epic) => epic.type), ...flattenEpicsToBeads(epics).map((bead) => bead.type)])],
+    () => [
+      ...new Set([
+        ...availableTypes,
+        ...epics.map((epic) => epic.type),
+        ...flattenEpicsToBeads(epics).map((bead) => bead.type),
+      ]),
+    ],
     [availableTypes, epics],
   )
   const filteredEpics = useMemo(
-    () => filterEpics(epics, { ...filters, type: selectedType, includeSystem }, rigNames, availableStatuses),
+    () =>
+      filterEpics(
+        epics,
+        { ...filters, type: selectedType, includeSystem },
+        rigNames,
+        availableStatuses,
+      ),
     [epics, filters, rigNames, selectedType, includeSystem, availableStatuses],
   )
   const sortedEpics = useMemo(() => sortEpics(filteredEpics, sort), [filteredEpics, sort])
@@ -813,7 +822,11 @@ function BeadsEpicsViewer() {
       if (ids.length === 0) return
       setBulkPending("status")
       try {
-        const result = await rpc.beads.updateBeadsStatus(ids, status, currentWorkspace?.databasePath)
+        const result = await rpc.beads.updateBeadsStatus(
+          ids,
+          status,
+          currentWorkspace?.databasePath,
+        )
         const summary = summarizeBulkStatus(result.results, getStatusDisplayConfig(status).label)
         if (summary.ok) {
           toast.success(summary.title)
@@ -1030,15 +1043,15 @@ function BeadsEpicsViewer() {
       <IncompatibilityBanner bdCheck={bdCheck} onOpenSettings={handleOpenSettingsToHelp} />
 
       {flockBanner && (
-        <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2">
+        <div className="bg-warning/15 border-b border-warning/30 px-4 py-2">
           <div className="flex items-center justify-between max-w-screen-xl mx-auto">
-            <div className="flex items-center gap-2 text-amber-400">
+            <div className="flex items-center gap-2 text-warning-text">
               <RefreshCw className="h-3.5 w-3.5 animate-spin shrink-0" />
               <span className="text-sm">Workspace busy, data may be outdated</span>
             </div>
             <button
               onClick={() => setFlockBanner(false)}
-              className="text-amber-400/70 hover:text-amber-300 text-xs px-2 py-1 rounded hover:bg-amber-500/20 transition-colors"
+              className="text-warning-text/70 hover:text-warning-text text-xs px-2 py-1 rounded hover:bg-warning/20 transition-colors"
             >
               Dismiss
             </button>
@@ -1051,25 +1064,36 @@ function BeadsEpicsViewer() {
         style={devConsole.open ? { marginBottom: devConsole.height } : undefined}
       >
         {typeCatalogError && (
-          <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-            <span>Could not load issue types: {typeCatalogError}. Type changes are unavailable.</span>
+          <div
+            role="alert"
+            className="mb-3 flex items-center justify-between gap-3 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-text"
+          >
+            <span>
+              Could not load issue types: {typeCatalogError}. Type changes are unavailable.
+            </span>
             <button
               type="button"
               onClick={retryAvailableTypes}
               disabled={typeCatalogRetrying}
-              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-60"
+              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-warning/20 disabled:cursor-wait disabled:opacity-60"
             >
               {typeCatalogRetrying ? "Retrying…" : "Retry"}
             </button>
           </div>
         )}
         {blocksDegraded && blocksDegraded.dbPath === currentWorkspace?.databasePath && (
-          <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-            <span>Blocked-by markers are unavailable: {blocksDegraded.message}. The tree does not show what is blocked.</span>
+          <div
+            role="alert"
+            className="mb-3 flex items-center justify-between gap-3 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning-text"
+          >
+            <span>
+              Blocked-by markers are unavailable: {blocksDegraded.message}. The tree does not show
+              what is blocked.
+            </span>
             <button
               type="button"
               onClick={() => setBlocksRetry((n) => n + 1)}
-              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-amber-500/20"
+              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-warning/20"
             >
               Retry
             </button>
@@ -1089,7 +1113,11 @@ function BeadsEpicsViewer() {
               selectedType={selectedType}
               onTypeChange={(type) => {
                 if (!currentWorkspace) return
-                try { localStorage.setItem(`beadbox:issue-type:${currentWorkspace.id}`, type) } catch { /* storage may be unavailable */ }
+                try {
+                  localStorage.setItem(`beadbox:issue-type:${currentWorkspace.id}`, type)
+                } catch {
+                  /* storage may be unavailable */
+                }
                 setTypesByWorkspace((current) => ({ ...current, [currentWorkspace.id]: type }))
               }}
               includeSystem={includeSystem}
@@ -1425,8 +1453,6 @@ function BeadsEpicsViewer() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        theme={theme}
-        onThemeChange={handleThemeChange}
         zoomLevel={zoomLevel}
         onZoomChange={handleZoomChange}
         databasePath={currentWorkspace?.databasePath}
@@ -1472,7 +1498,7 @@ function BeadsEpicsViewer() {
             <AlertDialogAction
               autoFocus
               disabled={isDeleting}
-              className="bg-red-600 hover:bg-red-700 text-white"
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
               onClick={(e) => {
                 e.preventDefault()
                 if (deleteConfirmId) {
@@ -1536,7 +1562,7 @@ function BeadsEpicsViewer() {
               {epicCloseConfirm?.action === "close" ? "Close" : "Archive"} epic only
             </AlertDialogAction>
             <AlertDialogAction
-              className="bg-amber-600 hover:bg-amber-700"
+              className="bg-warning hover:bg-warning/90"
               onClick={handleEpicCloseWithChildren}
             >
               {epicCloseConfirm?.action === "close" ? "Close" : "Archive"} children too

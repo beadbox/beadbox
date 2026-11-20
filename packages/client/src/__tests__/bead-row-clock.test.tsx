@@ -34,7 +34,7 @@ test("review: a row that passes its due time shows overdue on the next equal tre
   expect(icon()).toContain("text-muted-foreground/50")
   setSystemTime(new Date(start.getTime() + 5 * 60_000))
   view.rerender(ui({ ...bead, dueAt: new Date(bead.dueAt as Date) }))
-  expect(icon()).toContain("text-red-400")
+  expect(icon()).toContain("text-destructive-text")
 })
 
 test("gate deadline text advances on an equal tree reply", () => {

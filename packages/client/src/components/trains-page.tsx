@@ -8,8 +8,8 @@ import { useUpdateChecker } from "../hooks/use-update-checker"
 import { useHasWaiting } from "../hooks/use-waiting-gates"
 import { setSelectedBead as persistSelectedBead } from "../lib/local-storage"
 import { rpc } from "../lib/rpc"
-import { tryViewSwitchShortcut } from "../lib/view-switch-keys"
 import type { Workspace } from "../lib/types"
+import { tryViewSwitchShortcut } from "../lib/view-switch-keys"
 import { getWorkspaceCookie } from "../lib/workspace-cookie"
 import { Header } from "./header"
 import { SettingsDialog } from "./settings-dialog"
@@ -187,13 +187,25 @@ function TrainsBody({
     )
   }
   if (trains.length === 0) {
-    return <p className="text-muted-foreground">No .beadtrain files in this workspace .beads folder.</p>
+    return (
+      <p className="text-muted-foreground">No .beadtrain files in this workspace .beads folder.</p>
+    )
   }
   return (
     <div className="grid gap-6 md:grid-cols-[minmax(16rem,22rem)_1fr]">
-      <TrainList trains={trains} ready={ready} selectedName={selected?.name ?? null} onSelect={onSelect} />
+      <TrainList
+        trains={trains}
+        ready={ready}
+        selectedName={selected?.name ?? null}
+        onSelect={onSelect}
+      />
       {selected ? (
-        <TrainDetail train={selected} readyRows={readyForSelected} couplers={couplers} onOpenBead={onOpenBead} />
+        <TrainDetail
+          train={selected}
+          readyRows={readyForSelected}
+          couplers={couplers}
+          onOpenBead={onOpenBead}
+        />
       ) : null}
     </div>
   )
@@ -322,8 +334,6 @@ export function TrainsPage() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        theme={prefs.theme}
-        onThemeChange={prefs.handleThemeChange}
         zoomLevel={prefs.zoomLevel}
         onZoomChange={prefs.handleZoomChange}
         databasePath={dbPath}

@@ -15,7 +15,7 @@
       "route": "/all-projects",
       "waitFor": "[data-project-id][data-bead-id] [data-status=\"open\"][data-status-role=\"badge\"]",
       "assertions": [
-        { "selector": "html.theme-gray", "minCount": 1 },
+        { "selector": "html.dark", "minCount": 1 },
         {
           "selector": "[data-project-id=\"${WS_A}\"][data-bead-id] [data-status=\"open\"][data-status-role=\"badge\"]",
           "style": { "property": "background-color", "equals": "rgba(255, 0, 0, 0.2)" }

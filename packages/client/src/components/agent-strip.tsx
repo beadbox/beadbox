@@ -15,9 +15,9 @@ interface AgentStripProps {
 }
 
 const STATUS_DOT_COLORS: Record<AgentState["status"], string> = {
-  active: "bg-emerald-500",
-  quiet: "bg-amber-500",
-  silent: "bg-red-500",
+  active: "bg-success",
+  quiet: "bg-warning",
+  silent: "bg-destructive",
 }
 
 function truncate(text: string, max: number): string {
@@ -52,15 +52,15 @@ function AgentsLabel() {
           </p>
           <div className="space-y-1 text-muted-foreground">
             <div className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+              <span className="h-2 w-2 rounded-full bg-success shrink-0" />
               <span>Active in the last 5 minutes</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+              <span className="h-2 w-2 rounded-full bg-warning shrink-0" />
               <span>Quiet (5 to 30 minutes)</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" />
+              <span className="h-2 w-2 rounded-full bg-destructive shrink-0" />
               <span>Silent (30+ minutes)</span>
             </div>
           </div>
@@ -133,7 +133,7 @@ export function AgentStrip({
                 "min-w-[160px] max-w-[200px]",
                 "bg-card hover:bg-accent/50",
                 isSelected && "ring-2 ring-primary border-primary",
-                focusedIndex === idx && !isSelected && "ring-2 ring-blue-400/60 border-blue-400/60",
+                focusedIndex === idx && !isSelected && "ring-2 ring-info/60 border-info/60",
                 isDimmed && "opacity-50",
               )}
             >

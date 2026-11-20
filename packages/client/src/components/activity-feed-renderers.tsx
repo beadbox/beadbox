@@ -7,16 +7,16 @@ export function EventIcon({ event }: { event: ActivityEvent }) {
   const iconClass = "h-3.5 w-3.5 shrink-0"
   switch (event.type) {
     case "create":
-      return <Plus className={cn(iconClass, "text-emerald-400")} />
+      return <Plus className={cn(iconClass, "text-success-text")} />
     case "status":
-      return <ArrowRight className={cn(iconClass, "text-blue-400")} />
+      return <ArrowRight className={cn(iconClass, "text-info-text")} />
     case "comment":
-      return <MessageSquare className={cn(iconClass, "text-purple-400")} />
+      return <MessageSquare className={cn(iconClass, "text-primary-text")} />
     case "delete":
-      return <Trash2 className={cn(iconClass, "text-red-400")} />
+      return <Trash2 className={cn(iconClass, "text-destructive-text")} />
     case "update":
     default:
-      return <Pencil className={cn(iconClass, "text-zinc-400")} />
+      return <Pencil className={cn(iconClass, "text-muted-foreground")} />
   }
 }
 
@@ -28,7 +28,7 @@ export function getActionSummary(
   const idClass = cn(
     "font-mono text-xs",
     navigable
-      ? "text-blue-400/80 group-hover:text-blue-400 group-hover:underline"
+      ? "text-info-text/80 group-hover:text-info-text group-hover:underline"
       : "text-muted-foreground",
   )
 

@@ -2,13 +2,11 @@
 
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { safeCapture } from "../lib/posthog-safe"
 import {
   getAnalyticsEnabled,
   getFilterBarVisible,
   getFiltersPreference,
   getSortPreference,
-  getThemePreference,
   getUpdateCheckEnabled,
   getUpdateCheckFrequency,
   getVimNavigationEnabled,
@@ -17,18 +15,26 @@ import {
   setZoomLevel as persistZoomLevel,
   setFiltersPreference,
   setSortPreference,
-  setThemePreference,
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeVariant,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
-import { applyThemeClass } from "../lib/theme"
+import { safeCapture } from "../lib/posthog-safe"
 import type { Filters, SortOption } from "../lib/types"
 
 export function usePreferences() {
-  const [theme, setTheme] = useState<ThemeVariant>("gray")
+  // The theme preference is a single observable store (local-storage.ts),
+  // not local state here —
+  // see use-theme-preference.ts for the subscription-only hook and
+  // use-theme.ts for the hook that owns the apply-to-<html> effect. This
+  // keeps usePreferences's independent call sites in sync with any change
+  // made through the store, including from use-theme.ts itself.
+  //
+  // The settings dialog now
+  // reads/writes the two-slot store directly via useThemePreference(), so
+  // usePreferences no longer derives or exposes a `theme`/`handleThemeChange`
+  // pair for it.
   const [zoomLevel, setZoomLevelState] = useState(100)
   const [isTauri, setIsTauri] = useState(false)
   const isTauriRef = useRef(false)
@@ -126,9 +132,12 @@ export function usePreferences() {
   // Vim navigation toggle
   const [vimEnabled, setVimEnabledState] = useState(true)
 
-  // Load theme, zoom, vim navigation, and update preferences on mount
+  // Load zoom, vim navigation, and update preferences on mount. Theme is
+  // not hydrated here at all: usePreferences no longer derives or exposes
+  // theme state — a component that needs it calls use-theme-preference.ts's
+  // useThemePreference() directly, which owns its own
+  // useSyncExternalStore subscription to local-storage.ts's getThemePrefs.
   useEffect(() => {
-    setTheme(getThemePreference())
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
     setUpdateCheckFrequencyState(getUpdateCheckFrequency())
@@ -141,22 +150,11 @@ export function usePreferences() {
     }
   }, [])
 
-  // Apply theme classes to <html>
-  useEffect(() => {
-    const el = document.documentElement
-    applyThemeClass(el, theme)
-  }, [theme])
-
   // Apply zoom level to document (Tauri only)
   useEffect(() => {
     if (!isTauriRef.current) return
     document.documentElement.style.zoom = `${zoomLevel}%`
   }, [zoomLevel])
-
-  const handleThemeChange = useCallback((next: ThemeVariant) => {
-    setTheme(next)
-    setThemePreference(next)
-  }, [])
 
   const handleZoomChange = useCallback((level: number) => {
     const clamped = Math.max(50, Math.min(200, level))
@@ -184,8 +182,6 @@ export function usePreferences() {
     setFilters,
     sort,
     setSort,
-    theme,
-    handleThemeChange,
     zoomLevel,
     handleZoomChange,
     filterBarVisible,

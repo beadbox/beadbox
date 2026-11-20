@@ -152,11 +152,11 @@ export function MetadataControls({
                 disabled={fieldStates.priority.isSaving}
                 className={cn(
                   "h-auto min-h-[44px] md:min-h-0 p-0 border-0 bg-transparent dark:bg-transparent dark:hover:bg-transparent shadow-none rounded-none w-auto gap-1 text-[13px]",
-                  priority === "critical" && "text-red-400",
-                  priority === "high" && "text-orange-400",
-                  priority === "medium" && "text-yellow-400",
-                  priority === "low" && "text-slate-400",
-                  priority === "backlog" && "text-zinc-500",
+                  priority === "critical" && "text-destructive-text",
+                  priority === "high" && "text-warning-text",
+                  priority === "medium" && "text-warning-text",
+                  priority === "low" && "text-muted-foreground",
+                  priority === "backlog" && "text-muted-foreground",
                   fieldStates.priority.hasError && "ring-1 ring-destructive",
                 )}
               >
@@ -165,31 +165,31 @@ export function MetadataControls({
               <SelectContent>
                 <SelectItem value="critical">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-destructive" />
                     P0 - Critical
                   </span>
                 </SelectItem>
                 <SelectItem value="high">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-warning" />
                     P1 - High
                   </span>
                 </SelectItem>
                 <SelectItem value="medium">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-warning" />
                     P2 - Medium
                   </span>
                 </SelectItem>
                 <SelectItem value="low">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
                     P3 - Low
                   </span>
                 </SelectItem>
                 <SelectItem value="backlog">
                   <span className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
                     P4 - Backlog
                   </span>
                 </SelectItem>
@@ -291,7 +291,7 @@ export function MetadataControls({
                 <button
                   onClick={() => onRemoveLabel(label)}
                   className={cn(
-                    "ml-0.5 hover:text-red-400",
+                    "ml-0.5 hover:text-destructive-text",
                     isMobile && "min-h-[44px] min-w-[44px] flex items-center justify-center -mr-3",
                   )}
                 >

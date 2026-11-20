@@ -1,16 +1,45 @@
 import type * as DiagnosticsHandlers from "@beadbox/server/handlers"
-import { AlertCircle, AlertTriangle, ArrowUpCircle, Check, CheckCircle2, ChevronDown, CircleHelp, CircleX, Copy, ExternalLink, FolderOpen, GitBranch, Keyboard, Loader2, Minus, Plus, RefreshCw, RotateCcw, Settings, Stethoscope, Trash2, X } from "lucide-react"
+import type { Appearance } from "@beadbox/server/theme-tokens"
+import { QueryClientProvider, useQuery } from "@tanstack/react-query"
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowUpCircle,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  CircleHelp,
+  CircleX,
+  Copy,
+  ExternalLink,
+  FolderOpen,
+  GitBranch,
+  Keyboard,
+  Loader2,
+  Minus,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Settings,
+  Stethoscope,
+  Trash2,
+  X,
+} from "lucide-react"
 import posthog from "posthog-js"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { safeCapture } from "../lib/posthog-safe"
+import { useThemePreference } from "../hooks/use-theme-preference"
 import {
-  AVAILABLE_THEMES,
-  effectiveTheme,
-  type ThemeVariant,
+  clearCache,
+  getAnalyticsEnabled,
+  resolveThemeId,
+  setAnalyticsEnabled,
+  type ThemeId,
+  type ThemeMode,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
-import { clearCache, getAnalyticsEnabled, setAnalyticsEnabled } from "../lib/local-storage"
+import { safeCapture } from "../lib/posthog-safe"
+import { queryClient } from "../lib/query-client"
 // P3.1 source-divergence:
 //   - actions/system { openInFileManager, getLogDirectory } → rpc.system.*
 //   - actions/diagnostics { runDiagnostics } → rpc.diagnostics.runDiagnostics
@@ -18,6 +47,8 @@ import { clearCache, getAnalyticsEnabled, setAnalyticsEnabled } from "../lib/loc
 //     (single source of truth; rpc surface mirrors handler exports)
 //   - dynamic import("@/actions/epics") for getCacheStats → rpc.epics.getCacheStats
 import { rpc } from "../lib/rpc"
+import { isThemingAvailable } from "../lib/theme-engine"
+import { BUILTIN_ENTRIES, listThemes, type ThemeEntry, themesQueryKey } from "../lib/theme-source"
 import type { UpdateInfo } from "../lib/update-checker"
 import { cn } from "../lib/utils"
 import { BdPathSettings } from "./bd-path-settings"
@@ -50,59 +81,444 @@ const tabs: { id: SettingsTab; label: string; icon: typeof Settings }[] = [
 const version = import.meta.env.VITE_APP_VERSION ?? "0.0.0"
 const buildId = import.meta.env.VITE_BUILD_ID
 
-const THEME_OPTIONS: {
-  id: ThemeVariant
-  label: string
-  colors: {
-    bg: string
-    card: string
-    primary: string
-    secondary: string
-    muted: string
-    fg: string
+/**
+ * `themes` is never actually empty — the component falls back to the two
+ * built-ins until the query resolves — but the empty-array guard stays as
+ * defense against a future caller that does not supply that fallback.
+ */
+function nextSelectableThemeIndex(
+  themes: readonly ThemeEntry[],
+  from: number,
+  dir: 1 | -1,
+): number {
+  const len = themes.length
+  if (len === 0) return 0
+  let idx = from
+  for (let step = 0; step < len; step++) {
+    idx = (idx + dir + len) % len
+    if (!themes[idx]?.error) return idx
   }
-}[] = [
-  {
-    id: "blue",
-    label: "Blue",
-    colors: {
-      bg: "#0f172a",
-      card: "#1e293b",
-      primary: "#22c55e",
-      secondary: "#334155",
-      muted: "#94a3b8",
-      fg: "#f1f5f9",
-    },
-  },
-  {
-    id: "gray",
-    label: "Gray",
-    colors: {
-      bg: "#18181b",
-      card: "#27272a",
-      primary: "#22c55e",
-      secondary: "#3f3f46",
-      muted: "#a1a1aa",
-      fg: "#f4f4f5",
-    },
-  },
-  {
-    id: "green",
-    label: "Green",
-    colors: {
-      bg: "#0c1a14",
-      card: "#14291e",
-      primary: "#34d399",
-      secondary: "#1e3a2b",
-      muted: "#6ee7b7",
-      fg: "#ecfdf5",
-    },
-  },
-]
+  return from
+}
 
-// beadbox-knr: only themes that render are offered (Gray, until beadbox-o37
-// brings Blue and Green back); their definitions above stay for o37.
-const VISIBLE_THEME_OPTIONS = THEME_OPTIONS.filter((t) => AVAILABLE_THEMES.includes(t.id))
+/**
+ * A signature for "which ids, in which order" — module-level so it's a
+ * stable reference across renders (an inline arrow inside the component
+ * would be a new function every render, making it useless as an effect
+ * dependency). Used to tell a themesQueryKey refetch that only changed
+ * preview colours or error text (same ids — skip the focus resync) apart
+ * from one that added/removed a theme (different ids — resync is correct).
+ */
+function themeIds(list: readonly ThemeEntry[]): string {
+  return list.map((t) => t.id).join("\0")
+}
+
+/**
+ * One appearance slot's theme picker (dark or light). Each grid owns its
+ * own roving tabIndex and its own prevSyncRef below, so arrow keys stay
+ * within one slot and the two grids are independent Tab stops — sharing
+ * either between the two grids would let a change in one slot's selection
+ * or id list resync the other slot's focus too.
+ *
+ * `open` is threaded in (rather than read from context) so this grid's
+ * own focus-sync effect can tell a fresh dialog-open from an in-place
+ * refetch, exactly as the single-grid version did before this component
+ * was extracted.
+ */
+function ThemeSlotGrid({
+  label,
+  appearance,
+  themes,
+  selectedId,
+  onSelect,
+  open,
+}: {
+  /** The grid's full visible caption AND accessible name, e.g. "Dark theme". */
+  label: string
+  appearance: Appearance
+  themes: readonly ThemeEntry[]
+  selectedId: ThemeId
+  onSelect: (id: ThemeId) => void
+  open: boolean
+}) {
+  const [focusedIndex, setFocusedIndex] = useState(0)
+  const cardRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  // Sync focused index to the current selection — on the open transition,
+  // when `selectedId` itself changes (a deliberate selection, by click or
+  // by keyboard), or when the SET of this grid's own theme ids changes
+  // (the one-time placeholder-to-resolved transition on open —
+  // BUILTIN_ENTRIES only, then the full list — and a theme file being
+  // added/removed shift indices under the user either way, so
+  // re-resolving is correct there too). Deliberately NOT keyed on
+  // `themes` array identity alone: task 13 made the list refetch while
+  // the dialog stays open (hot reload invalidates themesQueryKey so a
+  // changed file's rejection reason, or updated preview colours, reach
+  // the picker — see task-13-addendum), and that refetch can produce a
+  // new array with the SAME ids. Resyncing on every such identity change
+  // would reset focusedIndex and yank the user's arrow-key focus out from
+  // under them mid-session (task-12-addendum deferred this exact tradeoff
+  // to task 13) — so an ids-unchanged refetch is the one case that must
+  // NOT resync.
+  const prevSyncRef = useRef<{ open: boolean; selectedId: ThemeId; ids: string }>({
+    open: false,
+    selectedId,
+    ids: themeIds(themes),
+  })
+  useEffect(() => {
+    const ids = themeIds(themes)
+    const openedNow = open && !prevSyncRef.current.open
+    const selectedChanged = selectedId !== prevSyncRef.current.selectedId
+    const idsChanged = ids !== prevSyncRef.current.ids
+    if (open && (openedNow || selectedChanged || idsChanged)) {
+      const resolved = resolveThemeId(
+        selectedId,
+        themes.map((o) => o.id),
+        appearance,
+      )
+      let idx = themes.findIndex((t) => t.id === resolved)
+      // A roving tabIndex on a disabled card is inert — disabled buttons are
+      // excluded from the tab order regardless of tabIndex — which would leave
+      // the radiogroup with no Tab stop at all. Fall back to the first
+      // selectable entry.
+      if (idx < 0 || themes[idx]?.error) idx = themes.findIndex((t) => !t.error)
+      setFocusedIndex(idx >= 0 ? idx : 0)
+    }
+    prevSyncRef.current = { open, selectedId, ids }
+  }, [open, selectedId, themes, appearance])
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (themes.length === 0) return
+      let nextIndex = focusedIndex
+
+      switch (e.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+          e.preventDefault()
+          // Invalid (errored) entries are shown but are not a choice, so
+          // arrow navigation skips over them rather than landing focus on a
+          // card that cannot be selected.
+          nextIndex = nextSelectableThemeIndex(themes, focusedIndex, 1)
+          break
+        case "ArrowLeft":
+        case "ArrowUp":
+          e.preventDefault()
+          nextIndex = nextSelectableThemeIndex(themes, focusedIndex, -1)
+          break
+        case "Enter":
+        case " ": {
+          e.preventDefault()
+          const target = themes[focusedIndex]
+          // Belt-and-suspenders: arrow nav already skips errored entries, so
+          // focus should never land here, but a disabled/unselectable entry
+          // must never fire onSelect or the analytics capture.
+          if (!target || target.error) return
+          if (getAnalyticsEnabled()) {
+            safeCapture("app_setting_changed", {
+              setting: "theme",
+              old_value: selectedId,
+              new_value: target.id,
+            })
+          }
+          onSelect(target.id)
+          return
+        }
+        default:
+          return
+      }
+
+      if (nextIndex === focusedIndex) return
+      setFocusedIndex(nextIndex)
+      cardRefs.current[nextIndex]?.focus()
+    },
+    [focusedIndex, onSelect, selectedId, themes],
+  )
+
+  return (
+    <div className="mb-6">
+      <p className="text-xs font-medium text-muted-foreground mb-2">{label}</p>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="grid grid-cols-3 gap-3 max-w-lg"
+        onKeyDown={handleKeyDown}
+      >
+        {themes.map((t, i) => {
+          const selected =
+            !t.error &&
+            resolveThemeId(
+              selectedId,
+              themes.map((o) => o.id),
+              appearance,
+            ) === t.id
+          return (
+            <button
+              key={t.id}
+              ref={(el) => {
+                cardRefs.current[i] = el
+              }}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-disabled={t.error ? true : undefined}
+              aria-label={`${t.name} theme`}
+              disabled={Boolean(t.error)}
+              tabIndex={focusedIndex === i ? 0 : -1}
+              onClick={() => {
+                // disabled already blocks the native click, but an
+                // invalid entry must never select or capture —
+                // belt and suspenders.
+                if (t.error) return
+                if (getAnalyticsEnabled()) {
+                  safeCapture("app_setting_changed", {
+                    setting: "theme",
+                    old_value: selectedId,
+                    new_value: t.id,
+                  })
+                }
+                onSelect(t.id)
+              }}
+              className={cn(
+                "relative rounded-lg border-2 p-1 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                t.error && "cursor-not-allowed border-transparent opacity-60",
+                !t.error &&
+                  (selected
+                    ? "cursor-pointer border-primary ring-1 ring-primary/30"
+                    : "cursor-pointer border-transparent hover:border-muted-foreground/30"),
+              )}
+            >
+              {t.preview ? (
+                <div
+                  className="rounded-md overflow-hidden aspect-[4/3]"
+                  style={{ backgroundColor: t.preview.background }}
+                >
+                  {/* Header bar */}
+                  <div
+                    className="flex items-center gap-1 px-2 py-1.5"
+                    style={{ borderBottom: `1px solid ${t.preview.secondary}` }}
+                  >
+                    <div className="flex gap-0.5">
+                      <div
+                        className="w-1.5 h-1.5 rounded-full"
+                        style={{ backgroundColor: t.preview.primary, opacity: 0.8 }}
+                      />
+                      <div
+                        className="w-1.5 h-1.5 rounded-full"
+                        style={{ backgroundColor: t.preview.primary, opacity: 0.5 }}
+                      />
+                      <div
+                        className="w-1.5 h-1.5 rounded-full"
+                        style={{ backgroundColor: t.preview.primary, opacity: 0.3 }}
+                      />
+                    </div>
+                    <div
+                      className="h-1.5 w-8 rounded-sm ml-1"
+                      style={{
+                        backgroundColor: t.preview.mutedForeground,
+                        opacity: 0.4,
+                      }}
+                    />
+                  </div>
+                  {/* Content rows */}
+                  <div className="px-2 py-1.5 space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className="h-1.5 w-6 rounded-sm"
+                        style={{ backgroundColor: t.preview.primary, opacity: 0.7 }}
+                      />
+                      <div
+                        className="h-1.5 flex-1 rounded-sm"
+                        style={{
+                          backgroundColor: t.preview.mutedForeground,
+                          opacity: 0.3,
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className="h-1.5 w-6 rounded-sm"
+                        style={{ backgroundColor: t.preview.secondary }}
+                      />
+                      <div
+                        className="h-1.5 flex-1 rounded-sm"
+                        style={{
+                          backgroundColor: t.preview.mutedForeground,
+                          opacity: 0.2,
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className="h-1.5 w-6 rounded-sm"
+                        style={{ backgroundColor: t.preview.secondary }}
+                      />
+                      <div
+                        className="h-1.5 w-3/4 rounded-sm"
+                        style={{
+                          backgroundColor: t.preview.mutedForeground,
+                          opacity: 0.2,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                // Invalid theme: no colours to preview. Show why it
+                // failed instead of hiding the entry or rendering a
+                // broken mini-UI (task-12-addendum requirement).
+                <div className="rounded-md aspect-[4/3] border border-dashed border-destructive/40 p-2 flex items-center">
+                  <p className="text-[10px] leading-tight text-destructive">{t.error}</p>
+                </div>
+              )}
+              {/* Selected indicator */}
+              {selected && (
+                <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+                  <Check className="w-2.5 h-2.5 text-primary-foreground" />
+                </div>
+              )}
+              {/* Theme label */}
+              <div
+                className={cn(
+                  "text-xs text-center mt-2 pb-1 font-medium",
+                  selected ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {t.name}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+const MODE_OPTIONS = ["dark", "light", "system"] as const
+
+/**
+ * The appearance-mode radiogroup (dark / light / follow system). Same
+ * roving-tabindex pattern as ThemeSlotGrid above — exactly one button is a
+ * Tab stop, arrow keys move it, Enter/Space selects — but simpler: three
+ * fixed options are never invalid, so there is no skip-the-errored-card
+ * logic to port over.
+ */
+function AppearanceModeSelector({
+  mode,
+  setMode,
+  open,
+}: {
+  mode: ThemeMode
+  setMode: (m: ThemeMode) => void
+  open: boolean
+}) {
+  const [focusedIndex, setFocusedIndex] = useState(() => MODE_OPTIONS.indexOf(mode))
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([])
+
+  // Resync the tab stop to the current mode on dialog open or on a mode
+  // change made some other way (e.g. a future external setter) — mirrors
+  // ThemeSlotGrid's prevSyncRef, minus the ids/errors tracking it needs and
+  // this selector does not.
+  const prevSyncRef = useRef<{ open: boolean; mode: ThemeMode }>({ open: false, mode })
+  useEffect(() => {
+    const openedNow = open && !prevSyncRef.current.open
+    const modeChanged = mode !== prevSyncRef.current.mode
+    if (open && (openedNow || modeChanged)) {
+      setFocusedIndex(MODE_OPTIONS.indexOf(mode))
+    }
+    prevSyncRef.current = { open, mode }
+  }, [open, mode])
+
+  const select = useCallback(
+    (m: ThemeMode) => {
+      if (getAnalyticsEnabled()) {
+        safeCapture("app_setting_changed", {
+          setting: "theme_mode",
+          old_value: mode,
+          new_value: m,
+        })
+      }
+      setMode(m)
+    },
+    [mode, setMode],
+  )
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      let nextIndex = focusedIndex
+      switch (e.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+          e.preventDefault()
+          nextIndex = (focusedIndex + 1) % MODE_OPTIONS.length
+          break
+        case "ArrowLeft":
+        case "ArrowUp":
+          e.preventDefault()
+          nextIndex = (focusedIndex - 1 + MODE_OPTIONS.length) % MODE_OPTIONS.length
+          break
+        case "Home":
+          e.preventDefault()
+          nextIndex = 0
+          break
+        case "End":
+          e.preventDefault()
+          nextIndex = MODE_OPTIONS.length - 1
+          break
+        case "Enter":
+        case " ":
+          e.preventDefault()
+          select(MODE_OPTIONS[focusedIndex])
+          return
+        default:
+          return
+      }
+      setFocusedIndex(nextIndex)
+      buttonRefs.current[nextIndex]?.focus()
+    },
+    [focusedIndex, select],
+  )
+
+  return (
+    <div className="mb-6">
+      {/* Visible caption: without this,
+          nothing distinguishes this row (WHEN to render dark/light) from
+          the Dark/Light theme grids below it (WHICH theme per slot) except
+          an aria-label a sighted user never sees — reading the three
+          buttons as filtering the two grids below was the natural, wrong
+          conclusion. Accessible names on the buttons themselves (below)
+          are unchanged. */}
+      <p className="text-xs font-medium text-muted-foreground mb-2">Appearance mode</p>
+      <div
+        role="radiogroup"
+        aria-label="Appearance mode"
+        className="flex gap-2"
+        onKeyDown={handleKeyDown}
+      >
+        {MODE_OPTIONS.map((m, i) => (
+          <button
+            key={m}
+            ref={(el) => {
+              buttonRefs.current[i] = el
+            }}
+            type="button"
+            role="radio"
+            aria-checked={mode === m}
+            aria-label={m === "system" ? "Follow system appearance" : `${m} mode`}
+            tabIndex={focusedIndex === i ? 0 : -1}
+            onClick={() => select(m)}
+            className={cn(
+              "rounded-md border px-3 py-1.5 text-sm capitalize transition-colors",
+              mode === m ? "border-primary bg-primary/10" : "border-border hover:bg-accent",
+            )}
+          >
+            {m === "system" ? "System" : m}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 const FREQUENCY_OPTIONS: { value: UpdateCheckFrequency; label: string }[] = [
   { value: 1800000, label: "Every 30 minutes" },
@@ -114,8 +530,6 @@ const FREQUENCY_OPTIONS: { value: UpdateCheckFrequency; label: string }[] = [
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  theme: ThemeVariant
-  onThemeChange: (theme: ThemeVariant) => void
   zoomLevel: number
   onZoomChange: (level: number) => void
   databasePath?: string
@@ -139,11 +553,22 @@ interface SettingsDialogProps {
   onCustomStatusesChanged?: () => void
 }
 
-export function SettingsDialog({
+// Self-wraps with the app's shared QueryClient (bd-path-settings.tsx's
+// pattern) so the theme picker's useQuery works whether this dialog is
+// mounted under main.tsx's own provider or stand-alone, as in this
+// component's own tests. Nesting the same client is a no-op for a caller
+// that already has an ancestor provider.
+export function SettingsDialog(props: SettingsDialogProps) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <SettingsDialogContent {...props} />
+    </QueryClientProvider>
+  )
+}
+
+function SettingsDialogContent({
   open,
   onOpenChange,
-  theme,
-  onThemeChange,
   zoomLevel,
   onZoomChange,
   databasePath,
@@ -168,8 +593,26 @@ export function SettingsDialog({
     setIsTauri(!!(window as any).__TAURI_INTERNALS__)
   }, [])
   const [activeTab, setActiveTab] = useState<SettingsTab>("general")
-  const [focusedThemeIndex, setFocusedThemeIndex] = useState(0)
-  const themeCardRefs = useRef<(HTMLButtonElement | null)[]>([])
+  // Lazy-once: the probe is memoised in theme-engine.ts and must not run per
+  // render. Trap 1 (task-12-addendum): do NOT call useTheme() here — it runs
+  // the apply effect, and this dialog must not become a second applier.
+  const [themingAvailable] = useState(() => isThemingAvailable())
+  // Falling back to BUILTIN_ENTRIES (rather than []) while the query is
+  // pending keeps the two built-ins on screen, and keyboard nav sane, for
+  // the one tick before the full list — which also contains them — comes
+  // back from the sidecar.
+  const { data: themesData } = useQuery({ queryKey: themesQueryKey, queryFn: listThemes })
+  const themes: readonly ThemeEntry[] = themesData ?? BUILTIN_ENTRIES
+  const darkThemes = themes.filter((t) => t.appearance === "dark")
+  const lightThemes = themes.filter((t) => t.appearance === "light")
+  // A theme whose own appearance could not be recovered (final whole-plan
+  // review, Fix 2) — e.g. unparseable JSON — belongs in neither grid: filing
+  // it under "Dark" by default is exactly the bug that put a broken light
+  // theme's error under the wrong heading. Shown in its own section below
+  // instead, errored and unselectable (every entry here always has
+  // `.error` set).
+  const unresolvedAppearanceThemes = themes.filter((t) => t.appearance === null)
+  const { mode, darkThemeId, lightThemeId, setMode, setThemeForAppearance } = useThemePreference()
   const [analyticsEnabled, setAnalyticsEnabledState] = useState(true)
 
   // Track whether we just did a manual check (to show result feedback)
@@ -225,52 +668,6 @@ export function SettingsDialog({
       posthog.opt_out_capturing()
     }
   }, [analyticsEnabled])
-
-  // Sync focused index to current theme when dialog opens
-  useEffect(() => {
-    if (open) {
-      const idx = VISIBLE_THEME_OPTIONS.findIndex((t) => t.id === effectiveTheme(theme))
-      setFocusedThemeIndex(idx >= 0 ? idx : 0)
-    }
-  }, [open, theme])
-
-  const handleThemeKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      const len = VISIBLE_THEME_OPTIONS.length
-      let nextIndex = focusedThemeIndex
-
-      switch (e.key) {
-        case "ArrowRight":
-        case "ArrowDown":
-          e.preventDefault()
-          nextIndex = (focusedThemeIndex + 1) % len
-          break
-        case "ArrowLeft":
-        case "ArrowUp":
-          e.preventDefault()
-          nextIndex = (focusedThemeIndex - 1 + len) % len
-          break
-        case "Enter":
-        case " ":
-          e.preventDefault()
-          if (getAnalyticsEnabled()) {
-            safeCapture("app_setting_changed", {
-              setting: "theme",
-              old_value: theme,
-              new_value: VISIBLE_THEME_OPTIONS[focusedThemeIndex].id,
-            })
-          }
-          onThemeChange(VISIBLE_THEME_OPTIONS[focusedThemeIndex].id)
-          return
-        default:
-          return
-      }
-
-      setFocusedThemeIndex(nextIndex)
-      themeCardRefs.current[nextIndex]?.focus()
-    },
-    [focusedThemeIndex, onThemeChange, theme],
-  )
 
   const [appLogDir, setAppLogDir] = useState<string | null>(null)
 
@@ -358,125 +755,56 @@ export function SettingsDialog({
                 <div>
                   <h3 className="text-lg font-semibold mb-1">Theme</h3>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Choose your preferred color scheme
+                    Choose when to use light or dark appearance, and which theme to use for each.
                   </p>
-                  <div
-                    role="radiogroup"
-                    aria-label="Theme selection"
-                    className="grid grid-cols-3 gap-3 max-w-lg"
-                    onKeyDown={handleThemeKeyDown}
-                  >
-                    {VISIBLE_THEME_OPTIONS.map((opt, i) => {
-                      const selected = effectiveTheme(theme) === opt.id
-                      return (
-                        <button
-                          key={opt.id}
-                          ref={(el) => {
-                            themeCardRefs.current[i] = el
-                          }}
-                          role="radio"
-                          aria-checked={selected}
-                          aria-label={`${opt.label} theme`}
-                          tabIndex={focusedThemeIndex === i ? 0 : -1}
-                          onClick={() => {
-                            if (getAnalyticsEnabled()) {
-                              safeCapture("app_setting_changed", {
-                                setting: "theme",
-                                old_value: theme,
-                                new_value: opt.id,
-                              })
-                            }
-                            onThemeChange(opt.id)
-                          }}
-                          className={cn(
-                            "relative rounded-lg border-2 p-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                            selected
-                              ? "border-primary ring-1 ring-primary/30"
-                              : "border-transparent hover:border-muted-foreground/30",
-                          )}
-                        >
-                          {/* Mini UI preview */}
-                          <div
-                            className="rounded-md overflow-hidden aspect-[4/3]"
-                            style={{ backgroundColor: opt.colors.bg }}
-                          >
-                            {/* Header bar */}
-                            <div
-                              className="flex items-center gap-1 px-2 py-1.5"
-                              style={{ borderBottom: `1px solid ${opt.colors.secondary}` }}
-                            >
-                              <div className="flex gap-0.5">
-                                <div
-                                  className="w-1.5 h-1.5 rounded-full"
-                                  style={{ backgroundColor: opt.colors.primary, opacity: 0.8 }}
-                                />
-                                <div
-                                  className="w-1.5 h-1.5 rounded-full"
-                                  style={{ backgroundColor: opt.colors.primary, opacity: 0.5 }}
-                                />
-                                <div
-                                  className="w-1.5 h-1.5 rounded-full"
-                                  style={{ backgroundColor: opt.colors.primary, opacity: 0.3 }}
-                                />
-                              </div>
-                              <div
-                                className="h-1.5 w-8 rounded-sm ml-1"
-                                style={{ backgroundColor: opt.colors.muted, opacity: 0.4 }}
-                              />
-                            </div>
-                            {/* Content rows */}
-                            <div className="px-2 py-1.5 space-y-1">
-                              <div className="flex items-center gap-1.5">
-                                <div
-                                  className="h-1.5 w-6 rounded-sm"
-                                  style={{ backgroundColor: opt.colors.primary, opacity: 0.7 }}
-                                />
-                                <div
-                                  className="h-1.5 flex-1 rounded-sm"
-                                  style={{ backgroundColor: opt.colors.muted, opacity: 0.3 }}
-                                />
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <div
-                                  className="h-1.5 w-6 rounded-sm"
-                                  style={{ backgroundColor: opt.colors.secondary }}
-                                />
-                                <div
-                                  className="h-1.5 flex-1 rounded-sm"
-                                  style={{ backgroundColor: opt.colors.muted, opacity: 0.2 }}
-                                />
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <div
-                                  className="h-1.5 w-6 rounded-sm"
-                                  style={{ backgroundColor: opt.colors.secondary }}
-                                />
-                                <div
-                                  className="h-1.5 w-3/4 rounded-sm"
-                                  style={{ backgroundColor: opt.colors.muted, opacity: 0.2 }}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                          {/* Selected indicator */}
-                          {selected && (
-                            <div className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
-                              <Check className="w-2.5 h-2.5 text-primary-foreground" />
-                            </div>
-                          )}
-                          {/* Theme label */}
-                          <div
-                            className={cn(
-                              "text-xs text-center mt-2 pb-1 font-medium",
-                              selected ? "text-foreground" : "text-muted-foreground",
-                            )}
-                          >
-                            {opt.label}
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
+                  {!themingAvailable ? (
+                    <div
+                      role="radiogroup"
+                      aria-label="Theme selection"
+                      aria-disabled="true"
+                      className="max-w-lg"
+                    >
+                      <p className="text-sm text-muted-foreground">
+                        Theming is not supported on this system's web engine, so Beadbox is using
+                        its built-in appearance.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <AppearanceModeSelector mode={mode} setMode={setMode} open={open} />
+                      <ThemeSlotGrid
+                        label="Dark theme"
+                        appearance="dark"
+                        themes={darkThemes}
+                        selectedId={darkThemeId}
+                        onSelect={(id) => setThemeForAppearance("dark", id)}
+                        open={open}
+                      />
+                      <ThemeSlotGrid
+                        label="Light theme"
+                        appearance="light"
+                        themes={lightThemes}
+                        selectedId={lightThemeId}
+                        onSelect={(id) => setThemeForAppearance("light", id)}
+                        open={open}
+                      />
+                      {unresolvedAppearanceThemes.length > 0 && (
+                        <ThemeSlotGrid
+                          label="Unknown appearance"
+                          // Every entry here is already errored (the only
+                          // way appearance ever becomes null) and therefore
+                          // unselectable, so no id in this slot's default
+                          // ever applies — "dark" is an arbitrary, inert
+                          // choice, not a claim about these themes.
+                          appearance="dark"
+                          themes={unresolvedAppearanceThemes}
+                          selectedId=""
+                          onSelect={() => {}}
+                          open={open}
+                        />
+                      )}
+                    </>
+                  )}
                 </div>
 
                 {/* Zoom (Tauri only) */}
@@ -1030,11 +1358,11 @@ function platformLabel(platform: string): string {
 function StatusIcon({ status }: { status: VersionCheck["status"] }) {
   switch (status) {
     case "ok":
-      return <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+      return <CheckCircle2 className="h-4 w-4 text-success-text shrink-0" />
     case "warning":
-      return <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+      return <AlertTriangle className="h-4 w-4 text-warning-text shrink-0" />
     case "error":
-      return <X className="h-4 w-4 text-red-400 shrink-0" />
+      return <X className="h-4 w-4 text-destructive-text shrink-0" />
     default:
       return <AlertTriangle className="h-4 w-4 text-muted-foreground shrink-0" />
   }
@@ -1099,9 +1427,9 @@ function DiagnosticsPanel({ databasePath }: { databasePath?: string }) {
 
       {/* Error state */}
       {result?.error && (
-        <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm">
-          <CircleX className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
-          <span className="text-red-300">{result.error}</span>
+        <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm">
+          <CircleX className="h-4 w-4 text-destructive-text shrink-0 mt-0.5" />
+          <span className="text-destructive-text">{result.error}</span>
         </div>
       )}
 
@@ -1110,11 +1438,11 @@ function DiagnosticsPanel({ databasePath }: { databasePath?: string }) {
         <div className="space-y-3">
           <div className="flex items-center gap-3 text-sm">
             <span className="text-muted-foreground">
-              Diagnostics: <span className="text-green-500">{result.passed} passed</span>
+              Diagnostics: <span className="text-success-text">{result.passed} passed</span>
               {result.warnings > 0 && (
                 <>
                   ,{" "}
-                  <span className="text-amber-400">
+                  <span className="text-warning-text">
                     {result.warnings} warning{result.warnings !== 1 ? "s" : ""}
                   </span>
                 </>
@@ -1122,7 +1450,7 @@ function DiagnosticsPanel({ databasePath }: { databasePath?: string }) {
               {result.errors > 0 && (
                 <>
                   ,{" "}
-                  <span className="text-red-400">
+                  <span className="text-destructive-text">
                     {result.errors} error{result.errors !== 1 ? "s" : ""}
                   </span>
                 </>
@@ -1166,8 +1494,8 @@ function DiagnosticCheckCard({
 }) {
   const [expanded, setExpanded] = useState(false)
   const isError = check.status === "fail"
-  const borderColor = isError ? "border-red-500/30" : "border-amber-500/30"
-  const iconColor = isError ? "text-red-400" : "text-amber-400"
+  const borderColor = isError ? "border-destructive/30" : "border-warning/30"
+  const iconColor = isError ? "text-destructive-text" : "text-warning-text"
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
@@ -1323,7 +1651,7 @@ function HelpTabContent({
                           <div className="text-xs mt-1 flex items-center gap-1.5">
                             <span
                               className={
-                                row.check.status === "error" ? "text-red-400" : "text-amber-400"
+                                row.check.status === "error" ? "text-destructive-text" : "text-warning-text"
                               }
                             >
                               {row.check.message}
@@ -1438,7 +1766,7 @@ function HelpTabContent({
                 <h4 className="font-medium mb-1">Epic Tree Cache</h4>
                 <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
                   <span>Status:</span>
-                  <span className={cacheStats.epicCached ? "text-green-400" : "text-amber-400"}>
+                  <span className={cacheStats.epicCached ? "text-success-text" : "text-warning-text"}>
                     {cacheStats.epicCached ? "Cached" : "Empty"}
                   </span>
                   {cacheStats.epicDbPath && (

@@ -16,10 +16,10 @@
 //   gates -> Waiting view (open gates + resolving a human gate)
 
 import { wrapNamespace } from "../lib/handler-timeout"
-import * as aggregate from "./aggregate"
 import * as activity from "./activity"
-import * as beads from "./beads"
+import * as aggregate from "./aggregate"
 import * as bdSettings from "./bd-settings"
+import * as beads from "./beads"
 import * as console from "./console"
 import * as smoke from "./smoke"
 import * as diagnostics from "./diagnostics"
@@ -33,6 +33,7 @@ import * as recovery from "./recovery"
 import * as session from "./session"
 import * as subscribe from "./subscribe"
 import * as system from "./system"
+import * as themes from "./themes"
 import * as trains from "./trains"
 import * as workspaces from "./workspaces"
 
@@ -62,6 +63,7 @@ export const handlers = {
   session: wrapNamespace(session, "session"),
   subscribe,
   system: wrapNamespace(system, "system"),
+  themes: wrapNamespace(themes, "themes"),
   trains: wrapNamespace(trains, "trains"),
   workspaces: wrapNamespace(workspaces, "workspaces"),
 } as const

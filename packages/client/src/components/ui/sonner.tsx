@@ -1,29 +1,42 @@
 // Sonner Toaster wrapper for the SPA. Ported from components/ui/sonner.tsx
 // (P2.3 / bb-cqpc.3).
 //
-// Differences from the Next.js version:
-// - Removed the next-themes useTheme() call. Beadbox is dark-only (Blue,
-//   Gray, Green are all dark variants per ADR-2008 addendum 3 — theme is
-//   set as html className/data-theme, never light/system). Hardcoded
-//   theme="dark" matches the production layout's actual rendering.
-// - Stripped the "use client" directive. Vite SPA, no RSC boundary.
+// Differences from the Next.js version: useThemePreference() replaces
+// next-themes' useTheme(), and the "use client" directive is gone (Vite SPA,
+// no RSC boundary).
 //
-// CSS variables (--popover, --popover-foreground, --border) come from the
-// theme tokens P2.1 ports into packages/client/src/index.css. If the
-// scaffold hasn't landed those yet, sonner falls back to library defaults.
+// Two axes: the toast BODY follows the --normal-* overrides below, so tokens
+// repaint it; Sonner's `theme` prop separately drives the library's internal
+// greys (close button, description text), which it does not expose as
+// variables — so only the prop can reach them.
+//
+// The --bb-* variables come from the theme tokens in
+// packages/client/src/index.css, where :root carries defaults and
+// applyTheme() writes per-theme values onto <html>. (The bare --popover and
+// friends this comment used to mention were dead by then and have since been
+// deleted — do not reach for them.)
 
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
+import { isThemingAvailable } from "@/lib/theme-engine"
+
+import { useThemePreference } from "@/hooks/use-theme-preference"
+
 const Toaster = ({ ...props }: ToasterProps) => {
+  const { appearance } = useThemePreference()
+  // When the startup probe disables theming, applyTheme never runs and <html>
+  // keeps the baked dark palette — so following the stored appearance here
+  // would paint light toast chrome over a dark app. settings-dialog.tsx gates
+  // on the same probe.
   return (
     <Sonner
-      theme="dark"
+      theme={isThemingAvailable() ? appearance : "dark"}
       className="toaster group"
       style={
         {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
+          "--normal-bg": "var(--bb-popover)",
+          "--normal-text": "var(--bb-popover-foreground)",
+          "--normal-border": "var(--bb-border)",
         } as React.CSSProperties
       }
       {...props}

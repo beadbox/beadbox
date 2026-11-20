@@ -118,7 +118,7 @@ export function WorkspaceErrorScreen({
 
   return (
     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-4">
-      <AlertTriangle className="h-8 w-8 text-amber-400" />
+      <AlertTriangle className="h-8 w-8 text-warning-text" />
 
       <div className="text-center space-y-2 max-w-md">
         <p className="text-sm font-medium text-foreground">{title}</p>
@@ -157,7 +157,7 @@ export function WorkspaceErrorScreen({
           <button
             onClick={() => setConfirmOpen(true)}
             disabled={isFixing}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-warning/20 hover:bg-warning/30 text-warning-text transition-colors disabled:opacity-50"
           >
             {isFixing ? (
               <>
@@ -196,7 +196,7 @@ export function WorkspaceErrorScreen({
       {/* Fix error display */}
       {fixError && (
         <div className="max-w-md w-full">
-          <pre className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-md p-2 whitespace-pre-wrap break-words">
+          <pre className="text-xs text-destructive-text bg-destructive/10 border border-destructive/20 rounded-md p-2 whitespace-pre-wrap break-words">
             {fixError}
           </pre>
         </div>

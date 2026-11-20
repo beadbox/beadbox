@@ -21,7 +21,7 @@ import {
   formatRelativeTime,
   getStatusDisplayConfig,
   getWorkflowAdvancement,
-  typeColors,
+  TYPE_BADGE_CLASS,
 } from "@/components/bead-detail-helpers"
 import { BeadExpandedViewModal } from "@/components/bead-expanded-view-modal"
 import { MetadataControls } from "@/components/bead-metadata-controls"
@@ -288,10 +288,11 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
+                      data-type={mutations.type}
+                      data-type-role="badge"
                       className={cn(
                         "px-2 py-1 text-xs font-medium rounded border capitalize cursor-pointer hover:opacity-80 transition-opacity shrink-0 flex items-center gap-1.5",
-                        typeColors[mutations.type] ??
-                          "bg-slate-500/20 text-slate-400 border-slate-500/30",
+                        TYPE_BADGE_CLASS,
                         mutations.fieldStates.type.hasError && "ring-2 ring-destructive",
                         isMobile && "min-h-[44px] min-w-[44px]",
                       )}
@@ -374,7 +375,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                 onCopy={() => captureDetailPanelAction("copy_id", bead.type)}
               />
               {bead.externalRef && (
-                <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">
+                <span className="px-1.5 py-0.5 rounded bg-info/20 text-info-text font-medium">
                   {bead.externalRef}
                 </span>
               )}
@@ -420,7 +421,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-medium hover:bg-indigo-500/30 transition-colors"
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-info/20 text-info-text font-medium hover:bg-info/30 transition-colors"
                       >
                         <ExternalLink className="h-3 w-3" />
                         <span className="truncate max-w-[200px]">{mutations.specId}</span>
@@ -428,7 +429,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                     ) : (
                       <button
                         onClick={handleSpecIdView}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 font-medium hover:bg-indigo-500/30 transition-colors cursor-pointer"
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-info/20 text-info-text font-medium hover:bg-info/30 transition-colors cursor-pointer"
                       >
                         <FileText className="h-3 w-3" />
                         <span className="truncate max-w-[200px]">{mutations.specId}</span>
@@ -720,8 +721,8 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
                         className={cn(
                           "w-full rounded-sm transition-all hover:opacity-100",
                           comments.focusedCommentIndex === null
-                            ? "bg-blue-500 opacity-100"
-                            : "bg-blue-500/30 opacity-60 hover:bg-blue-500/50",
+                            ? "bg-info opacity-100"
+                            : "bg-info/30 opacity-60 hover:bg-info/50",
                         )}
                         style={{
                           height: `${Math.max(16, Math.min(40, Math.floor((mutations.description?.length || 0) / 50) + 16))}px`,
@@ -794,7 +795,7 @@ export const BeadDetailPanel = forwardRef<BeadDetailPanelHandle, BeadDetailPanel
               }}
               disabled={mutations.fieldStates.status.isSaving || !advanceTargetStatus}
               className={cn(
-                "w-full bg-emerald-600 hover:bg-emerald-500 text-white",
+                "w-full bg-success hover:bg-success/90 text-primary-foreground",
                 isMobile && "min-h-[44px]",
               )}
             >

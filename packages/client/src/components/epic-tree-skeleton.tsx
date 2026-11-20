@@ -3,6 +3,8 @@
 import { Loader2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 
+// Mirrors epic-tree's identity cycle so the skeleton looks like what loads.
+// Identity colours, left literal: see authorColors in bead-detail-helpers.
 const SKELETON_EPIC_GROUPS = [
   { children: 3, color: "border-l-emerald-500" },
   { children: 2, color: "border-l-teal-500" },
@@ -13,7 +15,7 @@ export function EpicTreeSkeleton({ isSlowLoad = false }: { isSlowLoad?: boolean 
   return (
     <div className="space-y-2 py-4">
       {isSlowLoad && (
-        <div className="flex items-center gap-2 px-3 py-2 mb-2 text-sm text-amber-400">
+        <div className="flex items-center gap-2 px-3 py-2 mb-2 text-sm text-warning-text">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span>Taking longer than expected&hellip;</span>
         </div>

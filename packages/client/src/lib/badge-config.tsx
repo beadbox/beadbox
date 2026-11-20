@@ -11,6 +11,15 @@ import type React from "react"
 import type { BeadPriority } from "./types"
 import { cn } from "./utils"
 
+/**
+ * `className` is the PRE-STYLESHEET fallback, not the final look: the status
+ * and priority stylesheets (status-colors.ts) are unlayered and override it
+ * once they mount — status rules only after the custom-status list loads.
+ * It is written in tokens rather than palette literals so that window, and
+ * any surface the stylesheet does not reach, is still legible in a light
+ * theme. `-text` tokens are the per-surface derived values; never use the
+ * bare tone token as text, which is tuned for fills.
+ */
 export type BadgeConfig = {
   label: string
   shortLabel?: string
@@ -21,27 +30,27 @@ export type BadgeConfig = {
 const coreStatusConfig: Record<string, BadgeConfig> = {
   open: {
     label: "Open",
-    className: "bg-white/10 text-white border-white/30",
+    className: "bg-foreground/10 text-foreground border-foreground/30",
     icon: <Circle className="h-3 w-3" />,
   },
   in_progress: {
     label: "In Progress",
-    className: "bg-amber-500/20 text-amber-400 border-amber-500/40",
+    className: "bg-warning/20 text-warning-text border-warning/40",
     icon: <CircleDot className="h-3 w-3" />,
   },
   closed: {
     label: "Closed",
-    className: "bg-zinc-600/20 text-zinc-400 border-zinc-500/40",
+    className: "bg-muted/40 text-muted-foreground border-border",
     icon: <CheckCircle2 className="h-3 w-3" />,
   },
   ready_for_qa: {
     label: "Ready for QA",
-    className: "bg-purple-500/20 text-purple-400 border-purple-500/40",
+    className: "bg-info/20 text-info-text border-info/40",
     icon: <CircleDot className="h-3 w-3" />,
   },
   ready_to_ship: {
     label: "Ready to Ship",
-    className: "bg-emerald-500/20 text-emerald-400 border-emerald-500/40",
+    className: "bg-success/20 text-success-text border-success/40",
     icon: <CheckCircle2 className="h-3 w-3" />,
   },
 }
@@ -52,7 +61,10 @@ export function getStatusConfig(status: string): BadgeConfig {
   }
   return {
     label: status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-    className: "bg-blue-500/20 text-blue-400 border-blue-500/40",
+    // A lighter info than ready_for_qa's above: an arbitrary bd status
+    // (pinned, hooked) must not be indistinguishable from a known one while
+    // the stylesheet is still loading.
+    className: "bg-info/10 text-info-text border-info/25",
     icon: <Circle className="h-3 w-3" />,
   }
 }
@@ -61,55 +73,68 @@ export const priorityConfig: Record<BeadPriority, BadgeConfig> = {
   critical: {
     label: "P0 - Critical",
     shortLabel: "P0",
-    className: "bg-red-500/20 text-red-400 border-red-500/40",
+    className: "bg-destructive/20 text-destructive-text border-destructive/40",
     icon: <AlertTriangle className="h-3 w-3" />,
   },
   high: {
     label: "P1 - High",
     shortLabel: "P1",
-    className: "bg-orange-500/20 text-orange-400 border-orange-500/40",
+    className: "bg-warning/20 text-warning-text border-warning/40",
     icon: <ArrowUp className="h-3 w-3" />,
   },
   medium: {
     label: "P2 - Medium",
     shortLabel: "P2",
-    className: "bg-yellow-500/10 text-yellow-500/70 border-yellow-500/25",
+    className: "bg-warning/10 text-warning-text border-warning/25",
     icon: <Minus className="h-3 w-3" />,
   },
   low: {
     label: "P3 - Low",
     shortLabel: "P3",
-    className: "bg-slate-500/20 text-slate-400 border-slate-500/40",
+    className: "bg-muted/40 text-muted-foreground border-border",
     icon: <ArrowDown className="h-3 w-3" />,
   },
   backlog: {
     label: "P4 - Backlog",
     shortLabel: "P4",
-    className: "bg-zinc-500/10 text-zinc-500 border-zinc-500/25",
+    className: "bg-muted/20 text-muted-foreground border-border/50",
     icon: <Circle className="h-3 w-3" />,
   },
 }
 
 const fallbackConfig: BadgeConfig = {
   label: "Unknown",
-  className: "bg-slate-500/20 text-slate-400 border-slate-500/40",
+  // Dashed: distinct from `closed` (same muted triple) and from every
+  // priority, so a missing config is visibly a missing config.
+  className: "bg-muted/20 text-muted-foreground border-border/60 border-dashed",
   icon: <Circle className="h-3 w-3" />,
 }
 
 // beadbox-o3h: pass `status` for a status badge; it tags the element so a
-// chosen status color (the injected stylesheet) recolors it.
+// chosen status color (the injected stylesheet) recolors it. Pass `priority`
+// for a priority badge, which is tagged the same way against the priority
+// half of that stylesheet — that is what gives both per-surface text in a
+// light theme instead of a baked `text-orange-400`.
 export function PillBadge({
   config,
   status,
+  priority,
+  type,
 }: {
   config: BadgeConfig | undefined
   status?: string
+  priority?: BeadPriority
+  type?: string
 }) {
   const c = config || fallbackConfig
   return (
     <span
       data-status={status}
       data-status-role={status === undefined ? undefined : "badge"}
+      data-priority={priority}
+      data-priority-role={priority === undefined ? undefined : "badge"}
+      data-type={type}
+      data-type-role={type === undefined ? undefined : "badge"}
       className={cn(
         "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap",
         c.className,

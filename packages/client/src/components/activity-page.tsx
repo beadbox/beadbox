@@ -1,9 +1,9 @@
 import { useNavigate } from "@tanstack/react-router"
-import { useHasTrains } from "@/hooks/use-has-trains"
-import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { X } from "lucide-react"
 import posthog from "posthog-js"
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
+import { useHasTrains } from "@/hooks/use-has-trains"
+import { useHasWaiting } from "@/hooks/use-waiting-gates"
 import { safeCapture } from "@/lib/posthog-safe"
 import { useActiveWorkspace } from "../hooks/use-active-workspace"
 import { useAppHealth } from "../hooks/use-app-health"
@@ -14,21 +14,17 @@ import { useUpdateChecker } from "../hooks/use-update-checker"
 import { deriveAgentStates, derivePipelineStages, toCanonicalStage } from "../lib/activity-utils"
 import {
   getAnalyticsEnabled,
-  getThemePreference,
   getUpdateCheckEnabled,
   getUpdateCheckFrequency,
   getVimNavigationEnabled,
   getZoomLevel,
   setZoomLevel as persistZoomLevel,
   setSelectedBead as setStoredSelectedBead,
-  setThemePreference,
   setUpdateCheckEnabled,
   setUpdateCheckFrequency,
   setVimNavigationEnabled,
-  type ThemeVariant,
   type UpdateCheckFrequency,
 } from "../lib/local-storage"
-import { applyThemeClass } from "../lib/theme"
 import { rpc } from "../lib/rpc"
 import { composePipelineChain } from "../lib/status-chain"
 import { useSubscriptionChangeSignal } from "../lib/subscribe"
@@ -109,7 +105,6 @@ function ActivityViewer() {
   // Settings and app-level state
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
-  const [theme, setTheme] = useState<ThemeVariant>("gray")
   const [zoomLevel, setZoomLevelState] = useState(100)
   const isTauriRef = useRef(false)
   const [vimEnabled, setVimEnabledState] = useState(true)
@@ -164,7 +159,6 @@ function ActivityViewer() {
 
   // Load preferences on mount
   useEffect(() => {
-    setTheme(getThemePreference())
     setVimEnabledState(getVimNavigationEnabled())
     setUpdateCheckEnabledState(getUpdateCheckEnabled())
     setUpdateCheckFrequencyState(getUpdateCheckFrequency())
@@ -187,22 +181,11 @@ function ActivityViewer() {
     })
   }, [])
 
-  // Apply theme classes to <html>
-  useEffect(() => {
-    const el = document.documentElement
-    applyThemeClass(el, theme)
-  }, [theme])
-
   // Apply zoom level to document (Tauri only)
   useEffect(() => {
     if (!isTauriRef.current) return
     document.documentElement.style.zoom = `${zoomLevel}%`
   }, [zoomLevel])
-
-  const handleThemeChange = (next: ThemeVariant) => {
-    setTheme(next)
-    setThemePreference(next)
-  }
 
   const handleZoomChange = useCallback((level: number) => {
     const clamped = Math.max(50, Math.min(200, level))
@@ -509,7 +492,15 @@ function ActivityViewer() {
       }
 
       // Cmd+1/Cmd+2/Cmd+3: view switching (always active)
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4" || e.key === "5" || e.key === "6")) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        (e.key === "1" ||
+          e.key === "2" ||
+          e.key === "3" ||
+          e.key === "4" ||
+          e.key === "5" ||
+          e.key === "6")
+      ) {
         e.preventDefault()
         if (e.key === "1") {
           navigate({ to: "/" })
@@ -698,12 +689,12 @@ function ActivityViewer() {
               <div className="px-4 pb-2">
                 <Badge
                   variant="secondary"
-                  className="inline-flex items-center gap-1.5 text-xs bg-blue-500/15 text-blue-400 border-blue-500/30 hover:bg-blue-500/25"
+                  className="inline-flex items-center gap-1.5 text-xs bg-info/15 text-info-text border-info/30 hover:bg-info/25"
                 >
                   {filterChipLabel}
                   <button
                     onClick={clearFilter}
-                    className="hover:text-blue-200 transition-colors"
+                    className="hover:text-info-text transition-colors"
                     aria-label="Clear cross-filter"
                   >
                     <X className="h-3 w-3" />
@@ -742,8 +733,6 @@ function ActivityViewer() {
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        theme={theme}
-        onThemeChange={handleThemeChange}
         zoomLevel={zoomLevel}
         onZoomChange={handleZoomChange}
         databasePath={currentWorkspace?.databasePath}

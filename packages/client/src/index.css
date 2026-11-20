@@ -37,114 +37,34 @@
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
-}
+/* --bb-* indirection (runtime themes, bb-themes-t3): the prior `@theme
+   inline` block baked the gray-palette scope's (`.dark` combined with
+   `.theme-gray`) literal values directly into every `--color-*` token (see
+   the WKWebView history below for why), which froze the app to one palette
+   — no var() chain for a runtime engine to intercept. This block now
+   dereferences `--bb-*` custom properties instead of hex literals. `--bb-*`
+   is defined once, at `:root`, in hex (never oklch, never a nested scope)
+   — the same single-level, hex-only shape the WKWebView fix below proved
+   safe. A runtime theme engine can now repaint the app by writing `--bb-*`
+   values onto `documentElement.style`; with no engine running (JS
+   disabled, or the engine bails on its startup probe) the `:root` defaults
+   below reproduce the exact 0.25.2 gray palette. The old nested gray- and
+   green-palette scopes (the `.dark` + `.theme-gray` / `.dark` + `.theme-
+   green` literals this block used to walk at parse time) are deleted —
+   they are fully superseded by the `:root` `--bb-*` defaults.
 
-.dark {
-  --background: #0f172a;
-  --foreground: #f1f5f9;
-  --card: #1e293b;
-  --card-foreground: #f1f5f9;
-  --popover: #1e293b;
-  --popover-foreground: #f1f5f9;
-  --primary: #22c55e;
-  --primary-foreground: #0f172a;
-  --secondary: #334155;
-  --secondary-foreground: #f1f5f9;
-  --muted: #334155;
-  --muted-foreground: #94a3b8;
-  --accent: #334155;
-  --accent-foreground: #f1f5f9;
-  --destructive: #ef4444;
-  --destructive-foreground: #fef2f2;
-  --border: #334155;
-  --input: #334155;
-  --ring: #22c55e;
-}
-
-.dark.theme-gray {
-  --background: #18181b;
-  --foreground: #f4f4f5;
-  --card: #27272a;
-  --card-foreground: #f4f4f5;
-  --popover: #27272a;
-  --popover-foreground: #f4f4f5;
-  --primary: #22c55e;
-  --primary-foreground: #18181b;
-  --secondary: #3f3f46;
-  --secondary-foreground: #f4f4f5;
-  --muted: #3f3f46;
-  --muted-foreground: #a1a1aa;
-  --accent: #3f3f46;
-  --accent-foreground: #f4f4f5;
-  --destructive: #ef4444;
-  --destructive-foreground: #fef2f2;
-  --border: #3f3f46;
-  --input: #3f3f46;
-  --ring: #22c55e;
-}
-
-.dark.theme-green {
-  --background: #0c1a14;
-  --foreground: #ecfdf5;
-  --card: #14291e;
-  --card-foreground: #ecfdf5;
-  --popover: #14291e;
-  --popover-foreground: #ecfdf5;
-  --primary: #34d399;
-  --primary-foreground: #0c1a14;
-  --secondary: #1e3a2b;
-  --secondary-foreground: #ecfdf5;
-  --muted: #1e3a2b;
-  --muted-foreground: #6ee7b7;
-  --accent: #1e3a2b;
-  --accent-foreground: #ecfdf5;
-  --destructive: #ef4444;
-  --destructive-foreground: #fef2f2;
-  --border: #1e3a2b;
-  --input: #1e3a2b;
-  --ring: #34d399;
-}
-
-/* WKWebView fix (P3.7 second bounce / B3, qa1): the prior `@theme inline`
-   block declared every `--color-*` token as `var(--<token>)`, leaving the
-   cascade walk to use-time. Chromium (Vite dev / Playwright) resolved the
-   chain through `.dark.theme-gray` on <html> correctly; the Tauri WKWebView
-   either failed the oklch() fallback at `:root` (collapsing the var to an
-   IACVT default that matched the background) or scoped the `var()` lookup
-   to the @theme definition site rather than the consuming element. Net
-   effect: text rendered the same color as the background.
-   Fix: inline the literal `.dark.theme-gray` values directly into @theme so
-   no runtime cascade walk is required. The `--background`/`--foreground`/
-   etc. vars below remain in their scoped blocks for other consumers
-   (`dag-dotgrid`, `safe-area-inset` selectors using color-mix on
-   `--color-muted-foreground` etc), but the utility-class color tokens
-   resolve to literal values at parse time — WKWebView-safe.
-   index.html hardcodes `class="dark theme-gray"`, so this is a parity-
-   preserving change for the only theme the SPA currently uses. Restoring
-   runtime theme switching via classname swap is a separate concern (a
-   future bead would need to either re-introduce the var() chain inside
-   a different scope structure or rebuild the @theme block dynamically). */
+   History — WKWebView fix (P3.7 second bounce / B3, qa1): the pre-0.25.2
+   `@theme inline` block declared every `--color-*` token as
+   `var(--<token>)` pointing at the gray-palette scope above, leaving the
+   cascade walk to use-time. Chromium (Vite dev / Playwright) resolved that
+   chain correctly; the Tauri WKWebView either failed an oklch() fallback
+   at `:root` (collapsing the var to an IACVT default that matched the
+   background) or scoped the `var()` lookup to the @theme definition site
+   rather than the consuming element. Net effect: text rendered the same
+   color as the background. 0.25.2 worked around this by inlining literals
+   directly into @theme, forgoing indirection entirely. This block restores
+   indirection the conservative way: one level, hex, defined at `:root` —
+   not the three-nested-scope oklch() shape that broke originally. */
 @theme inline {
   /* bb-2e4v (P0 v0.25-rc.2 blocker): @fontsource registers Geist as
      `Geist Sans` (not `Geist`); `Geist Fallback` was a next/font/google-
@@ -155,32 +75,105 @@
      bare `Geist` from the system installation). The production .app is
      the only context that surfaces it — same shape as bb-eze7's
      production-bundle URL gap (addendum 6 instance #12). Match the
-     literal @fontsource-registered names + system fallbacks. */
-  --font-sans: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --color-background: #18181b;
-  --color-foreground: #f4f4f5;
-  --color-card: #27272a;
-  --color-card-foreground: #f4f4f5;
-  --color-popover: #27272a;
-  --color-popover-foreground: #f4f4f5;
-  --color-primary: #22c55e;
-  --color-primary-foreground: #18181b;
-  --color-secondary: #3f3f46;
-  --color-secondary-foreground: #f4f4f5;
-  --color-muted: #3f3f46;
-  --color-muted-foreground: #a1a1aa;
-  --color-accent: #3f3f46;
-  --color-accent-foreground: #f4f4f5;
-  --color-destructive: #ef4444;
-  --color-destructive-foreground: #fef2f2;
-  --color-border: #3f3f46;
-  --color-input: #3f3f46;
-  --color-ring: #22c55e;
-  --radius-sm: calc(0.625rem - 4px);
-  --radius-md: calc(0.625rem - 2px);
-  --radius-lg: 0.625rem;
-  --radius-xl: calc(0.625rem + 4px);
+     literal @fontsource-registered names + system fallbacks. (The literal
+     names themselves now live in the `:root` `--bb-font-*` defaults
+     below.) */
+  --font-sans: var(--bb-font-sans);
+  --font-mono: var(--bb-font-mono);
+
+  --color-background: var(--bb-background);
+  --color-foreground: var(--bb-foreground);
+  --color-card: var(--bb-card);
+  --color-card-foreground: var(--bb-card-foreground);
+  --color-popover: var(--bb-popover);
+  --color-popover-foreground: var(--bb-popover-foreground);
+  --color-primary: var(--bb-primary);
+  --color-primary-foreground: var(--bb-primary-foreground);
+  --color-secondary: var(--bb-secondary);
+  --color-secondary-foreground: var(--bb-secondary-foreground);
+  --color-muted: var(--bb-muted);
+  --color-muted-foreground: var(--bb-muted-foreground);
+  --color-accent: var(--bb-accent);
+  --color-accent-foreground: var(--bb-accent-foreground);
+  --color-destructive: var(--bb-destructive);
+  --color-destructive-foreground: var(--bb-destructive-foreground);
+  --color-border: var(--bb-border);
+  --color-input: var(--bb-input);
+  --color-ring: var(--bb-ring);
+
+  /* Semantic tone tokens (warning / info / success). `destructive` above
+     already covers the error tone. Each has a `-text` companion the theme
+     engine DERIVES per surface (theme-engine.ts), which is why one authored
+     hex renders correctly in both appearances: use `bg-warning/15
+     border-warning/30 text-warning-text`, never the bare tone token as
+     text — that hex is tuned for fills and will not clear 4.5:1 as text on
+     a light card. */
+  --color-warning: var(--bb-warning);
+  --color-warning-text: var(--bb-warning-text);
+  --color-info: var(--bb-info);
+  --color-info-text: var(--bb-info-text);
+  --color-success: var(--bb-success);
+  --color-success-text: var(--bb-success-text);
+  /* `destructive` and `primary` are themselves authored (COLOR_KEYS); only
+     their tinted-text companions are derived, for pills that tint rather
+     than fill. */
+  --color-destructive-text: var(--bb-destructive-text);
+  --color-primary-text: var(--bb-primary-text);
+
+  --radius-sm: var(--bb-radius-sm);
+  --radius-md: var(--bb-radius-md);
+  --radius-lg: var(--bb-radius-lg);
+  --radius-xl: var(--bb-radius-xl);
+}
+
+/* Baked defaults. These are the 0.25.2 gray literals verbatim, so with JS
+   disabled — or the engine bailed via its startup probe — the app renders
+   exactly as it does today. The theme engine overwrites these on
+   documentElement.style at runtime.
+   Single-level and hex-only on purpose: the 0.25.2 failure walked three
+   nested scopes with oklch at the root. */
+:root {
+  --bb-background: #18181b;
+  --bb-foreground: #f4f4f5;
+  --bb-card: #27272a;
+  --bb-card-foreground: #f4f4f5;
+  --bb-popover: #27272a;
+  --bb-popover-foreground: #f4f4f5;
+  --bb-primary: #22c55e;
+  --bb-primary-foreground: #18181b;
+  --bb-secondary: #3f3f46;
+  --bb-secondary-foreground: #f4f4f5;
+  --bb-muted: #3f3f46;
+  --bb-muted-foreground: #a1a1aa;
+  --bb-accent: #3f3f46;
+  --bb-accent-foreground: #f4f4f5;
+  --bb-destructive: #ef4444;
+  --bb-destructive-foreground: #fef2f2;
+  --bb-border: #3f3f46;
+  --bb-input: #3f3f46;
+  --bb-ring: #22c55e;
+
+  /* Tone defaults. These are the DARK-derived values (the `:root` defaults
+     are the dark palette, per the block above): each `-text` is
+     readableTextColor(base, #27272a), the dark card. The engine overwrites
+     both halves on every applyTheme, so these only stand when no engine is
+     running — JS disabled, or the startup probe bailed. */
+  --bb-warning: #f59e0b;
+  --bb-warning-text: #f59e0b;
+  --bb-info: #3b82f6;
+  --bb-info-text: #76a8f9;
+  --bb-success: #10b981;
+  --bb-success-text: #28c08e;
+  --bb-destructive-text: #f47c7c;
+  --bb-primary-text: #22c55e;
+
+  --bb-radius-sm: calc(0.625rem - 4px);
+  --bb-radius-md: calc(0.625rem - 2px);
+  --bb-radius-lg: 0.625rem;
+  --bb-radius-xl: calc(0.625rem + 4px);
+
+  --bb-font-sans: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --bb-font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* iOS/iPadOS safe area insets (Dynamic Island, status bar, home indicator) */
@@ -199,8 +192,11 @@
 }
 
 /* Formula DAG dot-grid background (opacity via color, not container opacity) */
+/* --bb-* directly, like the scrollbar rules: the startup probe only
+   tests ONE level of var() indirection, so a --color-* chain here would be
+   undetectable if it failed. */
 .dag-dotgrid {
-  background-image: radial-gradient(circle, color-mix(in srgb, var(--color-muted-foreground) 25%, transparent) 0.4px, transparent 0.4px);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--bb-muted-foreground) 25%, transparent) 0.4px, transparent 0.4px);
   background-size: 24px 24px;
   background-position: 12px 12px;
 }
@@ -353,7 +349,7 @@
      ::-webkit-scrollbar), so it doesn't need its own scope. */
   :where(html, body, [class*="overflow-"]) {
     scrollbar-width: thin;
-    scrollbar-color: var(--muted) transparent;
+    scrollbar-color: var(--bb-muted) transparent;
   }
 
   :where(html, body, [class*="overflow-"])::-webkit-scrollbar {
@@ -366,14 +362,14 @@
   }
 
   :where(html, body, [class*="overflow-"])::-webkit-scrollbar-thumb {
-    background-color: var(--muted);
+    background-color: var(--bb-muted);
     border-radius: 4px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
 
   :where(html, body, [class*="overflow-"])::-webkit-scrollbar-thumb:hover {
-    background-color: var(--muted-foreground);
+    background-color: var(--bb-muted-foreground);
   }
 
   :where(html, body, [class*="overflow-"])::-webkit-scrollbar-corner {

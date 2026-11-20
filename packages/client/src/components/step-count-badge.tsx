@@ -21,7 +21,7 @@ export function StepCountBadge({ stepId, compact }: { stepId: string; compact?: 
       className={cn(
         "py-0.5 rounded tabular-nums",
         compact ? "text-[10px] px-1" : "text-[11px] px-1.5",
-        done ? "bg-green-500/15 text-green-400" : "bg-[#1e1e21] text-muted-foreground",
+        done ? "bg-success/15 text-success-text" : "bg-background text-muted-foreground",
       )}
     >
       {count.closed}/{count.total}

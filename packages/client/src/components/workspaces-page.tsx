@@ -129,7 +129,7 @@ export function BdMissingScreen({
         <div className="my-6">
           <BdPathSettings onSaved={onCheckAgain} />
         </div>
-        {feedback && <p className="text-sm text-amber-400 text-center mb-4">{feedback}</p>}
+        {feedback && <p className="text-sm text-warning-text text-center mb-4">{feedback}</p>}
         <div className="flex items-center justify-center gap-4">
           <Button onClick={handleCheck} disabled={checking}>
             {checking && <RefreshCw className="h-4 w-4 animate-spin" />}

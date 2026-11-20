@@ -35,6 +35,21 @@ export const DEFAULT_STATUS_HEX: Readonly<Record<string, string>> = {
 // status with no entry of its own (bd's pinned / hooked, for one).
 const FALLBACK_HEX = "#3b82f6"
 
+/**
+ * Statuses whose default colour is the THEME'S FOREGROUND, not a fixed hex.
+ *
+ * `open` means "no colour of its own": it has always drawn in the body text
+ * colour. As a literal that was #ffffff, which is only correct while every
+ * theme is dark — on a white card its 20% tint is white-on-white, contrast
+ * 1.00, an invisible badge. Resolving it from the theme instead follows ANY
+ * theme, including a user's, in either appearance.
+ *
+ * DEFAULT_STATUS_HEX.open stays #ffffff: it is still the right swatch for
+ * the dark default, and it is a member of RESERVED_HEX, which a generated
+ * custom colour must keep avoiding.
+ */
+export const FOREGROUND_DEFAULT_STATUSES: ReadonlySet<string> = new Set(["open"])
+
 // Colors some surface already uses for a status by default (badge, detail
 // panel, pipeline tile or molecule graph). A generated default never lands on
 // one, so a custom status cannot look like a built-in anywhere.
@@ -64,7 +79,14 @@ const PALETTE = [
   "#f43f5e", // rose
 ]
 
-/** The three dark theme variants Beadbox ships, plus white for a future light theme. */
+/**
+ * NOT a theme registry — themes live in src/themes/*.json and ~/.beadbox/themes.
+ * The old `theme-*` class variants this described are gone.
+ *
+ * What survives: `gray.card` is the fallback when `--bb-card` cannot be read
+ * (the only production use), and the set as a whole is the surface matrix the
+ * contrast tests run readableTextColor across, white included.
+ */
 export const THEME_SURFACES: Readonly<Record<string, { background: string; card: string }>> = {
   blue: { background: "#0f172a", card: "#1e293b" },
   gray: { background: "#18181b", card: "#27272a" },
@@ -73,6 +95,25 @@ export const THEME_SURFACES: Readonly<Record<string, { background: string; card:
 }
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
+
+const RGB_FN = /^rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})/
+
+/**
+ * Normalises a theme colour to 6-digit hex. Theme files may legally write a
+ * token as rgb() (theme-validate.ts), but every function here parses hex, so
+ * an unnormalised rgb() surface silently yields black text rather than an
+ * error. Returns null for anything unrecognised so callers can skip instead
+ * of painting a wrong colour.
+ */
+export function toHexColor(value: string): string | null {
+  const v = value.trim()
+  if (isHexColor(v)) return v.toLowerCase()
+  const m = RGB_FN.exec(v)
+  if (!m) return null
+  return `#${[1, 2, 3]
+    .map((i) => Math.min(255, Number(m[i])).toString(16).padStart(2, "0"))
+    .join("")}`
+}
 
 export function isHexColor(value: unknown): value is string {
   return typeof value === "string" && HEX_RE.test(value)
@@ -237,7 +278,18 @@ export function resolveStatusColors(
   statuses: readonly string[],
   overrides: StatusColorMap,
   customs?: readonly string[],
-): { css: StatusColorMap; display: StatusColorMap; defaults: StatusColorMap } {
+  opts: { foreground?: string } = {},
+): {
+  css: StatusColorMap
+  chosen: StatusColorMap
+  display: StatusColorMap
+  defaults: StatusColorMap
+} {
+  // Defaults to the dark literal so a caller that cannot read the DOM (and
+  // every existing test) behaves exactly as before.
+  const foreground = isHexColor(opts.foreground ?? "")
+    ? (opts.foreground as string).toLowerCase()
+    : DEFAULT_STATUS_HEX.open
   const present = new Set(statuses)
   const live: StatusColorMap = {}
   for (const [k, v] of Object.entries(overrides)) {
@@ -250,16 +302,31 @@ export function resolveStatusColors(
     live,
   )
   const css: StatusColorMap = {}
+  const chosen: StatusColorMap = {}
   const display: StatusColorMap = {}
   const defaults: StatusColorMap = {}
   for (const s of statuses) {
-    const def = builtins.has(s) ? (DEFAULT_STATUS_HEX[s] ?? FALLBACK_HEX) : generated[s]
+    const builtinDef = FOREGROUND_DEFAULT_STATUSES.has(s)
+      ? foreground
+      : (DEFAULT_STATUS_HEX[s] ?? FALLBACK_HEX)
+    const def = builtins.has(s) ? builtinDef : generated[s]
     defaults[s] = def
     display[s] = live[s] ?? def
-    if (live[s]) css[s] = live[s]
-    else if (!builtins.has(s) && def !== DEFAULT_STATUS_HEX[s]) css[s] = def
+    // Every status now emits a stylesheet rule, built-ins included. Before
+    // tone/light themes a built-in with no chosen colour kept the hardcoded
+    // Tailwind classes on each surface; those are dark-only. Routing it here
+    // instead gives it readableTextColor's per-surface text for free, and
+    // makes a built-in and a custom status behave identically.
+    css[s] = live[s] ?? def
+    // `chosen` carries ONLY a colour the user picked or one generated for a
+    // custom status — what `css` meant before built-ins started emitting
+    // rules. The molecule graph keys its own palette off this: with `css` it
+    // would never reach that palette again, so its node colours would have
+    // changed silently for every workspace using the defaults.
+    if (live[s]) chosen[s] = live[s]
+    else if (!builtins.has(s) && def !== DEFAULT_STATUS_HEX[s]) chosen[s] = def
   }
-  return { css, display, defaults }
+  return { css, chosen, display, defaults }
 }
 
 /** Escape text for a double-quoted CSS string: anything but [A-Za-z0-9_-] becomes a hex escape. */
@@ -269,6 +336,42 @@ export function cssEscapeIdent(s: string): string {
     out += /[A-Za-z0-9_-]/.test(ch) ? ch : `\\${(ch.codePointAt(0) ?? 0).toString(16)} `
   }
   return out
+}
+
+/**
+ * One colour's worth of rules, for one `data-<attr>` value. Shared by the
+ * status and priority stylesheets so the tint/edge/readable-text arithmetic
+ * exists once: a change to how a colour becomes a badge cannot apply to
+ * statuses and miss priorities.
+ *
+ * `emphasis` scales the fill and border alpha. The hardcoded classes carried
+ * the priority ramp partly in alpha (P0 was `bg-red-500/20`, P2
+ * `bg-yellow-500/10`), so a uniform fill would have flattened it.
+ */
+function colorRules(
+  attr: "status" | "priority" | "type",
+  name: string,
+  hex: string,
+  surface: string,
+  prefix: string,
+  emphasis = 1,
+  edgeEmphasis = emphasis,
+): string[] {
+  const [r, g, b] = toRgb(hex)
+  const text = readableTextColor(hex, surface)
+  const sel = `${prefix}[data-${attr}="${cssEscapeIdent(name)}"]`
+  const role = (n: string) => `${sel}[data-${attr}-role="${n}"]`
+  // Round: 0.4 * 0.75 is 0.30000000000000004 in binary floating point, which
+  // is valid CSS but noise in the stylesheet (and in any test reading it).
+  const alpha = (base: number, mult: number) => Number((base * mult).toFixed(3))
+  const tint = `rgb(${r} ${g} ${b} / ${alpha(0.2, emphasis)})`
+  const edge = `rgb(${r} ${g} ${b} / ${alpha(0.4, edgeEmphasis)})`
+  return [
+    `${role("badge")}{background-color:${tint};border-color:${edge};color:${text}}`,
+    `${role("stage")}{background-color:${tint};border-color:${edge}}`,
+    `${role("text")}{color:${text}}`,
+    `${role("dot")}{background-color:${hex.toLowerCase()}}`,
+  ]
 }
 
 /**
@@ -282,17 +385,77 @@ export function buildStatusColorCss(css: StatusColorMap, surface: string, scope?
   const prefix = scope === undefined ? "" : `[data-project-id="${cssEscapeIdent(scope)}"] `
   for (const [name, hex] of Object.entries(css)) {
     if (!isHexColor(hex)) continue
-    const [r, g, b] = toRgb(hex)
-    const text = readableTextColor(hex, surface)
-    const sel = `${prefix}[data-status="${cssEscapeIdent(name)}"]`
-    const tint = `rgb(${r} ${g} ${b} / 0.2)`
-    const edge = `rgb(${r} ${g} ${b} / 0.4)`
-    rules.push(
-      `${sel}[data-status-role="badge"]{background-color:${tint};border-color:${edge};color:${text}}`,
-      `${sel}[data-status-role="stage"]{background-color:${tint};border-color:${edge}}`,
-      `${sel}[data-status-role="text"]{color:${text}}`,
-      `${sel}[data-status-role="dot"]{background-color:${hex.toLowerCase()}}`,
-    )
+    rules.push(...colorRules("status", name, hex, surface, prefix))
+  }
+  return rules.join("\n")
+}
+
+/**
+ * Priority colours, the hues the hardcoded classes used: red / orange /
+ * yellow / slate / zinc. Unlike statuses these are not user-configurable and
+ * not per project, so one unscoped stylesheet covers the app.
+ *
+ * They go through the same machinery purely for the per-surface text: as
+ * literals, `text-orange-400` on a white card fails contrast.
+ */
+export const DEFAULT_PRIORITY_HEX: Readonly<Record<string, string>> = {
+  critical: "#ef4444",
+  high: "#f97316",
+  medium: "#eab308",
+  low: "#64748b",
+  backlog: "#71717a",
+}
+
+// Matches the alpha the hardcoded classes used, so the ramp survives:
+// P0/P1/P3 filled at /20 + /40, P2/P4 at /10 + /25.
+const PRIORITY_EMPHASIS: Readonly<Record<string, number>> = {
+  critical: 1,
+  high: 1,
+  medium: 0.5,
+  low: 1,
+  backlog: 0.5,
+}
+
+/**
+ * Bead-type colours, the hues `typeColors` hardcoded. BeadType is an open
+ * vocabulary (a workspace may define its own), so this covers the types
+ * Beadbox has always drawn and a type with no entry keeps a tokenised
+ * neutral fallback rather than a generated hue — matching today's behaviour,
+ * where an unknown type drew slate.
+ */
+export const DEFAULT_TYPE_HEX: Readonly<Record<string, string>> = {
+  bug: "#ef4444",
+  task: "#3b82f6",
+  feature: "#a855f7",
+  epic: "#f59e0b",
+  chore: "#64748b",
+  message: "#06b6d4",
+  gate: "#22c55e",
+  "merge-request": "#14b8a6",
+  molecule: "#ec4899",
+  agent: "#8b5cf6",
+  role: "#0ea5e9",
+  rig: "#f97316",
+  convoy: "#84cc16",
+  event: "#f43f5e",
+  // epic-tree draws a milestone's Flag in sky; it had no entry here.
+  milestone: "#38bdf8",
+}
+
+export function buildTypeColorCss(surface: string): string {
+  const rules: string[] = []
+  for (const [name, hex] of Object.entries(DEFAULT_TYPE_HEX)) {
+    // typeColors tinted at /20 with a /30 edge; 0.75 emphasis reproduces the
+    // slightly softer border those classes used.
+    rules.push(...colorRules("type", name, hex, surface, "", 1, 0.75))
+  }
+  return rules.join("\n")
+}
+
+export function buildPriorityColorCss(surface: string): string {
+  const rules: string[] = []
+  for (const [name, hex] of Object.entries(DEFAULT_PRIORITY_HEX)) {
+    rules.push(...colorRules("priority", name, hex, surface, "", PRIORITY_EMPHASIS[name] ?? 1))
   }
   return rules.join("\n")
 }
