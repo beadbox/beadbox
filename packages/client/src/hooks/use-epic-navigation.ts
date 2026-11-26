@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Filters } from "@/components/filter-bar"
 import { useHasTrains } from "@/hooks/use-has-trains"
 import { useHasWaiting } from "@/hooks/use-waiting-gates"
+import { subscribeDeepLinks } from "@/lib/deep-link"
 import { dispatchKeyDown, type KeyNavContext } from "@/lib/epic-navigation-keys"
 import { orderMoleculeSteps } from "@/lib/molecule-order"
 import { countAllBeads, findBeadById, findParentPath } from "@/lib/epic-tree-utils"
@@ -128,6 +129,18 @@ export function useEpicNavigation(opts: UseEpicNavigationOpts) {
     setExpandedBeadsState(new Set(getStoredExpandedBeads()))
     setBeadIdParam(getStoredSelectedBead())
   }, [])
+
+  // A beadbox://bead/<id> link opens that bead: it is the selection, and the home page is the page that shows it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: subscribe once; navigate is stable for the router
+  useEffect(
+    () =>
+      subscribeDeepLinks((id) => {
+        setStoredSelectedBead(id)
+        setBeadIdParam(id)
+        void navigate({ to: "/" })
+      }),
+    [],
+  )
 
   // beadbox-e04o.2: a molecule's steps open on first sight unless finished,
   // and a step that finishes collapses once (like a phase). Through the same
