@@ -7,6 +7,8 @@
 #[cfg(not(target_os = "ios"))]
 mod credentials;
 #[cfg(not(target_os = "ios"))]
+pub mod deep_link;
+#[cfg(not(target_os = "ios"))]
 pub mod paths;
 #[cfg(not(target_os = "ios"))]
 mod telemetry_id;
@@ -175,6 +177,17 @@ pub fn run() {
         };
 
         let app = builder
+            // beadbox:// deep links. The single-instance plugin (Windows and Linux start a second process for a link)
+            // hands the link to the running app; on macOS the OS delivers it to the running app itself.
+            .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }))
+            .plugin(tauri_plugin_deep_link::init())
+            .manage(deep_link::PendingOpen::default())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_process::init())
             // kkrpc bridge between WebView and the Bun sidecar (P4.1).
@@ -191,6 +204,7 @@ pub fn run() {
                 credentials::get_credential,
                 credentials::set_credential,
                 credentials::delete_credential,
+                deep_link::take_pending_open,
             ])
             .setup(move |app| {
                 let builder = tauri::WebviewWindowBuilder::new(
@@ -221,6 +235,21 @@ pub fn run() {
                 let builder = builder.visible(false);
 
                 let window = builder.build().expect("failed to create main window");
+
+                // beadbox:// links: one that launched the app (cold start) and every later one. A development run
+                // registers the scheme at run time; an installed app has it from its bundle.
+                {
+                    use tauri_plugin_deep_link::DeepLinkExt;
+                    #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+                    let _ = app.deep_link().register_all();
+                    if let Ok(Some(urls)) = app.deep_link().get_current() {
+                        deep_link::handle(app.handle(), &urls);
+                    }
+                    let handle = app.handle().clone();
+                    app.deep_link().on_open_url(move |event| {
+                        deep_link::handle(&handle, &event.urls());
+                    });
+                }
 
                 #[cfg(target_os = "linux")]
                 {

@@ -27,6 +27,8 @@ serde_json = "1"
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-js = "0.1.0"
 # beadbox-mm6: without the default "zip" feature, so the zip crate is not in
 # the graph (RUSTSEC-2026-0367/0368/0369/0429). The feature gates only the
